@@ -208,9 +208,14 @@ jobs:
         if: matrix.platform == 'android'
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 30
           arch: x86_64
-          target: google_apis
+          target: google_atd
+          profile: pixel_2
+          ram-size: 2048M
+          heap-size: 512M
+          emulator-boot-timeout: 900
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           script: dart run tool/pixa_platform_build.dart --platform=android --enable-native-roi --run-self-check --device=emulator-5554 --device-kind=emulator --connection=local --signing=debug --report-output=build/reports/pixa_platform_probe_self_check_android.json
       - name: Boot iOS simulator
         if: matrix.platform == 'ios'
@@ -316,9 +321,14 @@ jobs:
         if: matrix.platform == 'android'
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 30
           arch: x86_64
-          target: google_apis
+          target: google_atd
+          profile: pixel_2
+          ram-size: 2048M
+          heap-size: 512M
+          emulator-boot-timeout: 900
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           script: dart run tool/pixa_example_smoke.dart --platform=android --device=emulator-5554 --device-kind=emulator --connection=local --signing=debug --report-output=build/reports/pixa_example_smoke_android.json
       - name: Boot iOS simulator
         if: matrix.platform == 'ios'
