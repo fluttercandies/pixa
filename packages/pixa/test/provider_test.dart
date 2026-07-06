@@ -455,6 +455,118 @@ void main() {
     },
   );
 
+  test('PixaProvider paces image completions across frame budget', () async {
+    final Directory cacheRoot = await Directory.systemTemp.createTemp(
+      'pixa-provider-completion-budget-',
+    );
+    addTearDown(() => cacheRoot.delete(recursive: true));
+    await Pixa.configure(
+      PixaConfig(
+        cacheRootPath: cacheRoot.path,
+        decodeConcurrency: 2,
+        maxImageCompletionsPerFrame: 1,
+      ),
+    );
+
+    final Completer<void> firstDecodeReturned = Completer<void>();
+    final Completer<void> secondDecodeReturned = Completer<void>();
+
+    Future<ui.Codec> firstDecode(
+      ui.ImmutableBuffer buffer, {
+      ui.TargetImageSizeCallback? getTargetSize,
+    }) async {
+      final ui.Codec codec = await ui.instantiateImageCodec(_minimalGif());
+      firstDecodeReturned.complete();
+      return codec;
+    }
+
+    Future<ui.Codec> secondDecode(
+      ui.ImmutableBuffer buffer, {
+      ui.TargetImageSizeCallback? getTargetSize,
+    }) async {
+      final ui.Codec codec = await ui.instantiateImageCodec(_minimalGif());
+      secondDecodeReturned.complete();
+      return codec;
+    }
+
+    final PixaProvider first = PixaProvider(
+      request: PixaRequest(
+        source: PixaSource.custom(
+          'completion-budget-a',
+          () async => _minimalGif(),
+        ),
+        cachePolicy: const PixaCachePolicy.noStore(),
+      ),
+    );
+    final PixaProvider second = PixaProvider(
+      request: PixaRequest(
+        source: PixaSource.custom(
+          'completion-budget-b',
+          () async => _minimalGif(),
+        ),
+        cachePolicy: const PixaCachePolicy.noStore(),
+      ),
+    );
+    final ImageStreamCompleter firstCompleter = first.loadImage(
+      first,
+      firstDecode,
+    );
+    final ImageStreamCompleter secondCompleter = second.loadImage(
+      second,
+      secondDecode,
+    );
+    final Completer<ImageInfo> firstImage = Completer<ImageInfo>();
+    final Completer<ImageInfo> secondImage = Completer<ImageInfo>();
+    final ImageStreamListener firstListener = ImageStreamListener((
+      ImageInfo image,
+      bool synchronousCall,
+    ) {
+      if (!firstImage.isCompleted) {
+        firstImage.complete(image);
+      } else {
+        image.dispose();
+      }
+    });
+    final ImageStreamListener secondListener = ImageStreamListener((
+      ImageInfo image,
+      bool synchronousCall,
+    ) {
+      if (!secondImage.isCompleted) {
+        secondImage.complete(image);
+      } else {
+        image.dispose();
+      }
+    });
+
+    firstCompleter.addListener(firstListener);
+    secondCompleter.addListener(secondListener);
+    await Future.wait<void>(<Future<void>>[
+      firstDecodeReturned.future,
+      secondDecodeReturned.future,
+    ]).timeout(const Duration(seconds: 5));
+    await Future<void>.delayed(Duration.zero);
+    final Map<String, Object?> snapshot = PixaDebugInspector.snapshot()
+        .toJson();
+    final Map<String, Object?> displayDecoder =
+        snapshot['displayDecoder']! as Map<String, Object?>;
+
+    expect(displayDecoder['completionQueueDepth'], 1);
+    expect(displayDecoder['completionsReleasedThisFrame'], 1);
+    expect(displayDecoder['completionFrameScheduled'], isTrue);
+    expect(secondImage.isCompleted, isFalse);
+
+    final ImageInfo firstInfo = await firstImage.future.timeout(
+      const Duration(seconds: 5),
+    );
+    addTearDown(firstInfo.dispose);
+    final ImageInfo secondInfo = await secondImage.future.timeout(
+      const Duration(seconds: 5),
+    );
+    addTearDown(secondInfo.dispose);
+    firstCompleter.removeListener(firstListener);
+    secondCompleter.removeListener(secondListener);
+  });
+
   test(
     'PixaProvider rejects decode work when queued decode budget is full',
     () async {
