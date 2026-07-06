@@ -4,4 +4,6 @@ build/
 coverage/
 rust/target/
 **/target/
-melos_*.iml
+.idea/
+*.iml
+**/.flutter-plugins-dependencies
