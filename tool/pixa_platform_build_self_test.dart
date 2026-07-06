@@ -48,6 +48,11 @@ void main() {
     build.tryExtractPixaPlatformSelfCheckReport('no marker') == null,
     'returns null for missing marker in tolerant extraction',
   );
+  _expect(
+    build.platformSelfCheckExitTimeoutForTesting() >=
+        const Duration(minutes: 20),
+    'allows slow iOS simulator self-check startup',
+  );
 
   stdout.writeln('Pixa platform build self-test passed.');
 }

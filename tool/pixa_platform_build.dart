@@ -925,7 +925,9 @@ Future<void> _runSelfCheck(
   );
 }
 
-const Duration _selfCheckExitTimeout = Duration(minutes: 8);
+const Duration _selfCheckExitTimeout = Duration(minutes: 20);
+
+Duration platformSelfCheckExitTimeoutForTesting() => _selfCheckExitTimeout;
 
 Future<void> _terminateProcess(
   Process process,
