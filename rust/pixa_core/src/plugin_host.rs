@@ -20,7 +20,16 @@ pub type RuntimePluginExecutorRef = Arc<dyn RuntimePluginExecutor>;
 pub struct RuntimePluginFetchRequest<'a> {
     pub source_kind: &'a str,
     pub locator: &'a str,
+    pub video_frame: Option<RuntimePluginVideoFrameSpec<'a>>,
     pub max_output_bytes: usize,
+}
+
+/// Structured video frame parameters passed to a runtime fetcher executor.
+#[derive(Clone, Copy, Debug)]
+pub struct RuntimePluginVideoFrameSpec<'a> {
+    pub timestamp_micros: i64,
+    pub exact: bool,
+    pub backend: Option<&'a str>,
 }
 
 /// Request passed to a runtime decoder executor.

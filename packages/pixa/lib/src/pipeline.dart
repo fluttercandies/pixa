@@ -1485,6 +1485,7 @@ final class PixaPipeline {
       PixaNetworkSource() ||
       PixaFileSource() ||
       PixaExifThumbnailSource() ||
+      PixaVideoFrameSource() ||
       PixaRuntimePluginSource() => false,
     };
   }

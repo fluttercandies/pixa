@@ -123,6 +123,11 @@ struct PixaPluginFetchRequestV1 {
     source_kind_len: usize,
     locator_ptr: *const u8,
     locator_len: usize,
+    has_video_frame: bool,
+    video_timestamp_micros: i64,
+    video_exact: bool,
+    video_backend_ptr: *const u8,
+    video_backend_len: usize,
     max_output_bytes: usize,
 }
 
@@ -417,6 +422,22 @@ impl PluginExecutor for HostLinkedPluginExecutor {
             source_kind_len: request.source_kind.len(),
             locator_ptr: request.locator.as_ptr(),
             locator_len: request.locator.len(),
+            has_video_frame: request.video_frame.is_some(),
+            video_timestamp_micros: request
+                .video_frame
+                .map(|frame| frame.timestamp_micros)
+                .unwrap_or(0),
+            video_exact: request.video_frame.is_some_and(|frame| frame.exact),
+            video_backend_ptr: request
+                .video_frame
+                .and_then(|frame| frame.backend)
+                .map(str::as_ptr)
+                .unwrap_or(std::ptr::null()),
+            video_backend_len: request
+                .video_frame
+                .and_then(|frame| frame.backend)
+                .map(str::len)
+                .unwrap_or(0),
             max_output_bytes: request.max_output_bytes,
         };
         let mut output = empty_plugin_output();

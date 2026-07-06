@@ -596,7 +596,20 @@ void _writeSource(_BinaryRequestWriter writer, PixaSource source) {
       writer.writeUint8(5);
       writer.writeString(sourceKind);
       writer.writeString(locator);
+    case PixaVideoFrameSource(:final locator, :final options):
+      writer.writeUint8(6);
+      writer.writeString(locator);
+      writer.writeInt64(options.timestampMicros);
+      writer.writeUint8(_videoFrameSelectionCode(options.frameSelection));
+      writer.writeString(options.normalizedBackend ?? '');
   }
+}
+
+int _videoFrameSelectionCode(PixaVideoFrameSelection selection) {
+  return switch (selection) {
+    PixaVideoFrameSelection.nearest => 0,
+    PixaVideoFrameSelection.exact => 1,
+  };
 }
 
 int _cacheModeCode(PixaCacheMode mode) {

@@ -555,6 +555,54 @@ final class PixaRequest {
     );
   }
 
+  /// Creates a request for a still frame extracted from a video.
+  factory PixaRequest.videoFrame(
+    String locator, {
+    required Duration timestamp,
+    PixaVideoFrameSelection frameSelection = PixaVideoFrameSelection.nearest,
+    String? backend,
+    Map<String, String> headers = const <String, String>{},
+    PixaHeadersPolicy headersPolicy = const PixaHeadersPolicy(),
+    String cacheNamespace = 'default',
+    PixaTargetSize? targetSize,
+    double scale = 1.0,
+    BoxFit? fit,
+    List<String> processors = const <String>[],
+    Map<String, Object?> decoderOptions = const <String, Object?>{},
+    PixaPluginExecutionPolicy pluginExecutionPolicy =
+        const PixaPluginExecutionPolicy.runtimeOnly(),
+    PixaCachePolicy cachePolicy = const PixaCachePolicy(),
+    PixaPriority priority = PixaPriority.normal,
+    PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
+    PixaRequestLimits limits = const PixaRequestLimits(),
+    PixaRedirectPolicy redirectPolicy = const PixaRedirectPolicy(),
+    Map<String, Object?> metadata = const <String, Object?>{},
+  }) {
+    return PixaRequest(
+      source: PixaSource.videoFrame(
+        locator,
+        timestamp: timestamp,
+        frameSelection: frameSelection,
+        backend: backend,
+      ),
+      headers: headers,
+      headersPolicy: headersPolicy,
+      cacheNamespace: cacheNamespace,
+      targetSize: targetSize,
+      scale: scale,
+      fit: fit,
+      processors: processors,
+      decoderOptions: decoderOptions,
+      pluginExecutionPolicy: pluginExecutionPolicy,
+      cachePolicy: cachePolicy,
+      priority: priority,
+      retryPolicy: retryPolicy,
+      limits: limits,
+      redirectPolicy: redirectPolicy,
+      metadata: metadata,
+    );
+  }
+
   /// Primary image source.
   final PixaSource source;
 
@@ -632,6 +680,7 @@ final class PixaRequest {
       pluginExecutionPolicy.runtime,
       pluginExecutionPolicy.dart,
       pluginExecutionPolicy.external,
+      cachePolicy.privateDiskCache,
       redirectPolicy.allowCrossHostRedirects,
       redirectPolicy.allowHttpsToHttp,
     ], debugLabel: '${source.safeLabel}#$cacheNamespace');
@@ -647,6 +696,7 @@ final class PixaRequest {
       source.cacheMaterial,
       headersPolicy.keyMaterial(headers),
       _privatePartitionMaterial,
+      cachePolicy.privateDiskCache,
       redirectPolicy.allowCrossHostRedirects,
       redirectPolicy.allowHttpsToHttp,
     ], debugLabel: 'encoded:${source.safeLabel}#$cacheNamespace');

@@ -28,6 +28,12 @@ pub enum RuntimeSource {
         source_kind: String,
         locator: String,
     },
+    VideoFrame {
+        locator: String,
+        timestamp_micros: i64,
+        exact: bool,
+        backend: Option<String>,
+    },
 }
 
 /// Cache mode mirrored from Dart.
@@ -218,6 +224,23 @@ pub fn decode_binary_request(bytes: &[u8]) -> RuntimeResult<RuntimeRequest> {
             source_kind: reader.read_string()?,
             locator: reader.read_string()?,
         },
+        6 => {
+            let locator = reader.read_string()?;
+            let timestamp_micros = reader.read_i64()?;
+            if timestamp_micros < 0 {
+                return Err(RuntimeError::new(
+                    "request",
+                    false,
+                    "video frame timestamp must not be negative",
+                ));
+            }
+            RuntimeSource::VideoFrame {
+                locator,
+                timestamp_micros,
+                exact: decode_video_frame_exact(reader.read_u8()?)?,
+                backend: optional_route_claim(reader.read_string()?),
+            }
+        }
         value => {
             return Err(RuntimeError::new(
                 "request",
@@ -470,6 +493,18 @@ fn decode_retry_mode(value: u8) -> RuntimeResult<RuntimeRetryMode> {
     }
 }
 
+fn decode_video_frame_exact(value: u8) -> RuntimeResult<bool> {
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(RuntimeError::new(
+            "request",
+            false,
+            format!("unknown binary request video frame selection {value}"),
+        )),
+    }
+}
+
 fn non_zero_dimension(value: u32) -> Option<u32> {
     (value != 0).then_some(value)
 }
@@ -585,6 +620,32 @@ mod tests {
                 ref source_kind,
                 ref locator,
             } if source_kind == "s3" && locator == "s3://bucket/key.gif"
+        ));
+    }
+
+    #[test]
+    fn decodes_video_frame_source_without_inline_bytes() {
+        let bytes = binary_request_fixture_with_source(|bytes| {
+            push_u8(bytes, 6);
+            push_string(bytes, "https://media.example.test/movie.mp4?token=alpha");
+            push_i64(bytes, 1_234_000);
+            push_u8(bytes, 1);
+            push_string(bytes, "platform-codec");
+        });
+
+        let request = decode_binary_request(&bytes).expect("video frame source should decode");
+
+        assert!(matches!(
+            request.source,
+            RuntimeSource::VideoFrame {
+                ref locator,
+                timestamp_micros,
+                exact,
+                ref backend,
+            } if locator == "https://media.example.test/movie.mp4?token=alpha"
+                && timestamp_micros == 1_234_000
+                && exact
+                && backend.as_deref() == Some("platform-codec")
         ));
     }
 

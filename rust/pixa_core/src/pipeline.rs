@@ -18,7 +18,7 @@ use crate::{
     runtime_decoder_for_format_id, runtime_decoder_for_mime_type,
     runtime_fetcher_executor_for_source_kind, runtime_fetcher_for_source_kind, runtime_process,
     RuntimeError, RuntimePluginDecodeRequest, RuntimePluginExecutorRef, RuntimePluginFetchRequest,
-    RuntimePluginModule, RuntimePluginProcessRequest, RuntimeResult,
+    RuntimePluginModule, RuntimePluginProcessRequest, RuntimePluginVideoFrameSpec, RuntimeResult,
 };
 use image::GenericImageView;
 use std::borrow::Cow;
@@ -1324,6 +1324,18 @@ fn source_identity(source: &RuntimeSource) -> String {
             source_kind.trim().to_ascii_lowercase(),
             identity_digest(locator)
         ),
+        RuntimeSource::VideoFrame {
+            locator,
+            timestamp_micros,
+            exact,
+            backend,
+        } => format!(
+            "video-frame:{}:{}:{}:{}",
+            backend.as_deref().unwrap_or("default"),
+            timestamp_micros,
+            exact,
+            identity_digest(locator)
+        ),
     }
 }
 
@@ -1833,7 +1845,26 @@ fn fetch_source_uncached(
         RuntimeSource::RuntimePlugin {
             source_kind,
             locator,
-        } => fetch_plugin_source(request, source_kind, locator, progress_sink),
+        } => fetch_plugin_source(request, source_kind, locator, None, progress_sink),
+        RuntimeSource::VideoFrame {
+            locator,
+            timestamp_micros,
+            exact,
+            backend,
+        } => {
+            let source_kind = video_frame_source_kind(backend.as_deref());
+            fetch_plugin_source(
+                request,
+                &source_kind,
+                locator,
+                Some(RuntimePluginVideoFrameSpec {
+                    timestamp_micros: *timestamp_micros,
+                    exact: *exact,
+                    backend: backend.as_deref(),
+                }),
+                progress_sink,
+            )
+        }
     }
 }
 
@@ -1841,6 +1872,7 @@ fn fetch_plugin_source(
     request: &RuntimeRequest,
     source_kind: &str,
     locator: &str,
+    video_frame: Option<RuntimePluginVideoFrameSpec<'_>>,
     progress_sink: Option<&dyn RuntimeProgressSink>,
 ) -> RuntimeResult<FetchOutcome> {
     let module = runtime_fetcher_for_source_kind(source_kind)?.ok_or_else(|| {
@@ -1867,6 +1899,7 @@ fn fetch_plugin_source(
         .fetch(RuntimePluginFetchRequest {
             source_kind,
             locator,
+            video_frame,
             max_output_bytes: request.limits.max_encoded_bytes,
         })?
         .ok_or_else(|| {
@@ -1891,6 +1924,13 @@ fn fetch_plugin_source(
         http_cache_metadata: None,
         not_modified: false,
     })
+}
+
+fn video_frame_source_kind(backend: Option<&str>) -> Cow<'_, str> {
+    match backend {
+        Some(backend) => Cow::Owned(format!("video-frame:{backend}")),
+        None => Cow::Borrowed("video-frame"),
+    }
 }
 
 fn plugin_entrypoint_missing_error(

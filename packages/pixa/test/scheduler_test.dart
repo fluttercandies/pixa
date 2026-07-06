@@ -418,6 +418,41 @@ void main() {
     expect(failureEvent.durationMicros, isNotNull);
   });
 
+  test(
+    'video frame request fails typed unsupported when no backend is registered',
+    () async {
+      final List<PixaEvent> events = <PixaEvent>[];
+      final PixaPipeline pipeline = PixaPipeline(
+        cacheRootPath: '',
+        maxConcurrentRuntimeLoads: 1,
+        observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+      );
+      final PixaRequest request = PixaRequest.videoFrame(
+        'file:///photos/private/movie.mp4',
+        timestamp: const Duration(seconds: 2),
+        targetSize: const PixaTargetSize(width: 160, height: 90),
+      );
+
+      final Object error = await pipeline
+          .load(request)
+          .then<Object>(
+            (_) => fail('video frame without a backend should fail the load'),
+            onError: (Object error) => error,
+          );
+
+      expect(error, isA<PixaFailure>());
+      final PixaFailure failure = error as PixaFailure;
+      expect(failure.stage, PixaStage.fetch);
+      expect(failure.retryability, PixaRetryability.notRetryable);
+      expect(failure.safeMessage, contains('video-frame'));
+      final PixaEvent failureEvent = events.singleWhere(
+        (PixaEvent event) => event.name == 'request.failure',
+      );
+      expect(failureEvent.stage, PixaStage.fetch);
+      expect(failureEvent.failure, same(failure));
+    },
+  );
+
   test('cancelled listener emits observer cancellation span', () async {
     final Completer<Uint8List> pendingBytes = Completer<Uint8List>();
     final Completer<void> released = Completer<void>();

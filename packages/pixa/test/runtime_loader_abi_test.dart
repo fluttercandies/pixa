@@ -198,6 +198,28 @@ void main() {
     expect(reader.readString(), 's3://bucket/key.gif');
   });
 
+  test('video frame source is encoded in the compact request ABI', () {
+    final PixaRequest request = PixaRequest.videoFrame(
+      'https://media.example.test/movie.mp4?token=alpha',
+      timestamp: const Duration(milliseconds: 1234),
+      frameSelection: PixaVideoFrameSelection.exact,
+      backend: 'platform-codec',
+    );
+
+    final Uint8List payload = PixaRuntimeLoader.encodeRequest(request);
+    final PixaRuntimeBinaryReader reader = PixaRuntimeBinaryReader(payload);
+
+    expect(reader.readMagic(0x50, 0x58, 0x52, 0x31), isTrue);
+    expect(reader.readUint8(), 6);
+    expect(
+      reader.readString(),
+      'https://media.example.test/movie.mp4?token=alpha',
+    );
+    expect(reader.readInt64(), 1234000);
+    expect(reader.readUint8(), 1);
+    expect(reader.readString(), 'platform-codec');
+  });
+
   test('target size and decoded pixel budget are encoded in request ABI', () {
     final PixaRequest request = PixaRequest(
       source: PixaSource.bytes(Uint8List(1), id: 'targeted'),

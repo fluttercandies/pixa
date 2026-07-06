@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'runtime/runtime_bridge.dart';
@@ -9,6 +10,68 @@ final Expando<String> _bytesSourceFingerprints = Expando<String>(
 
 /// Function used by custom sources to provide encoded bytes.
 typedef PixaCustomSourceLoader = Future<Uint8List> Function();
+
+/// How a requested video frame timestamp should be selected.
+enum PixaVideoFrameSelection {
+  /// Use the nearest decodable frame when an exact timestamp is expensive.
+  nearest,
+
+  /// Require the frame at the requested timestamp.
+  exact,
+}
+
+/// Options that identify a video frame variant before image processing.
+@immutable
+final class PixaVideoFrameOptions {
+  /// Creates video frame source options.
+  PixaVideoFrameOptions({
+    required this.timestamp,
+    this.frameSelection = PixaVideoFrameSelection.nearest,
+    this.backend,
+  }) {
+    if (timestamp.isNegative) {
+      throw ArgumentError.value(timestamp, 'timestamp', 'must not be negative');
+    }
+  }
+
+  /// Requested timestamp in the video stream.
+  final Duration timestamp;
+
+  /// Timestamp selection policy.
+  final PixaVideoFrameSelection frameSelection;
+
+  /// Optional backend route, for example a platform codec module.
+  final String? backend;
+
+  /// Timestamp encoded in microseconds for cache keys and runtime ABI.
+  int get timestampMicros => timestamp.inMicroseconds;
+
+  /// Normalized backend route, or null when the default capability is used.
+  String? get normalizedBackend {
+    final String? value = backend?.trim().toLowerCase();
+    return value == null || value.isEmpty ? null : value;
+  }
+
+  /// Stable material that identifies the source frame before processors.
+  Object get cacheMaterial => <String, Object?>{
+    'timestampMicros': timestampMicros,
+    'frameSelection': frameSelection.name,
+    if (normalizedBackend != null) 'backend': normalizedBackend,
+  };
+
+  @override
+  bool operator ==(Object other) {
+    return other is PixaVideoFrameOptions &&
+        other.timestamp == timestamp &&
+        other.frameSelection == frameSelection &&
+        other.normalizedBackend == normalizedBackend;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(timestamp, frameSelection, normalizedBackend);
+  }
+}
 
 /// Image source handled by the Pixa pipeline.
 sealed class PixaSource {
@@ -22,6 +85,26 @@ sealed class PixaSource {
 
   /// Creates a JPEG EXIF thumbnail source for a filesystem image.
   factory PixaSource.exifThumbnail(String path) = PixaExifThumbnailSource;
+
+  /// Creates a video frame source routed through a runtime backend.
+  factory PixaSource.videoFrame(
+    String locator, {
+    required Duration timestamp,
+    PixaVideoFrameSelection frameSelection = PixaVideoFrameSelection.nearest,
+    String? backend,
+  }) {
+    if (timestamp.isNegative) {
+      throw ArgumentError.value(timestamp, 'timestamp', 'must not be negative');
+    }
+    return PixaVideoFrameSource(
+      locator: locator,
+      options: PixaVideoFrameOptions(
+        timestamp: timestamp,
+        frameSelection: frameSelection,
+        backend: backend,
+      ),
+    );
+  }
 
   /// Creates an asset source.
   factory PixaSource.asset(
@@ -109,6 +192,29 @@ final class PixaExifThumbnailSource extends PixaSource {
 
   @override
   String get safeLabel => 'exif-thumbnail:${PixaRedactor.fileBasename(path)}';
+}
+
+/// Runtime-backed video frame image source.
+final class PixaVideoFrameSource extends PixaSource {
+  /// Creates a video frame source.
+  const PixaVideoFrameSource({required this.locator, required this.options});
+
+  /// Video locator, such as a file path, content URI, or HTTPS URL.
+  final String locator;
+
+  /// Frame extraction options.
+  final PixaVideoFrameOptions options;
+
+  @override
+  Object get cacheMaterial => <String, Object?>{
+    'type': 'videoFrame',
+    'locator': _runtimeLocatorKeyMaterial(locator),
+    'frame': options.cacheMaterial,
+  };
+
+  @override
+  String get safeLabel =>
+      'video-frame:${_videoFrameLocatorLabel(locator)}@${options.timestampMicros}us';
 }
 
 /// Flutter asset image source.
@@ -241,4 +347,20 @@ Object _runtimeLocatorKeyMaterial(String locator) {
     };
   }
   return PixaRedactor.redactText(locator);
+}
+
+String _videoFrameLocatorLabel(String locator) {
+  final Uri? uri = Uri.tryParse(locator);
+  if (uri != null && uri.hasScheme) {
+    final List<String> pathSegments = uri.pathSegments
+        .where((String segment) => segment.isNotEmpty)
+        .toList(growable: false);
+    if (pathSegments.isNotEmpty) {
+      return pathSegments.last;
+    }
+    if (uri.host.isNotEmpty) {
+      return uri.host;
+    }
+  }
+  return PixaRedactor.fileBasename(locator);
 }

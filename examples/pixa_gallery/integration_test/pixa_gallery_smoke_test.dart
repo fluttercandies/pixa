@@ -131,8 +131,21 @@ void main() {
       passed: passed,
       snapshot: snapshot,
     );
+    await _disposeSmokeWidgetTree(tester);
     expect(passed, isTrue, reason: const JsonEncoder().convert(checks));
   });
+}
+
+Future<void> _disposeSmokeWidgetTree(WidgetTester tester) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  imageCache.clear();
+  imageCache.clearLiveImages();
+  for (var attempt = 0; attempt < 8; attempt++) {
+    if (tester.binding.transientCallbackCount == 0) {
+      break;
+    }
+    await tester.pump(const Duration(milliseconds: 100));
+  }
 }
 
 Future<void> _pumpUntil(

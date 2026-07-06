@@ -623,6 +623,81 @@ void main() {
     expect(thumbnail.cacheKey.debugLabel, contains('exif-thumbnail:full.jpg'));
   });
 
+  test(
+    'video frame source keys timestamp and backend without leaking locator secrets',
+    () {
+      final PixaRequest first = PixaRequest.videoFrame(
+        'https://media.example.test/private/movie.mp4?token=alpha',
+        timestamp: const Duration(milliseconds: 1500),
+        frameSelection: PixaVideoFrameSelection.nearest,
+        backend: 'platform',
+        targetSize: const PixaTargetSize(width: 160, height: 90),
+        processors: const <String>['resize(width=160,height=90)'],
+        cachePolicy: const PixaCachePolicy(privateDiskCache: true),
+      );
+      final PixaRequest sameEncodedDifferentTarget = PixaRequest.videoFrame(
+        'https://media.example.test/private/movie.mp4?token=alpha',
+        timestamp: const Duration(milliseconds: 1500),
+        frameSelection: PixaVideoFrameSelection.nearest,
+        backend: 'platform',
+        targetSize: const PixaTargetSize(width: 320, height: 180),
+        cachePolicy: const PixaCachePolicy(privateDiskCache: true),
+      );
+      final PixaRequest differentTimestamp = PixaRequest.videoFrame(
+        'https://media.example.test/private/movie.mp4?token=alpha',
+        timestamp: const Duration(milliseconds: 1501),
+        frameSelection: PixaVideoFrameSelection.nearest,
+        backend: 'platform',
+        cachePolicy: const PixaCachePolicy(privateDiskCache: true),
+      );
+      final PixaRequest differentMode = PixaRequest.videoFrame(
+        'https://media.example.test/private/movie.mp4?token=alpha',
+        timestamp: const Duration(milliseconds: 1500),
+        frameSelection: PixaVideoFrameSelection.exact,
+        backend: 'platform',
+        cachePolicy: const PixaCachePolicy(privateDiskCache: true),
+      );
+      final PixaRequest differentBackend = PixaRequest.videoFrame(
+        'https://media.example.test/private/movie.mp4?token=alpha',
+        timestamp: const Duration(milliseconds: 1500),
+        frameSelection: PixaVideoFrameSelection.nearest,
+        backend: 'native-codec',
+        cachePolicy: const PixaCachePolicy(privateDiskCache: true),
+      );
+      final PixaRequest publicCachePolicy = PixaRequest.videoFrame(
+        'https://media.example.test/private/movie.mp4?token=alpha',
+        timestamp: const Duration(milliseconds: 1500),
+        frameSelection: PixaVideoFrameSelection.nearest,
+        backend: 'platform',
+        cachePolicy: const PixaCachePolicy(),
+      );
+
+      expect(first.cacheKey, isNot(sameEncodedDifferentTarget.cacheKey));
+      expect(first.encodedCacheKey, sameEncodedDifferentTarget.encodedCacheKey);
+      expect(first.encodedCacheKey, isNot(differentTimestamp.encodedCacheKey));
+      expect(first.encodedCacheKey, isNot(differentMode.encodedCacheKey));
+      expect(first.encodedCacheKey, isNot(differentBackend.encodedCacheKey));
+      expect(first.encodedCacheKey, isNot(publicCachePolicy.encodedCacheKey));
+      expect(first.source.safeLabel, 'video-frame:movie.mp4@1500000us');
+      expect(first.cacheKey.debugLabel, isNot(contains('alpha')));
+      expect(first.source.cacheMaterial.toString(), isNot(contains('alpha')));
+    },
+  );
+
+  test('video frame source rejects negative timestamps', () {
+    expect(
+      () => PixaSource.videoFrame(
+        'file:///movie.mp4',
+        timestamp: const Duration(microseconds: -1),
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => PixaVideoFrameOptions(timestamp: const Duration(microseconds: -1)),
+      throwsArgumentError,
+    );
+  });
+
   test('decoder options separate final key while sharing encoded key', () {
     final PixaRequest first = PixaRequest.network(
       'https://images.example.test/a.jpg',

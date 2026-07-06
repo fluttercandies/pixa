@@ -44,7 +44,7 @@ pub use plugin_host::{
     RuntimePluginDeployment, RuntimePluginExecutor, RuntimePluginExecutorRef,
     RuntimePluginFetchRequest, RuntimePluginModule, RuntimePluginOutput,
     RuntimePluginProcessRequest, RuntimePluginRegistryStats, RuntimePluginRoutes,
-    PIXA_PLUGIN_ABI_VERSION,
+    RuntimePluginVideoFrameSpec, PIXA_PLUGIN_ABI_VERSION,
 };
 pub use progress::{RuntimeProgressEvent, RuntimeProgressSink, RuntimeProgressStage};
 pub use request::{CacheMode, RuntimeRequest, RuntimeSource};
