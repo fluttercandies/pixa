@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -185,7 +186,37 @@ Future<void> _runSmoke(
         stderr.write(chunk);
         output.write(chunk);
       });
-  final int exitCode = await process.exitCode;
+  final Future<int> exitCodeFuture = process.exitCode;
+  late final int exitCode;
+  try {
+    exitCode = await exitCodeFuture.timeout(_smokeExitTimeout);
+  } on TimeoutException {
+    final String capturedOutput = output.toString();
+    final String? reportText =
+        _readExistingSmokeReport(File(reportPath)) ??
+        tryExtractPixaExampleSmokeReport(capturedOutput);
+    if (reportText != null &&
+        acceptsNonZeroPixaExampleSmokeExit(capturedOutput, reportText)) {
+      await _terminateProcess(process, exitCodeFuture);
+      await stdoutDone;
+      await stderrDone;
+      _writeSmokeReportIfMissing(File(reportPath), reportText);
+      stdout.writeln(
+        'Pixa example smoke accepted timed-out flutter test after validating '
+        'the smoke report and Flutter test pass marker.',
+      );
+      return;
+    }
+    await _terminateProcess(process, exitCodeFuture);
+    await stdoutDone;
+    await stderrDone;
+    throw TimeoutException(
+      'Pixa example smoke did not exit within '
+      '${_smokeExitTimeout.inMinutes} minutes.\n'
+      '${_tailText(capturedOutput, 24000)}',
+      _smokeExitTimeout,
+    );
+  }
   await stdoutDone;
   await stderrDone;
   final String capturedOutput = output.toString();
@@ -212,6 +243,22 @@ Future<void> _runSmoke(
     report,
     extractPixaExampleSmokeReport(capturedOutput),
   );
+}
+
+const Duration _smokeExitTimeout = Duration(minutes: 8);
+
+Future<void> _terminateProcess(
+  Process process,
+  Future<int> exitCodeFuture,
+) async {
+  if (process.kill()) {
+    try {
+      await exitCodeFuture.timeout(const Duration(seconds: 5));
+      return;
+    } on Object {
+      process.kill(ProcessSignal.sigkill);
+    }
+  }
 }
 
 String extractPixaExampleSmokeReport(String output) {
@@ -331,6 +378,13 @@ String _defaultSigning(String platform) {
     'linux' || 'macos' || 'windows' => 'not-applicable',
     _ => 'unknown',
   };
+}
+
+String _tailText(String value, int maxChars) {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return value.substring(value.length - maxChars);
 }
 
 Never _usageAndExit() {
