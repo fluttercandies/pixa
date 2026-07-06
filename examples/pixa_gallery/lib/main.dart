@@ -873,6 +873,7 @@ final class _LargeImagePageState extends State<_LargeImagePage> {
         placeholder: const PixaPlaceholder.color(Color(0xFF1D222B)),
         progressBuilder: _progressBuilder,
         errorBuilder: _errorBuilder,
+        tileErrorBuilder: _largeImageTileErrorBuilder,
       ),
     );
   }
@@ -1128,7 +1129,9 @@ final class _ScenarioTile extends StatelessWidget {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: _ScenarioViewport(child: scenario.child),
+                child: SizedBox.expand(
+                  child: _ScenarioViewport(child: scenario.child),
+                ),
               ),
             ),
           ),
@@ -1194,17 +1197,7 @@ final class _ScenarioViewport extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        final double width = constraints.maxWidth.isFinite
-            ? constraints.maxWidth
-            : 190;
-        final double height = constraints.maxHeight.isFinite
-            ? constraints.maxHeight
-            : 170;
-        return SizedBox(width: width, height: height, child: child);
-      },
-    );
+    return SizedBox.expand(child: child);
   }
 }
 
@@ -1291,6 +1284,14 @@ Widget _errorBuilder(
       ),
     ),
   );
+}
+
+Widget _largeImageTileErrorBuilder(
+  BuildContext context,
+  PixaFailure failure,
+  VoidCallback retry,
+) {
+  return const SizedBox.expand();
 }
 
 String _formatBytes(int bytes) {

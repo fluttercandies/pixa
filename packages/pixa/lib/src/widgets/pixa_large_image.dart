@@ -36,6 +36,7 @@ final class PixaLargeImage extends StatefulWidget {
     this.placeholder,
     this.progressBuilder,
     this.errorBuilder,
+    this.tileErrorBuilder,
     this.backgroundColor = const Color(0xFF111318),
     this.overviewTargetPixels = 1024,
     this.showOverview = true,
@@ -76,6 +77,7 @@ final class PixaLargeImage extends StatefulWidget {
     PixaPlaceholder? placeholder,
     PixaProgressBuilder? progressBuilder,
     PixaErrorBuilder? errorBuilder,
+    PixaErrorBuilder? tileErrorBuilder,
     Color backgroundColor = const Color(0xFF111318),
     int overviewTargetPixels = 1024,
     bool showOverview = true,
@@ -120,6 +122,7 @@ final class PixaLargeImage extends StatefulWidget {
       placeholder: placeholder,
       progressBuilder: progressBuilder,
       errorBuilder: errorBuilder,
+      tileErrorBuilder: tileErrorBuilder,
       backgroundColor: backgroundColor,
       overviewTargetPixels: overviewTargetPixels,
       showOverview: showOverview,
@@ -184,6 +187,11 @@ final class PixaLargeImage extends StatefulWidget {
 
   /// Error builder used for overview loading and tile failures.
   final PixaErrorBuilder? errorBuilder;
+
+  /// Optional error builder used for individual tile failures.
+  ///
+  /// Defaults to [errorBuilder] so existing callers keep the same behavior.
+  final PixaErrorBuilder? tileErrorBuilder;
 
   /// Background color behind the image.
   final Color backgroundColor;

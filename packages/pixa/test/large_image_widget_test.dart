@@ -121,6 +121,53 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
   });
+
+  testWidgets('large image uses tile error builder for tile failures', (
+    WidgetTester tester,
+  ) async {
+    await _configure('pixa-large-image-tile-error-');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(devicePixelRatio: 1),
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 256,
+              height: 256,
+              child: PixaLargeImage(
+                request: PixaRequest(
+                  source: PixaSource.custom(
+                    'large-image-tile-error',
+                    () => Future<Uint8List>.error(StateError('tile failed')),
+                  ),
+                  cachePolicy: const PixaCachePolicy.noStore(),
+                ),
+                imageWidth: 512,
+                imageHeight: 512,
+                tileSize: 512,
+                showOverview: false,
+                prefetchTiles: false,
+                evictDecodedTilesOnExit: false,
+                errorBuilder: (_, _, _) => const Text('overview-error'),
+                tileErrorBuilder: (_, _, _) => const Text('tile-error'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await _pumpUntilFound(tester, find.text('tile-error'));
+
+    expect(find.text('tile-error'), findsWidgets);
+    expect(find.text('overview-error'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+  });
 }
 
 Future<void> _doubleTapAt(WidgetTester tester, Offset position) async {
@@ -128,6 +175,15 @@ Future<void> _doubleTapAt(WidgetTester tester, Offset position) async {
   await tester.pump(const Duration(milliseconds: 50));
   await tester.tapAt(position);
   await tester.pump();
+}
+
+Future<void> _pumpUntilFound(WidgetTester tester, Finder finder) async {
+  for (var attempt = 0; attempt < 20; attempt += 1) {
+    await tester.pump(const Duration(milliseconds: 50));
+    if (finder.evaluate().isNotEmpty) {
+      return;
+    }
+  }
 }
 
 Future<void> _configure(String prefix) async {

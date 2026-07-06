@@ -112,7 +112,8 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
                         tile: tile,
                         request: tile.requestFor(widget.request),
                         filterQuality: widget.filterQuality,
-                        errorBuilder: widget.errorBuilder,
+                        errorBuilder:
+                            widget.tileErrorBuilder ?? widget.errorBuilder,
                       ),
                   ],
                 ),
