@@ -88,6 +88,7 @@ void main() {
     _check(checks, 'loopbackImageRequest', server.requestCount > 0);
 
     final Finder tile = find.byKey(const ValueKey<String>('grid-1'));
+    await _pumpUntil(tester, () => tile.evaluate().isNotEmpty);
     if (tile.evaluate().isEmpty) {
       await tester.scrollUntilVisible(
         tile,
@@ -100,7 +101,14 @@ void main() {
       );
     }
     if (tile.evaluate().isNotEmpty) {
-      await tester.tap(tile.first);
+      await tester.ensureVisible(tile.first);
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    final Finder tappableTile = tile.hitTestable();
+    _check(checks, 'gridTileVisible', tappableTile.evaluate().isNotEmpty);
+    if (tappableTile.evaluate().isNotEmpty) {
+      await tester.tapAt(tester.getCenter(tappableTile.first));
+      await tester.pump();
       await _pumpUntil(
         tester,
         () => find.byType(PixaLargeImage).evaluate().isNotEmpty,
@@ -226,8 +234,8 @@ final class _LoopbackImageServer {
       ImagePost(
         id: index,
         imageUrl: imageUrl(index),
-        width: 320 + index * 7,
-        height: 220 + index * 5,
+        width: 1,
+        height: 1,
         source: SourceType.nekosia,
       ),
   ];

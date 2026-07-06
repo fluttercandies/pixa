@@ -37,12 +37,49 @@ final class ZerochanSource implements ImageSource {
   }
 
   ImagePost _postFromItem(Map<String, Object?> item) {
+    final int sourceWidth = ((item['width']! as num).toInt())
+        .clamp(1, 1 << 30)
+        .toInt();
+    final int sourceHeight = ((item['height']! as num).toInt())
+        .clamp(1, 1 << 30)
+        .toInt();
+    final String imageUrl = _jpegThumbnailUrl(item['thumbnail']! as String);
+    final int width = _thumbnailWidth(imageUrl) ?? sourceWidth;
+    final int height = (sourceHeight * width / sourceWidth)
+        .round()
+        .clamp(1, 1 << 30)
+        .toInt();
     return ImagePost(
       id: item['id']! as int,
-      imageUrl: item['thumbnail']! as String,
-      width: (item['width']! as num).toInt(),
-      height: (item['height']! as num).toInt(),
+      imageUrl: imageUrl,
+      width: width,
+      height: height,
       source: SourceType.zerochan,
+      thumbnailUrl: imageUrl,
+      thumbnailWidth: width,
+      thumbnailHeight: height,
     );
+  }
+
+  String _jpegThumbnailUrl(String thumbnailUrl) {
+    final Uri uri = Uri.parse(thumbnailUrl);
+    final int extensionStart = uri.path.lastIndexOf('.');
+    if (extensionStart > 0) {
+      return uri
+          .replace(path: '${uri.path.substring(0, extensionStart)}.jpg')
+          .toString();
+    }
+    return thumbnailUrl;
+  }
+
+  int? _thumbnailWidth(String imageUrl) {
+    final List<String> segments = Uri.parse(imageUrl).pathSegments;
+    for (final String segment in segments) {
+      final int? width = int.tryParse(segment);
+      if (width != null && width > 0) {
+        return width;
+      }
+    }
+    return null;
   }
 }

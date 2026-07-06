@@ -3,8 +3,8 @@ description: Smoke-test gallery for the Pixa image loading package.
 publish_to: none
 
 environment:
-  sdk: ">=3.8.0 <4.0.0"
-  flutter: ">=3.41.0"
+  sdk: ">=3.11.0 <4.0.0"
+  flutter: ">=3.41.9"
 
 dependencies:
   flexbox_layout: ^3.1.0

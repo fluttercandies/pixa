@@ -22,6 +22,9 @@ final class ImagePost {
     required this.width,
     required this.height,
     required this.source,
+    this.thumbnailUrl,
+    this.thumbnailWidth,
+    this.thumbnailHeight,
   });
 
   /// Stable image identifier.
@@ -39,12 +42,21 @@ final class ImagePost {
   /// Image source bucket.
   final SourceType source;
 
+  /// Optional lightweight preview URL with dimensions that match the payload.
+  final String? thumbnailUrl;
+
+  /// Preview width in pixels.
+  final int? thumbnailWidth;
+
+  /// Preview height in pixels.
+  final int? thumbnailHeight;
+
   /// Runtime aspect ratio used by the row layout.
   double get aspectRatio => width > 0 && height > 0 ? width / height : 1;
 
   /// Low-resolution URL for placeholder-to-full swaps.
   String lowResUrl({int size = 96}) {
-    return imageUrl;
+    return thumbnailUrl ?? imageUrl;
   }
 
   @override

@@ -31,14 +31,40 @@ final class YandeSource implements ImageSource {
 
   ImagePost _postFromItem(Map<String, Object?> item) {
     final int id = item['id']! as int;
-    final num width = (item['width'] ?? item['sample_width'])! as num;
-    final num height = (item['height'] ?? item['sample_height'])! as num;
+    final bool hasSample = item['sample_url'] != null;
+    final String imageUrl =
+        item['sample_url'] as String? ??
+        item['jpeg_url'] as String? ??
+        item['file_url'] as String? ??
+        item['preview_url']! as String;
+    final int width = (hasSample
+        ? _intField(item, 'sample_width')
+        : _intField(item, 'jpeg_width') ??
+              _intField(item, 'width') ??
+              _intField(item, 'preview_width'))!;
+    final int height = (hasSample
+        ? _intField(item, 'sample_height')
+        : _intField(item, 'jpeg_height') ??
+              _intField(item, 'height') ??
+              _intField(item, 'preview_height'))!;
     return ImagePost(
       id: id,
-      imageUrl: item['preview_url']! as String,
-      width: width.toInt(),
-      height: height.toInt(),
+      imageUrl: imageUrl,
+      width: width,
+      height: height,
       source: SourceType.yande,
+      thumbnailUrl: item['preview_url'] as String?,
+      thumbnailWidth:
+          _intField(item, 'actual_preview_width') ??
+          _intField(item, 'preview_width'),
+      thumbnailHeight:
+          _intField(item, 'actual_preview_height') ??
+          _intField(item, 'preview_height'),
     );
+  }
+
+  int? _intField(Map<String, Object?> item, String key) {
+    final Object? value = item[key];
+    return value is num ? value.toInt() : null;
   }
 }

@@ -862,7 +862,7 @@ final class _LargeImagePageState extends State<_LargeImagePage> {
         ],
       ),
       body: PixaLargeImage(
-        request: _requestForPost(post, targetPixels: 1024),
+        request: _requestForPost(post),
         imageWidth: post.width,
         imageHeight: post.height,
         controller: _controller,
@@ -987,7 +987,7 @@ final class _ScenarioSection extends StatelessWidget {
             request: _requestForPost(
               first,
               targetPixels: 720,
-            ).copyWith(lowRes: _requestForPost(first, targetPixels: 96)),
+            ).copyWith(lowRes: _thumbnailRequestForPost(first)),
             fit: BoxFit.cover,
             placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
             progressBuilder: _progressBuilder,
@@ -1128,7 +1128,7 @@ final class _ScenarioTile extends StatelessWidget {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: SizedBox.expand(child: scenario.child),
+                child: _ScenarioViewport(child: scenario.child),
               ),
             ),
           ),
@@ -1187,6 +1187,27 @@ final class _LargeImagePreview extends StatelessWidget {
   }
 }
 
+final class _ScenarioViewport extends StatelessWidget {
+  const _ScenarioViewport({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double width = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : 190;
+        final double height = constraints.maxHeight.isFinite
+            ? constraints.maxHeight
+            : 170;
+        return SizedBox(width: width, height: height, child: child);
+      },
+    );
+  }
+}
+
 final class _Scenario {
   const _Scenario({required this.title, required this.child});
 
@@ -1218,6 +1239,21 @@ PixaRequest _requestForPost(
     processors: processors,
     cachePolicy: const PixaCachePolicy.public(maxAge: Duration(days: 7)),
     priority: PixaPriority.normal,
+    retryPolicy: const PixaRetryPolicy.exponential(maxAttempts: 2),
+  );
+}
+
+PixaRequest _thumbnailRequestForPost(ImagePost post) {
+  final int? width = post.thumbnailWidth;
+  final int? height = post.thumbnailHeight;
+  return PixaRequest(
+    source: PixaSource.network(Uri.parse(post.lowResUrl())),
+    targetSize: width == null && height == null
+        ? const PixaTargetSize(width: 96, height: 96)
+        : PixaTargetSize(width: width, height: height),
+    fit: BoxFit.cover,
+    cachePolicy: const PixaCachePolicy.public(maxAge: Duration(days: 7)),
+    priority: PixaPriority.low,
     retryPolicy: const PixaRetryPolicy.exponential(maxAttempts: 2),
   );
 }
