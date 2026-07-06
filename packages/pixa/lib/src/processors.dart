@@ -122,6 +122,22 @@ abstract final class PixaProcessors {
     return 'fastBlur(sigma=${_formatDouble(sigma)})';
   }
 
+  /// Applies a bounded 3x3 convolution kernel. Each value range: -64..64.
+  static String filter3x3(List<double> kernel) {
+    if (kernel.length != 9) {
+      throw ArgumentError.value(
+        kernel.length,
+        'kernel',
+        'must contain 9 values',
+      );
+    }
+    final Iterable<String> values = kernel.map((double value) {
+      _checkFiniteRange(value, -64, 64, 'kernel');
+      return _formatDouble(value);
+    });
+    return 'filter3x3(kernel=${values.join('|')})';
+  }
+
   /// Mirrors pixels horizontally.
   static String flipHorizontal() => 'flipHorizontal()';
 

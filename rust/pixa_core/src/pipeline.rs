@@ -2109,6 +2109,9 @@ enum RuntimeProcessor {
     FastBlur {
         sigma: f32,
     },
+    Filter3x3 {
+        kernel: [f32; 9],
+    },
     FlipHorizontal,
     FlipVertical,
     Grayscale,
@@ -2235,6 +2238,9 @@ fn parse_processor_descriptor(descriptor: &str) -> RuntimeResult<RuntimeProcesso
         }),
         "fastblur" => Ok(RuntimeProcessor::FastBlur {
             sigma: required_processor_f32(&args, "sigma")?,
+        }),
+        "filter3x3" => Ok(RuntimeProcessor::Filter3x3 {
+            kernel: required_processor_kernel3x3(&args, "kernel")?,
         }),
         "fliphorizontal" | "fliph" => Ok(RuntimeProcessor::FlipHorizontal),
         "flipvertical" | "flipv" => Ok(RuntimeProcessor::FlipVertical),
@@ -2605,6 +2611,40 @@ fn required_processor_f32_range(
         ));
     }
     Ok(parsed)
+}
+
+fn required_processor_kernel3x3(
+    args: &HashMap<String, String>,
+    name: &'static str,
+) -> RuntimeResult<[f32; 9]> {
+    let Some(value) = args.get(name) else {
+        return processor_descriptor_error(format!("missing processor argument {name}"));
+    };
+    let parts = value
+        .split(['|', ';'])
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<&str>>();
+    if parts.len() != 9 {
+        return processor_descriptor_error(format!("processor argument {name} must have 9 values"));
+    }
+    let mut kernel = [0.0_f32; 9];
+    for (index, part) in parts.iter().enumerate() {
+        let parsed = part.parse::<f32>().map_err(|_| {
+            RuntimeError::new(
+                "processor",
+                false,
+                format!("processor argument {name}[{index}] must be a finite number"),
+            )
+        })?;
+        if !parsed.is_finite() || !(-64.0..=64.0).contains(&parsed) {
+            return processor_descriptor_error(format!(
+                "processor argument {name}[{index}] must be in range -64..64"
+            ));
+        }
+        kernel[index] = parsed;
+    }
+    Ok(kernel)
 }
 
 fn required_processor_i32_alias(
@@ -3226,6 +3266,7 @@ fn apply_processor(
         },
         RuntimeProcessor::Blur { sigma } => image.blur(sigma),
         RuntimeProcessor::FastBlur { sigma } => image.fast_blur(sigma),
+        RuntimeProcessor::Filter3x3 { ref kernel } => image.filter3x3(kernel),
         RuntimeProcessor::FlipHorizontal => image.fliph(),
         RuntimeProcessor::FlipVertical => image.flipv(),
         RuntimeProcessor::Grayscale => image.grayscale(),
@@ -5290,6 +5331,14 @@ mod tests {
                     "crop(x=1,y=1,width=1,height=1)".to_string(),
                 ],
                 [47, 47, 0, 255],
+            ),
+            (
+                "processor-filter-3x3",
+                vec![
+                    "filter3x3(kernel=0|0|0|0|2|0|0|-1|0)".to_string(),
+                    "crop(x=1,y=1,width=1,height=1)".to_string(),
+                ],
+                [40, 0, 0, 255],
             ),
         ];
 

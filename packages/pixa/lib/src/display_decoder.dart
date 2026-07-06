@@ -605,6 +605,7 @@ bool _isRuntimeDisplayProcessor(String descriptor) {
     'rotate' ||
     'blur' ||
     'fastblur' ||
+    'filter3x3' ||
     'fliphorizontal' ||
     'fliph' ||
     'flipvertical' ||

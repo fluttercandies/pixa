@@ -28,6 +28,10 @@ void main() {
     expect(PixaProcessors.blur(2.5), 'blur(sigma=2.5)');
     expect(PixaProcessors.fastBlur(1.5), 'fastBlur(sigma=1.5)');
     expect(
+      PixaProcessors.filter3x3(const <double>[0, -1, 0, -1, 5, -1, 0, -1, 0]),
+      'filter3x3(kernel=0.0|-1.0|0.0|-1.0|5.0|-1.0|0.0|-1.0|0.0)',
+    );
+    expect(
       PixaProcessors.tileCropResize(
         x: 1,
         y: 2,
@@ -68,6 +72,29 @@ void main() {
     expect(() => PixaProcessors.blur(double.nan), throwsRangeError);
     expect(() => PixaProcessors.fastBlur(-0.1), throwsRangeError);
     expect(() => PixaProcessors.fastBlur(double.nan), throwsRangeError);
+    expect(
+      () => PixaProcessors.filter3x3(const <double>[1]),
+      throwsArgumentError,
+    );
+    expect(
+      () => PixaProcessors.filter3x3(const <double>[
+        0,
+        0,
+        0,
+        0,
+        double.nan,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      throwsRangeError,
+    );
+    expect(
+      () =>
+          PixaProcessors.filter3x3(const <double>[0, 0, 0, 0, 65, 0, 0, 0, 0]),
+      throwsRangeError,
+    );
     expect(
       () => PixaProcessors.tileCropResize(
         x: 0,

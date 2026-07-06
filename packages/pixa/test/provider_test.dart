@@ -1226,7 +1226,7 @@ void main() {
             () async => _minimalGif(),
           ),
           cachePolicy: const PixaCachePolicy.noStore(),
-          processors: const <String>['fast-blur(sigma=1.0)'],
+          processors: const <String>['filter-3x3(kernel=0|0|0|0|1|0|0|0|0)'],
         ),
       );
       final ImageStreamCompleter completer = provider.loadImage(provider, (
