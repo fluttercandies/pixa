@@ -277,6 +277,62 @@ void main() {
   );
 
   test(
+    'predictive prefetcher does not remember stale active completions',
+    () async {
+      final List<int> started = <int>[];
+      final Map<int, List<Completer<void>>> completions =
+          <int, List<Completer<void>>>{};
+      final PixaPredictivePrefetcher prefetcher = PixaPredictivePrefetcher(
+        requestBuilder: _requestForIndex,
+        forwardItemCount: 1,
+        backwardItemCount: 0,
+        maxConcurrent: 1,
+        runPrefetch:
+            (PixaRequest request, {required PixaPrefetchTarget target}) {
+              final int index = _indexFromRequest(request);
+              started.add(index);
+              final Completer<void> completer = Completer<void>();
+              completions
+                  .putIfAbsent(index, () => <Completer<void>>[])
+                  .add(completer);
+              return completer.future;
+            },
+      );
+
+      final Future<void> stale = prefetcher.prefetchAround(
+        firstVisibleIndex: 0,
+        lastVisibleIndex: 0,
+        itemCount: 10,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(started, <int>[1]);
+
+      final Future<void> current = prefetcher.prefetchAround(
+        firstVisibleIndex: 5,
+        lastVisibleIndex: 5,
+        itemCount: 10,
+      );
+      completions[1]!.removeAt(0).complete();
+      await stale;
+      await Future<void>.delayed(Duration.zero);
+      expect(started, <int>[1, 6]);
+
+      completions[6]!.removeAt(0).complete();
+      await current;
+
+      final Future<void> revisited = prefetcher.prefetchAround(
+        firstVisibleIndex: 0,
+        lastVisibleIndex: 0,
+        itemCount: 10,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(started, <int>[1, 6, 1]);
+      completions[1]!.removeAt(0).complete();
+      await revisited;
+    },
+  );
+
+  test(
     'encoded predictive prefetch dedupes variants by encoded cache key',
     () async {
       final List<int?> startedWidths = <int?>[];

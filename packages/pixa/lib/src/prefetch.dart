@@ -156,9 +156,22 @@ final class PixaPredictivePrefetcher {
 
     final int first = firstVisibleIndex.clamp(0, itemCount - 1).toInt();
     final int last = lastVisibleIndex.clamp(0, itemCount - 1).toInt();
+    final PixaPrefetchTarget effectiveTarget = target ?? this.target;
+    if (_pending.isEmpty) {
+      final List<PixaRequest> requests = _plannedRequests(
+        first,
+        last,
+        itemCount,
+        effectiveTarget,
+      );
+      if (requests.isEmpty) {
+        return;
+      }
+      final int generation = ++_generation;
+      return _enqueueBatch(requests, effectiveTarget, context, generation);
+    }
     final int generation = ++_generation;
     _discardPendingFromPreviousGeneration();
-    final PixaPrefetchTarget effectiveTarget = target ?? this.target;
     final List<PixaRequest> requests = _plannedRequests(
       first,
       last,
@@ -261,8 +274,12 @@ final class PixaPredictivePrefetcher {
     try {
       await _run(work.request, work.target, work.context);
       completed = true;
-      _remember(work.key);
-      work.batch.completeOne();
+      if (work.generation == _generation) {
+        _remember(work.key);
+        work.batch.completeOne();
+      } else {
+        work.batch.completeSkipped(1);
+      }
     } on Object catch (error, stackTrace) {
       if (work.generation == _generation) {
         work.batch.completeOne(error: error, stackTrace: stackTrace);
