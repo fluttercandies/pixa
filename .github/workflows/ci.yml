@@ -31,6 +31,8 @@ jobs:
         run: dart pub get
       - name: Guard
         run: dart run tool/pixa_guard.dart
+      - name: Platform build wrapper self-test
+        run: dart run tool/pixa_platform_build_self_test.dart
       - name: Analyze core packages
         run: dart analyze packages/pixa packages/pixa_fetcher_s3 tool
       - name: Test core package

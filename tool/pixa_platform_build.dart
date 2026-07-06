@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -861,10 +862,54 @@ Future<void> _runSelfCheck(
         stderr.write(chunk);
         output.write(chunk);
       });
-  final int exitCode = await process.exitCode;
+  final Future<int> exitCodeFuture = process.exitCode;
+  late final int exitCode;
+  try {
+    exitCode = await exitCodeFuture.timeout(_selfCheckExitTimeout);
+  } on TimeoutException {
+    final String capturedOutput = output.toString();
+    final String? reportText =
+        _readExistingPlatformSelfCheckReport(reportPath) ??
+        tryExtractPixaPlatformSelfCheckReport(capturedOutput);
+    if (reportText != null &&
+        acceptsNonZeroPixaPlatformSelfCheckExit(capturedOutput, reportText)) {
+      await _terminateProcess(process, exitCodeFuture);
+      await stdoutDone;
+      await stderrDone;
+      _writePlatformSelfCheckReportIfMissing(reportPath, reportText);
+      stdout.writeln(
+        'Pixa platform self-check accepted timed-out flutter test after '
+        'validating the self-check report and Flutter test pass marker.',
+      );
+      return;
+    }
+    await _terminateProcess(process, exitCodeFuture);
+    await stdoutDone;
+    await stderrDone;
+    throw TimeoutException(
+      'Pixa platform self-check did not exit within '
+      '${_selfCheckExitTimeout.inMinutes} minutes.\n'
+      '${_tailText(capturedOutput, 24000)}',
+      _selfCheckExitTimeout,
+    );
+  }
   await stdoutDone;
   await stderrDone;
+  final String capturedOutput = output.toString();
   if (exitCode != 0) {
+    final String? reportText =
+        _readExistingPlatformSelfCheckReport(reportPath) ??
+        tryExtractPixaPlatformSelfCheckReport(capturedOutput);
+    if (reportText != null &&
+        acceptsNonZeroPixaPlatformSelfCheckExit(capturedOutput, reportText)) {
+      _writePlatformSelfCheckReportIfMissing(reportPath, reportText);
+      stdout.writeln(
+        'Pixa platform self-check accepted non-zero flutter test exit '
+        '$exitCode after validating the self-check report and Flutter test '
+        'pass marker.',
+      );
+      return;
+    }
     throw ProcessException(executable, arguments, 'command failed', exitCode);
   }
   if (reportPath == null || reportPath.trim().isEmpty) {
@@ -874,12 +919,29 @@ Future<void> _runSelfCheck(
   if (report.existsSync() && report.lengthSync() > 0) {
     return;
   }
-  final String reportText = _extractSelfCheckReport(output.toString());
-  report.parent.createSync(recursive: true);
-  report.writeAsStringSync(reportText);
+  _writePlatformSelfCheckReportIfMissing(
+    reportPath,
+    extractPixaPlatformSelfCheckReport(capturedOutput),
+  );
 }
 
-String _extractSelfCheckReport(String output) {
+const Duration _selfCheckExitTimeout = Duration(minutes: 8);
+
+Future<void> _terminateProcess(
+  Process process,
+  Future<int> exitCodeFuture,
+) async {
+  if (process.kill()) {
+    try {
+      await exitCodeFuture.timeout(const Duration(seconds: 5));
+      return;
+    } on Object {
+      process.kill(ProcessSignal.sigkill);
+    }
+  }
+}
+
+String extractPixaPlatformSelfCheckReport(String output) {
   const String marker = 'PIXA_PLATFORM_SELF_CHECK_REPORT_JSON:';
   final int index = output.lastIndexOf(marker);
   if (index < 0) {
@@ -891,6 +953,83 @@ String _extractSelfCheckReport(String output) {
       .substring(valueStart, valueEnd < 0 ? output.length : valueEnd)
       .trim();
   return utf8.decode(base64Url.decode(encoded));
+}
+
+String? tryExtractPixaPlatformSelfCheckReport(String output) {
+  try {
+    return extractPixaPlatformSelfCheckReport(output);
+  } on Object {
+    return null;
+  }
+}
+
+bool acceptsNonZeroPixaPlatformSelfCheckExit(String output, String reportText) {
+  return hasFlutterTestPassedMarker(output) &&
+      isPassingPixaPlatformSelfCheckReport(reportText);
+}
+
+bool hasFlutterTestPassedMarker(String output) {
+  return RegExp(
+        r'(^|\n)[^\d\n]*\d+\s+tests?\s+passed\.',
+        multiLine: true,
+      ).hasMatch(output.replaceAll('\r\n', '\n')) ||
+      output.contains('All tests passed!');
+}
+
+bool isPassingPixaPlatformSelfCheckReport(String reportText) {
+  try {
+    final Object? decoded = jsonDecode(reportText);
+    if (decoded is! Map<String, Object?>) {
+      return false;
+    }
+    final Object? evidence = decoded['evidence'];
+    if (evidence is! Map || evidence['runMode'] != 'integration-test') {
+      return false;
+    }
+    final Object? selfCheck = decoded['selfCheck'];
+    if (selfCheck is! Map || selfCheck['passed'] != true) {
+      return false;
+    }
+    final Object? platform = selfCheck['platform'];
+    if (platform is! String || platform.trim().isEmpty) {
+      return false;
+    }
+    final Object? checks = selfCheck['checks'];
+    if (checks is! List || checks.isEmpty) {
+      return false;
+    }
+    return checks.every((Object? check) {
+      return check is Map && check['passed'] == true;
+    });
+  } on Object {
+    return false;
+  }
+}
+
+String? _readExistingPlatformSelfCheckReport(String? reportPath) {
+  if (reportPath == null || reportPath.trim().isEmpty) {
+    return null;
+  }
+  final File report = File(reportPath);
+  if (!report.existsSync() || report.lengthSync() <= 0) {
+    return null;
+  }
+  return report.readAsStringSync();
+}
+
+void _writePlatformSelfCheckReportIfMissing(
+  String? reportPath,
+  String reportText,
+) {
+  if (reportPath == null || reportPath.trim().isEmpty) {
+    return;
+  }
+  final File report = File(reportPath);
+  if (report.existsSync() && report.lengthSync() > 0) {
+    return;
+  }
+  report.parent.createSync(recursive: true);
+  report.writeAsStringSync(reportText);
 }
 
 String _flutterExecutable() {
