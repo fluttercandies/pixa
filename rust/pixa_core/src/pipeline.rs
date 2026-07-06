@@ -4379,6 +4379,85 @@ mod tests {
     }
 
     #[test]
+    fn coalesces_video_frame_origin_fetch_without_merging_processed_variants() {
+        let _registry_guard = plugin_registry_test_guard();
+        clear_plugin_registry_for_test();
+        let mut capabilities = RuntimePluginCapabilities::hot_path();
+        capabilities.fetcher = true;
+        let executor = Arc::new(VideoFrameRuntimePluginExecutor::default());
+        register_plugin_module_with_executor(
+            RuntimePluginModule::built_in("pixa.video_frame.test", capabilities).with_routes(
+                RuntimePluginRoutes {
+                    fetcher_source_kinds: vec!["video-frame:platform".to_string()],
+                    ..RuntimePluginRoutes::default()
+                },
+            ),
+            executor.clone(),
+        )
+        .expect("video frame runtime fetcher should register");
+
+        let mut small_request = video_frame_request("video-frame-shared-small-final");
+        small_request.cache_mode = CacheMode::MemoryOnly;
+        small_request.processors =
+            vec!["resize(width=1,height=1,mode=exact,filter=nearest)".to_string()];
+        let mut large_request = video_frame_request("video-frame-shared-large-final");
+        large_request.cache_mode = CacheMode::MemoryOnly;
+        large_request.processors =
+            vec!["resize(width=2,height=2,mode=exact,filter=nearest)".to_string()];
+        assert_eq!(
+            small_request.encoded_cache_key,
+            large_request.encoded_cache_key
+        );
+        assert_ne!(small_request.cache_key, large_request.cache_key);
+        let barrier = Arc::new(Barrier::new(3));
+        let small_barrier = barrier.clone();
+        let large_barrier = barrier.clone();
+
+        let small = thread::spawn(move || {
+            small_barrier.wait();
+            load_image("", small_request, None).expect("small video frame variant should complete")
+        });
+        let large = thread::spawn(move || {
+            large_barrier.wait();
+            load_image("", large_request, None).expect("large video frame variant should complete")
+        });
+
+        barrier.wait();
+        let small_outcome = small.join().unwrap();
+        let large_outcome = large.join().unwrap();
+        let small_decoded =
+            image::load_from_memory(&small_outcome.bytes).expect("small variant should decode");
+        let large_decoded =
+            image::load_from_memory(&large_outcome.bytes).expect("large variant should decode");
+        let observed = executor.observed();
+
+        assert_eq!(executor.fetch_count.load(Ordering::Relaxed), 1);
+        assert_eq!(small_decoded.dimensions(), (1, 1));
+        assert_eq!(large_decoded.dimensions(), (2, 2));
+        assert_eq!(
+            small_outcome.source_label,
+            "processed:runtime-plugin:video-frame:platform"
+        );
+        assert_eq!(
+            large_outcome.source_label,
+            "processed:runtime-plugin:video-frame:platform"
+        );
+        assert!(memory_get_processed("video-frame-shared-small-final")
+            .expect("processed memory lookup should succeed")
+            .is_some());
+        assert!(memory_get_processed("video-frame-shared-large-final")
+            .expect("processed memory lookup should succeed")
+            .is_some());
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].source_kind, "video-frame:platform");
+        assert_eq!(observed[0].locator, "file:///clips/sample.mp4?token=secret");
+        assert_eq!(observed[0].timestamp_micros, 1_500_000);
+        assert!(observed[0].exact);
+        assert_eq!(observed[0].backend.as_deref(), Some("platform"));
+        clear_plugin_registry_for_test();
+    }
+
+    #[test]
     fn origin_fetch_key_separates_distinct_inline_payloads() {
         let request = bytes_request(RuntimeLimits::default());
         let first = minimal_gif(1, 0);
@@ -5620,6 +5699,33 @@ mod tests {
         }
     }
 
+    fn video_frame_request(cache_key: &str) -> RuntimeRequest {
+        RuntimeRequest {
+            source: RuntimeSource::VideoFrame {
+                locator: "file:///clips/sample.mp4?token=secret".to_string(),
+                timestamp_micros: 1_500_000,
+                exact: true,
+                backend: Some("platform".to_string()),
+            },
+            headers: BTreeMap::new(),
+            namespace: "test".to_string(),
+            cache_key: cache_key.to_string(),
+            encoded_cache_key: "video-frame-shared-origin".to_string(),
+            target_width: None,
+            target_height: None,
+            decoder_mime_type: None,
+            decoder_format_id: None,
+            cache_mode: CacheMode::NoStore,
+            ttl_ms: None,
+            private_cache: false,
+            processors: Vec::new(),
+            limits: RuntimeLimits::default(),
+            redirect_policy: RuntimeRedirectPolicy::default(),
+            priority: RuntimePriority::Normal,
+            retry: RuntimeRetryPolicy::default(),
+        }
+    }
+
     fn temp_cache_root(label: &str) -> String {
         let unique = TEST_ROOT_COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir()
@@ -6102,6 +6208,65 @@ mod tests {
     struct StaticRuntimePluginExecutor {
         decode_count: AtomicUsize,
         process_count: AtomicUsize,
+    }
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct ObservedVideoFrameFetch {
+        source_kind: String,
+        locator: String,
+        timestamp_micros: i64,
+        exact: bool,
+        backend: Option<String>,
+    }
+
+    #[derive(Default)]
+    struct VideoFrameRuntimePluginExecutor {
+        fetch_count: AtomicUsize,
+        observed: Mutex<Vec<ObservedVideoFrameFetch>>,
+    }
+
+    impl VideoFrameRuntimePluginExecutor {
+        fn observed(&self) -> Vec<ObservedVideoFrameFetch> {
+            self.observed
+                .lock()
+                .expect("video frame observations lock should not be poisoned")
+                .iter()
+                .map(|item| ObservedVideoFrameFetch {
+                    source_kind: item.source_kind.clone(),
+                    locator: item.locator.clone(),
+                    timestamp_micros: item.timestamp_micros,
+                    exact: item.exact,
+                    backend: item.backend.clone(),
+                })
+                .collect()
+        }
+    }
+
+    impl RuntimePluginExecutor for VideoFrameRuntimePluginExecutor {
+        fn fetch(
+            &self,
+            request: RuntimePluginFetchRequest<'_>,
+        ) -> RuntimeResult<Option<RuntimePluginOutput>> {
+            let video_frame = request.video_frame.expect("video frame spec is required");
+            assert_eq!(request.source_kind, "video-frame:platform");
+            assert!(request.max_output_bytes >= 128);
+            self.fetch_count.fetch_add(1, Ordering::Relaxed);
+            self.observed
+                .lock()
+                .expect("video frame observations lock should not be poisoned")
+                .push(ObservedVideoFrameFetch {
+                    source_kind: request.source_kind.to_string(),
+                    locator: request.locator.to_string(),
+                    timestamp_micros: video_frame.timestamp_micros,
+                    exact: video_frame.exact,
+                    backend: video_frame.backend.map(str::to_string),
+                });
+            thread::sleep(Duration::from_millis(150));
+            Ok(Some(RuntimePluginOutput::from_vec(
+                minimal_png(4, 4),
+                Some("image/png"),
+            )))
+        }
     }
 
     impl RuntimePluginExecutor for StaticRuntimePluginExecutor {
