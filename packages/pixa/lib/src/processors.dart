@@ -1,9 +1,121 @@
+/// Resize behavior for [PixaProcessors.resize].
+enum PixaResizeMode {
+  /// Preserve aspect ratio and fit within the supplied bounds.
+  fit,
+
+  /// Force the exact supplied output dimensions.
+  exact,
+}
+
+/// Resize sampling filter for runtime processors.
+enum PixaResizeFilter {
+  /// Nearest-neighbor sampling.
+  nearest,
+
+  /// Triangle/linear sampling.
+  triangle,
+
+  /// Catmull-Rom/cubic sampling.
+  catmullRom,
+
+  /// Gaussian sampling.
+  gaussian,
+
+  /// Lanczos3 sampling.
+  lanczos3,
+}
+
 /// Helpers for building stable runtime processor descriptors.
 ///
 /// Pixa keeps processor descriptors as strings so cache keys remain compact and
 /// stable across Dart and Rust. These helpers avoid typo-prone user code while
 /// preserving the same runtime pipeline.
 abstract final class PixaProcessors {
+  /// Resizes an image. At least one of [width] or [height] is required.
+  static String resize({
+    int? width,
+    int? height,
+    PixaResizeMode mode = PixaResizeMode.fit,
+    PixaResizeFilter filter = PixaResizeFilter.lanczos3,
+  }) {
+    if (width == null && height == null) {
+      throw ArgumentError('resize requires width or height.');
+    }
+    final List<String> args = <String>[];
+    if (width != null) {
+      args.add('width=${_checkPositiveInt(width, 'width')}');
+    }
+    if (height != null) {
+      args.add('height=${_checkPositiveInt(height, 'height')}');
+    }
+    args.add('mode=${_resizeMode(mode)}');
+    args.add('filter=${_resizeFilter(filter)}');
+    return 'resize(${args.join(',')})';
+  }
+
+  /// Resizes an image to an exact [width] and [height].
+  static String resizeExact(
+    int width,
+    int height, {
+    PixaResizeFilter filter = PixaResizeFilter.lanczos3,
+  }) {
+    return 'resizeExact(width=${_checkPositiveInt(width, 'width')},'
+        'height=${_checkPositiveInt(height, 'height')},'
+        'filter=${_resizeFilter(filter)})';
+  }
+
+  /// Crops a rectangle from the image.
+  static String crop({
+    required int x,
+    required int y,
+    required int width,
+    required int height,
+  }) {
+    return 'crop(x=${_checkNonNegativeInt(x, 'x')},'
+        'y=${_checkNonNegativeInt(y, 'y')},'
+        'width=${_checkPositiveInt(width, 'width')},'
+        'height=${_checkPositiveInt(height, 'height')})';
+  }
+
+  /// Crops a source tile and resizes it to decoded tile dimensions.
+  static String tileCropResize({
+    required int x,
+    required int y,
+    required int width,
+    required int height,
+    required int decodedWidth,
+    required int decodedHeight,
+    int sampleSize = 1,
+    PixaResizeFilter filter = PixaResizeFilter.lanczos3,
+  }) {
+    return 'tile(x=${_checkNonNegativeInt(x, 'x')},'
+        'y=${_checkNonNegativeInt(y, 'y')},'
+        'width=${_checkPositiveInt(width, 'width')},'
+        'height=${_checkPositiveInt(height, 'height')},'
+        'decodedWidth=${_checkPositiveInt(decodedWidth, 'decodedWidth')},'
+        'decodedHeight=${_checkPositiveInt(decodedHeight, 'decodedHeight')},'
+        'sampleSize=${_checkPositiveInt(sampleSize, 'sampleSize')},'
+        'filter=${_resizeFilter(filter)})';
+  }
+
+  /// Rotates by 0, 90, 180, or 270 degrees.
+  static String rotate(int degrees) {
+    if (degrees != 0 && degrees != 90 && degrees != 180 && degrees != 270) {
+      throw ArgumentError.value(
+        degrees,
+        'degrees',
+        'must be one of 0, 90, 180, or 270',
+      );
+    }
+    return 'rotate(degrees=$degrees)';
+  }
+
+  /// Applies a Gaussian blur. Range: 0..128.
+  static String blur(double sigma) {
+    _checkFiniteRange(sigma, 0, 128, 'sigma');
+    return 'blur(sigma=${_formatDouble(sigma)})';
+  }
+
   /// Mirrors pixels horizontally.
   static String flipHorizontal() => 'flipHorizontal()';
 
@@ -54,5 +166,40 @@ abstract final class PixaProcessors {
       return value.toStringAsFixed(1);
     }
     return value.toString();
+  }
+
+  static int _checkPositiveInt(int value, String name) {
+    if (value <= 0) {
+      throw RangeError.value(value, name, 'must be greater than zero');
+    }
+    return value;
+  }
+
+  static int _checkNonNegativeInt(int value, String name) {
+    if (value < 0) {
+      throw RangeError.value(
+        value,
+        name,
+        'must be greater than or equal to zero',
+      );
+    }
+    return value;
+  }
+
+  static String _resizeMode(PixaResizeMode mode) {
+    return switch (mode) {
+      PixaResizeMode.fit => 'fit',
+      PixaResizeMode.exact => 'exact',
+    };
+  }
+
+  static String _resizeFilter(PixaResizeFilter filter) {
+    return switch (filter) {
+      PixaResizeFilter.nearest => 'nearest',
+      PixaResizeFilter.triangle => 'triangle',
+      PixaResizeFilter.catmullRom => 'catmullrom',
+      PixaResizeFilter.gaussian => 'gaussian',
+      PixaResizeFilter.lanczos3 => 'lanczos3',
+    };
   }
 }

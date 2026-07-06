@@ -3,6 +3,42 @@ import 'package:pixa/pixa.dart';
 
 void main() {
   test('PixaProcessors builds stable runtime processor descriptors', () {
+    expect(
+      PixaProcessors.resize(
+        width: 64,
+        height: 48,
+        mode: PixaResizeMode.exact,
+        filter: PixaResizeFilter.nearest,
+      ),
+      'resize(width=64,height=48,mode=exact,filter=nearest)',
+    );
+    expect(
+      PixaProcessors.resize(width: 64),
+      'resize(width=64,mode=fit,filter=lanczos3)',
+    );
+    expect(
+      PixaProcessors.resizeExact(32, 24, filter: PixaResizeFilter.triangle),
+      'resizeExact(width=32,height=24,filter=triangle)',
+    );
+    expect(
+      PixaProcessors.crop(x: 1, y: 2, width: 3, height: 4),
+      'crop(x=1,y=2,width=3,height=4)',
+    );
+    expect(PixaProcessors.rotate(90), 'rotate(degrees=90)');
+    expect(PixaProcessors.blur(2.5), 'blur(sigma=2.5)');
+    expect(
+      PixaProcessors.tileCropResize(
+        x: 1,
+        y: 2,
+        width: 100,
+        height: 80,
+        decodedWidth: 50,
+        decodedHeight: 40,
+        sampleSize: 2,
+        filter: PixaResizeFilter.catmullRom,
+      ),
+      'tile(x=1,y=2,width=100,height=80,decodedWidth=50,decodedHeight=40,sampleSize=2,filter=catmullrom)',
+    );
     expect(PixaProcessors.flipHorizontal(), 'flipHorizontal()');
     expect(PixaProcessors.flipVertical(), 'flipVertical()');
     expect(PixaProcessors.grayscale(), 'grayscale()');
@@ -13,6 +49,30 @@ void main() {
   });
 
   test('PixaProcessors validates bounded runtime processor arguments', () {
+    expect(PixaProcessors.resize, throwsArgumentError);
+    expect(() => PixaProcessors.resize(width: 0), throwsRangeError);
+    expect(
+      () => PixaProcessors.crop(x: -1, y: 0, width: 1, height: 1),
+      throwsRangeError,
+    );
+    expect(
+      () => PixaProcessors.crop(x: 0, y: 0, width: 0, height: 1),
+      throwsRangeError,
+    );
+    expect(() => PixaProcessors.rotate(45), throwsArgumentError);
+    expect(() => PixaProcessors.blur(double.nan), throwsRangeError);
+    expect(
+      () => PixaProcessors.tileCropResize(
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+        decodedWidth: 1,
+        decodedHeight: 1,
+        sampleSize: 0,
+      ),
+      throwsRangeError,
+    );
     expect(() => PixaProcessors.brighten(256), throwsRangeError);
     expect(() => PixaProcessors.brighten(-256), throwsRangeError);
     expect(() => PixaProcessors.contrast(256), throwsRangeError);
