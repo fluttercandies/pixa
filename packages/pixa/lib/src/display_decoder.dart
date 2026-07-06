@@ -116,15 +116,17 @@ final class PixaDisplayDecoder {
     final PixaImageFormatCatalog formatCatalog = PixaImageFormatCatalog(
       registry: pipeline.registry,
     );
-    final _DisplayDecoderBackend decodeBackend = _effectiveBackendForPayload(
-      backend,
-      request,
-      load.bytes,
-      formatCatalog: formatCatalog,
-    );
+    var decodeBackend = backend;
     _DecodePermit? permit;
     Stopwatch? decodeClock;
     try {
+      decodeBackend = _effectiveBackendForPayload(
+        backend,
+        request,
+        load.bytes,
+        requestId: load.requestId,
+        formatCatalog: formatCatalog,
+      );
       _emit(
         pipeline,
         PixaEvent(
@@ -402,6 +404,7 @@ _DisplayDecoderBackend _effectiveBackendForPayload(
   _DisplayDecoderBackend selected,
   PixaRequest request,
   Uint8List bytes, {
+  required int requestId,
   required PixaImageFormatCatalog formatCatalog,
 }) {
   if (!selected.usesFlutterEngine) {
@@ -412,9 +415,28 @@ _DisplayDecoderBackend _effectiveBackendForPayload(
     formatId: request.decoderOptions['formatId'],
     mimeType: request.decoderOptions['mimeType'],
   );
-  if (route?.source == PixaImageFormatRouteSource.builtIn &&
-      route?.defaultRuntimeDisplay == true) {
+  if (route == null) {
+    throw PixaFailure(
+      requestId: requestId,
+      stage: PixaStage.decode,
+      safeMessage:
+          'Unsupported image format. Pixa only sends declared engine-backed formats to Flutter engine decode.',
+      retryability: PixaRetryability.notRetryable,
+    );
+  }
+  if (route.defaultRuntimeDisplay && route.capabilities.runtimeDisplay) {
     return const _RuntimeDisplayDecoderBackend();
+  }
+  if (!route.capabilities.engineDisplay) {
+    final String routeName =
+        route.formatId ?? route.mimeType ?? route.source.name;
+    throw PixaFailure(
+      requestId: requestId,
+      stage: PixaStage.decode,
+      safeMessage:
+          'Unsupported image format $routeName. No Pixa display backend is available for this route.',
+      retryability: PixaRetryability.notRetryable,
+    );
   }
   return selected;
 }

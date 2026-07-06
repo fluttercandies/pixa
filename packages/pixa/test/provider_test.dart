@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pixa/pixa_plugins.dart';
 import 'package:pixa/pixa_debug.dart';
 import 'package:pixa/pixa.dart';
 import 'package:pixa/src/image_format.dart';
@@ -119,6 +120,139 @@ void main() {
     expect(failure.durationMicros, isNotNull);
     expect(failure.durationMicros, greaterThanOrEqualTo(0));
   });
+
+  test(
+    'PixaProvider rejects unknown payload before Flutter engine decode',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-unknown-format-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      final List<PixaEvent> events = <PixaEvent>[];
+      await Pixa.configure(
+        PixaConfig(
+          cacheRootPath: cacheRoot.path,
+          observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+        ),
+      );
+      var engineDecodeCalls = 0;
+      final PixaProvider provider = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.custom(
+            'unknown-format',
+            () async => Uint8List.fromList('not an image'.codeUnits),
+          ),
+          cachePolicy: const PixaCachePolicy.noStore(),
+        ),
+      );
+      final ImageStreamCompleter completer = provider.loadImage(provider, (
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        engineDecodeCalls += 1;
+        throw StateError(
+          'unknown payload must not reach Flutter engine decode',
+        );
+      });
+      final Completer<Object> errorCompleter = Completer<Object>();
+      final ImageStreamListener listener = ImageStreamListener(
+        (ImageInfo image, bool synchronousCall) {
+          fail('unknown payload should not produce an ImageInfo');
+        },
+        onError: (Object error, StackTrace? stackTrace) {
+          if (!errorCompleter.isCompleted) {
+            errorCompleter.complete(error);
+          }
+        },
+      );
+
+      completer.addListener(listener);
+      final Object error = await errorCompleter.future.timeout(
+        const Duration(seconds: 5),
+      );
+      completer.removeListener(listener);
+
+      expect(engineDecodeCalls, 0);
+      expect(error, isA<PixaFailure>());
+      final PixaFailure failure = error as PixaFailure;
+      expect(failure.stage, PixaStage.decode);
+      expect(failure.retryability, PixaRetryability.notRetryable);
+      expect(failure.safeMessage, contains('supported image signature'));
+    },
+  );
+
+  test(
+    'PixaProvider rejects plugin output with no display backend before engine',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-plugin-unknown-format-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      final List<PixaEvent> events = <PixaEvent>[];
+      await Pixa.configure(
+        PixaConfig(
+          cacheRootPath: cacheRoot.path,
+          plugins: const <PixaPlugin>[_UnknownTranscodePlugin()],
+          observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+        ),
+      );
+      var engineDecodeCalls = 0;
+      final PixaProvider provider = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.custom(
+            'plugin-unknown-format',
+            () async => _minimalGif(),
+          ),
+          cachePolicy: const PixaCachePolicy.noStore(),
+          decoderOptions: const <String, Object?>{
+            'mimeType': 'image/pixa-unknown-transcode',
+          },
+          pluginExecutionPolicy:
+              const PixaPluginExecutionPolicy.runtimeFirstWithDart(),
+        ),
+      );
+      final ImageStreamCompleter completer = provider.loadImage(provider, (
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        engineDecodeCalls += 1;
+        throw StateError(
+          'plugin output without a display backend must not reach engine decode',
+        );
+      });
+      final Completer<Object> errorCompleter = Completer<Object>();
+      final ImageStreamListener listener = ImageStreamListener(
+        (ImageInfo image, bool synchronousCall) {
+          fail('unsupported plugin output should not produce an ImageInfo');
+        },
+        onError: (Object error, StackTrace? stackTrace) {
+          if (!errorCompleter.isCompleted) {
+            errorCompleter.complete(error);
+          }
+        },
+      );
+
+      completer.addListener(listener);
+      final Object error = await errorCompleter.future.timeout(
+        const Duration(seconds: 5),
+      );
+      completer.removeListener(listener);
+
+      expect(engineDecodeCalls, 0);
+      expect(error, isA<PixaFailure>());
+      final PixaFailure failure = error as PixaFailure;
+      expect(failure.stage, PixaStage.decode);
+      expect(failure.retryability, PixaRetryability.notRetryable);
+      expect(failure.safeMessage, contains('Unsupported image format'));
+      final PixaEvent event = events.singleWhere(
+        (PixaEvent event) => event.name == 'decode.failure',
+      );
+      expect(event.stage, PixaStage.decode);
+      expect(event.failure, same(failure));
+      expect(event.attributes['backend'], 'engine');
+      expect(event.attributes['execution'], 'flutter');
+    },
+  );
 
   test('PixaProvider limits concurrent Flutter decode callbacks', () async {
     final Directory cacheRoot = await Directory.systemTemp.createTemp(
@@ -1146,4 +1280,62 @@ List<int> _be32(int value) {
     (unsigned >> 8) & 0xff,
     unsigned & 0xff,
   ];
+}
+
+final class _UnknownTranscodePlugin implements PixaPlugin {
+  const _UnknownTranscodePlugin();
+
+  @override
+  String get id => 'unknown-transcode';
+
+  @override
+  PixaVersionConstraint get compatiblePixaVersions =>
+      const PixaVersionConstraint.any();
+
+  @override
+  void register(PixaRegistry registry) {
+    registry.registerDecoder(const _UnknownTranscodeDecoderDescriptor());
+  }
+}
+
+final class _UnknownTranscodeDecoderDescriptor
+    implements PixaDartDecoderDescriptor {
+  const _UnknownTranscodeDecoderDescriptor();
+
+  @override
+  String get id => 'unknown-transcode-decoder';
+
+  @override
+  PixaPluginExecutionKind get executionKind => PixaPluginExecutionKind.dart;
+
+  @override
+  Set<String> get mimeTypes => const <String>{'image/pixa-unknown-transcode'};
+
+  @override
+  Set<String> get formatIds => const <String>{};
+
+  @override
+  List<PixaDecoderSignature> get signatures => const <PixaDecoderSignature>[];
+
+  @override
+  PixaDecoderCapabilities get capabilities =>
+      const PixaDecoderCapabilities.dartBytes();
+
+  @override
+  int get priority => 1;
+
+  @override
+  PixaDecoder get decoder => const _UnknownTranscodeDecoder();
+}
+
+final class _UnknownTranscodeDecoder implements PixaDecoder {
+  const _UnknownTranscodeDecoder();
+
+  @override
+  PixaBytePayload decode(PixaBytePayload input, PixaExecutionContext context) {
+    return PixaBytePayload(
+      bytes: Uint8List.fromList('not an image'.codeUnits),
+      mimeType: 'image/pixa-unknown-output',
+    );
+  }
 }
