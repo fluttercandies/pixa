@@ -821,6 +821,7 @@ void _checkPublicExports(Directory root, List<String> failures) {
       'src/pixa.dart',
       'src/plugin.dart',
       'src/prefetch.dart',
+      'src/processors.dart',
       'src/progress.dart',
       'src/provider.dart',
       'src/request.dart',

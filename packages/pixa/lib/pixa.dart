@@ -19,6 +19,7 @@ export 'src/pipeline.dart'
     show PixaPipeline, PixaPipelineHandle, PixaPipelineLoad;
 export 'src/pixa.dart';
 export 'src/prefetch.dart';
+export 'src/processors.dart';
 export 'src/plugin.dart' show PixaPlugin, PixaVersionConstraint;
 export 'src/progress.dart';
 export 'src/provider.dart';
