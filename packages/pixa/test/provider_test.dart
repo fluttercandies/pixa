@@ -840,6 +840,74 @@ void main() {
   );
 
   test(
+    'common image processors automatically use runtime display decoding',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-runtime-common-processor-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      final List<PixaEvent> events = <PixaEvent>[];
+      await Pixa.configure(
+        PixaConfig(
+          cacheRootPath: cacheRoot.path,
+          observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+        ),
+      );
+
+      final PixaProvider provider = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.custom(
+            'runtime-common-processor',
+            () async => _minimalGif(),
+          ),
+          cachePolicy: const PixaCachePolicy.noStore(),
+          processors: const <String>['flipHorizontal()'],
+        ),
+      );
+      final ImageStreamCompleter completer = provider.loadImage(provider, (
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        throw StateError(
+          'common runtime processor output should not call engineDecode',
+        );
+      });
+      final Completer<ImageInfo> imageCompleter = Completer<ImageInfo>();
+      final Completer<Object> errorCompleter = Completer<Object>();
+      final ImageStreamListener listener = ImageStreamListener(
+        (ImageInfo image, bool synchronousCall) {
+          if (!imageCompleter.isCompleted) {
+            imageCompleter.complete(image);
+          }
+        },
+        onError: (Object error, StackTrace? stackTrace) {
+          if (!errorCompleter.isCompleted) {
+            errorCompleter.complete(error);
+          }
+        },
+      );
+
+      completer.addListener(listener);
+      final Object result = await Future.any<Object>(<Future<Object>>[
+        imageCompleter.future,
+        errorCompleter.future,
+      ]).timeout(const Duration(seconds: 5));
+      completer.removeListener(listener);
+      expect(result, isA<ImageInfo>());
+      final ImageInfo image = result as ImageInfo;
+      addTearDown(image.dispose);
+
+      expect(image.image.width, 1);
+      expect(image.image.height, 1);
+      final PixaEvent start = events.singleWhere(
+        (PixaEvent event) => event.name == 'decode.start',
+      );
+      expect(start.attributes['backend'], 'runtime-rgba');
+      expect(start.attributes['execution'], 'runtime');
+    },
+  );
+
+  test(
     'non-engine ICO MIME automatically uses runtime display decoding',
     () async {
       final Directory cacheRoot = await Directory.systemTemp.createTemp(

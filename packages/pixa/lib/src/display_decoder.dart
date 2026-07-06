@@ -607,6 +607,17 @@ bool _isRuntimeDisplayProcessor(String descriptor) {
     'tilecropresize' ||
     'rotate' ||
     'blur' ||
+    'fliphorizontal' ||
+    'fliph' ||
+    'flipvertical' ||
+    'flipv' ||
+    'grayscale' ||
+    'greyscale' ||
+    'invert' ||
+    'brighten' ||
+    'brightness' ||
+    'contrast' ||
+    'huerotate' ||
     'watermark' => true,
     _ => false,
   };

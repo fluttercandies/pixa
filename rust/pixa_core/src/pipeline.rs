@@ -2106,6 +2106,19 @@ enum RuntimeProcessor {
     Blur {
         sigma: f32,
     },
+    FlipHorizontal,
+    FlipVertical,
+    Grayscale,
+    Invert,
+    Brighten {
+        value: i32,
+    },
+    Contrast {
+        value: f32,
+    },
+    HueRotate {
+        degrees: i32,
+    },
     Watermark(WatermarkSpec),
 }
 
@@ -2164,8 +2177,9 @@ fn parse_processor_descriptor(descriptor: &str) -> RuntimeResult<RuntimeProcesso
         return Ok(RuntimeProcessor::Tile(tile));
     }
     let operation = processor_operation_label(descriptor);
+    let operation_key = normalize_processor_operation(&operation);
     let args = processor_args(descriptor);
-    match operation.as_str() {
+    match operation_key.as_str() {
         "resize" => {
             let width = optional_processor_u32(&args, "width")?;
             let height = optional_processor_u32(&args, "height")?;
@@ -2179,7 +2193,7 @@ fn parse_processor_descriptor(descriptor: &str) -> RuntimeResult<RuntimeProcesso
                 filter: parse_resize_filter(args.get("filter").map(String::as_str))?,
             })
         }
-        "resize_exact" | "resizeExact" => {
+        "resizeexact" => {
             let width = required_processor_u32(&args, "width")?;
             let height = required_processor_u32(&args, "height")?;
             Ok(RuntimeProcessor::Resize {
@@ -2195,7 +2209,7 @@ fn parse_processor_descriptor(descriptor: &str) -> RuntimeResult<RuntimeProcesso
             width: required_processor_u32(&args, "width")?,
             height: required_processor_u32(&args, "height")?,
         }),
-        "tile" | "tileCropResize" | "tile_crop_resize" => Ok(RuntimeProcessor::Tile(TileSpec {
+        "tile" | "tilecropresize" => Ok(RuntimeProcessor::Tile(TileSpec {
             x: required_processor_u32_allow_zero(&args, "x")?,
             y: required_processor_u32_allow_zero(&args, "y")?,
             width: required_processor_u32(&args, "width")?,
@@ -2211,6 +2225,19 @@ fn parse_processor_descriptor(descriptor: &str) -> RuntimeResult<RuntimeProcesso
         }),
         "blur" => Ok(RuntimeProcessor::Blur {
             sigma: required_processor_f32(&args, "sigma")?,
+        }),
+        "fliphorizontal" | "fliph" => Ok(RuntimeProcessor::FlipHorizontal),
+        "flipvertical" | "flipv" => Ok(RuntimeProcessor::FlipVertical),
+        "grayscale" | "greyscale" => Ok(RuntimeProcessor::Grayscale),
+        "invert" => Ok(RuntimeProcessor::Invert),
+        "brighten" | "brightness" => Ok(RuntimeProcessor::Brighten {
+            value: required_processor_i32_alias(&args, "value", "amount", -255, 255)?,
+        }),
+        "contrast" => Ok(RuntimeProcessor::Contrast {
+            value: required_processor_f32_range(&args, "value", -255.0, 255.0)?,
+        }),
+        "huerotate" => Ok(RuntimeProcessor::HueRotate {
+            degrees: required_processor_i32_alias(&args, "degrees", "angle", -360, 360)?,
         }),
         "watermark" => Ok(RuntimeProcessor::Watermark(WatermarkSpec {
             text: required_processor_text(&args, "text")?,
@@ -2229,6 +2256,14 @@ fn parse_processor_descriptor(descriptor: &str) -> RuntimeResult<RuntimeProcesso
             operation
         )),
     }
+}
+
+fn normalize_processor_operation(operation: &str) -> String {
+    operation
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 fn parse_tile_processor_descriptor(descriptor: &str) -> RuntimeResult<Option<TileSpec>> {
@@ -2532,6 +2567,72 @@ fn required_processor_f32(
         ));
     }
     Ok(parsed)
+}
+
+fn required_processor_f32_range(
+    args: &HashMap<String, String>,
+    name: &'static str,
+    min: f32,
+    max: f32,
+) -> RuntimeResult<f32> {
+    let Some(value) = args.get(name) else {
+        return processor_descriptor_error(format!("missing processor argument {name}"));
+    };
+    let parsed = value.parse::<f32>().map_err(|_| {
+        RuntimeError::new(
+            "processor",
+            false,
+            format!("processor argument {name} must be a finite number"),
+        )
+    })?;
+    if !parsed.is_finite() || parsed < min || parsed > max {
+        return processor_descriptor_error(format!(
+            "processor argument {name} must be in range {min}..{max}"
+        ));
+    }
+    Ok(parsed)
+}
+
+fn required_processor_i32_alias(
+    args: &HashMap<String, String>,
+    name: &'static str,
+    alias: &'static str,
+    min: i32,
+    max: i32,
+) -> RuntimeResult<i32> {
+    let value = optional_processor_i32_range(args, name, min, max)?;
+    let alias_value = optional_processor_i32_range(args, alias, min, max)?;
+    match (value, alias_value) {
+        (Some(value), Some(alias_value)) if value != alias_value => {
+            processor_descriptor_error(format!("processor arguments {name} and {alias} must match"))
+        }
+        (Some(value), _) | (_, Some(value)) => Ok(value),
+        (None, None) => processor_descriptor_error(format!("missing processor argument {name}")),
+    }
+}
+
+fn optional_processor_i32_range(
+    args: &HashMap<String, String>,
+    name: &'static str,
+    min: i32,
+    max: i32,
+) -> RuntimeResult<Option<i32>> {
+    let Some(value) = args.get(name) else {
+        return Ok(None);
+    };
+    let parsed = value.parse::<i32>().map_err(|_| {
+        RuntimeError::new(
+            "processor",
+            false,
+            format!("processor argument {name} must be an integer"),
+        )
+    })?;
+    if parsed < min || parsed > max {
+        return processor_descriptor_error(format!(
+            "processor argument {name} must be in range {min}..{max}"
+        ));
+    }
+    Ok(Some(parsed))
 }
 
 fn required_processor_text(
@@ -3095,6 +3196,17 @@ fn apply_processor(
             _ => return processor_descriptor_error("invalid rotate degrees"),
         },
         RuntimeProcessor::Blur { sigma } => image.blur(sigma),
+        RuntimeProcessor::FlipHorizontal => image.fliph(),
+        RuntimeProcessor::FlipVertical => image.flipv(),
+        RuntimeProcessor::Grayscale => image.grayscale(),
+        RuntimeProcessor::Invert => {
+            let mut inverted = image;
+            inverted.invert();
+            inverted
+        }
+        RuntimeProcessor::Brighten { value } => image.brighten(value),
+        RuntimeProcessor::Contrast { value } => image.adjust_contrast(value),
+        RuntimeProcessor::HueRotate { degrees } => image.huerotate(degrees),
         RuntimeProcessor::Watermark(ref spec) => apply_watermark_processor(image, spec),
     };
     validate_processor_dimensions(&processed, limits)?;
@@ -5079,6 +5191,93 @@ mod tests {
             .names()
             .iter()
             .any(|name| name == "process.regionDecode.complete"));
+    }
+
+    #[test]
+    fn applies_common_image_pixel_processors() {
+        let cases = [
+            (
+                "processor-flip-horizontal",
+                vec![
+                    "flipHorizontal()".to_string(),
+                    "crop(x=0,y=0,width=1,height=1)".to_string(),
+                ],
+                [120, 0, 0, 255],
+            ),
+            (
+                "processor-flip-vertical",
+                vec![
+                    "flipVertical()".to_string(),
+                    "crop(x=0,y=0,width=1,height=1)".to_string(),
+                ],
+                [0, 120, 0, 255],
+            ),
+            (
+                "processor-grayscale",
+                vec![
+                    "crop(x=3,y=0,width=1,height=1)".to_string(),
+                    "grayscale()".to_string(),
+                ],
+                [25, 25, 25, 255],
+            ),
+            (
+                "processor-invert",
+                vec![
+                    "crop(x=3,y=0,width=1,height=1)".to_string(),
+                    "invert()".to_string(),
+                ],
+                [135, 255, 255, 255],
+            ),
+            (
+                "processor-brighten",
+                vec![
+                    "crop(x=1,y=1,width=1,height=1)".to_string(),
+                    "brighten(value=30)".to_string(),
+                ],
+                [70, 70, 30, 255],
+            ),
+            (
+                "processor-contrast",
+                vec![
+                    "crop(x=3,y=0,width=1,height=1)".to_string(),
+                    "contrast(value=50)".to_string(),
+                ],
+                [110, 0, 0, 255],
+            ),
+        ];
+
+        for (cache_key, processors, expected_pixel) in cases {
+            let mut request = bytes_request(RuntimeLimits::default());
+            request.cache_key = cache_key.to_string();
+            request.encoded_cache_key = format!("{cache_key}-origin");
+            request.processors = processors;
+
+            let outcome = load_image("", request, Some(&png_rgba_4x4()))
+                .unwrap_or_else(|error| panic!("{cache_key} should process: {error:?}"));
+            let decoded =
+                image::load_from_memory(&outcome.bytes).expect("processed PNG should decode");
+            let rgba = decoded.to_rgba8();
+
+            assert_eq!(decoded.dimensions(), (1, 1), "{cache_key}");
+            assert_eq!(rgba.get_pixel(0, 0).0, expected_pixel, "{cache_key}");
+        }
+
+        let mut hue_request = bytes_request(RuntimeLimits::default());
+        hue_request.cache_key = "processor-hue-rotate".to_string();
+        hue_request.encoded_cache_key = "processor-hue-rotate-origin".to_string();
+        hue_request.processors = vec![
+            "crop(x=3,y=0,width=1,height=1)".to_string(),
+            "hueRotate(degrees=120)".to_string(),
+        ];
+        let hue_outcome =
+            load_image("", hue_request, Some(&png_rgba_4x4())).expect("hue rotate should process");
+        let hue_decoded =
+            image::load_from_memory(&hue_outcome.bytes).expect("processed PNG should decode");
+        let hue_pixel = hue_decoded.to_rgba8().get_pixel(0, 0).0;
+
+        assert_eq!(hue_decoded.dimensions(), (1, 1));
+        assert_ne!(hue_pixel, [120, 0, 0, 255]);
+        assert_eq!(hue_pixel[3], 255);
     }
 
     #[test]
