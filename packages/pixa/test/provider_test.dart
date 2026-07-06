@@ -256,6 +256,69 @@ void main() {
     },
   );
 
+  test(
+    'PixaProvider suppresses pipeline cancel errors after last listener removal',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-pipeline-cancel-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      await Pixa.configure(PixaConfig(cacheRootPath: cacheRoot.path));
+
+      final FlutterExceptionHandler? previousOnError = FlutterError.onError;
+      final List<Object> cancelErrors = <Object>[];
+      final List<Object> unexpectedErrors = <Object>[];
+      FlutterError.onError = (FlutterErrorDetails details) {
+        final Object exception = details.exception;
+        if (exception is PixaFailure && exception.stage == PixaStage.cancel) {
+          cancelErrors.add(exception);
+          return;
+        }
+        unexpectedErrors.add(exception);
+      };
+      addTearDown(() {
+        FlutterError.onError = previousOnError;
+      });
+
+      final Completer<void> fetchStarted = Completer<void>();
+      final Completer<Uint8List> pendingBytes = Completer<Uint8List>();
+      final List<Object> listenerErrors = <Object>[];
+      final PixaProvider provider = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.custom('pipeline-cancel', () async {
+            fetchStarted.complete();
+            return pendingBytes.future;
+          }),
+          cachePolicy: const PixaCachePolicy.noStore(),
+        ),
+      );
+      final ImageStreamCompleter completer = provider.loadImage(provider, (
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        throw StateError('cancelled provider load must not decode');
+      });
+      final ImageStreamListener listener = ImageStreamListener(
+        (ImageInfo image, bool synchronousCall) {
+          fail('cancelled provider load should not produce an image');
+        },
+        onError: (Object error, StackTrace? stackTrace) {
+          listenerErrors.add(error);
+        },
+      );
+
+      completer.addListener(listener);
+      await fetchStarted.future.timeout(const Duration(seconds: 5));
+      completer.removeListener(listener);
+      pendingBytes.complete(_minimalGif());
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(listenerErrors, isEmpty);
+      expect(cancelErrors, isEmpty);
+      expect(unexpectedErrors, isEmpty);
+    },
+  );
+
   test('PixaProvider limits concurrent Flutter decode callbacks', () async {
     final Directory cacheRoot = await Directory.systemTemp.createTemp(
       'pixa-provider-decode-limit-',

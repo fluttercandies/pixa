@@ -110,16 +110,18 @@ final class PixaDisplayDecoder {
     required Future<void> cancelled,
     required bool Function() isCancelled,
   }) async {
-    final PixaDisplayPipelineLoad pipelineLoad = await startLoad();
-    final PixaPipeline pipeline = pipelineLoad.pipeline;
-    final PixaPipelineLoad load = pipelineLoad.load;
-    final PixaImageFormatCatalog formatCatalog = PixaImageFormatCatalog(
-      registry: pipeline.registry,
-    );
+    PixaPipeline? pipeline;
+    PixaPipelineLoad? load;
     var decodeBackend = backend;
     _DecodePermit? permit;
     Stopwatch? decodeClock;
     try {
+      final PixaDisplayPipelineLoad pipelineLoad = await startLoad();
+      pipeline = pipelineLoad.pipeline;
+      load = pipelineLoad.load;
+      final PixaImageFormatCatalog formatCatalog = PixaImageFormatCatalog(
+        registry: pipeline.registry,
+      );
       decodeBackend = _effectiveBackendForPayload(
         backend,
         request,
@@ -190,22 +192,27 @@ final class PixaDisplayDecoder {
       await _completionGate.wait(maxPerFrame: maxCompletionsPerFrame);
       return codec;
     } on _DecodeCancelled {
+      final PixaPipeline? currentPipeline = pipeline;
+      final PixaPipelineLoad? currentLoad = load;
+      if (currentPipeline == null || currentLoad == null) {
+        rethrow;
+      }
       throw PixaFailure(
-        requestId: load.requestId,
+        requestId: currentLoad.requestId,
         stage: PixaStage.cancel,
         safeMessage: 'Pixa decode was cancelled before image delivery.',
         retryability: PixaRetryability.notRetryable,
       );
     } on _DecodeQueueFull {
       final PixaFailure failure = PixaFailure(
-        requestId: load.requestId,
+        requestId: load!.requestId,
         stage: PixaStage.decode,
         safeMessage:
             'Pixa decode queue is full. Increase maxQueuedDecodes or reduce simultaneous image loads.',
         retryability: PixaRetryability.notRetryable,
       );
       _emitFailure(
-        pipeline,
+        pipeline!,
         request,
         load,
         decodeBackend,
@@ -214,21 +221,39 @@ final class PixaDisplayDecoder {
       );
       throw failure;
     } on PixaFailure catch (failure) {
-      _emitFailure(
-        pipeline,
-        request,
-        load,
-        decodeBackend,
-        failure,
-        decodeClock,
-      );
+      if (isCancelled() && failure.stage == PixaStage.cancel) {
+        throw const _DecodeCancelled();
+      }
+      final PixaPipeline? currentPipeline = pipeline;
+      final PixaPipelineLoad? currentLoad = load;
+      if (currentPipeline != null && currentLoad != null) {
+        _emitFailure(
+          currentPipeline,
+          request,
+          currentLoad,
+          decodeBackend,
+          failure,
+          decodeClock,
+        );
+      }
       rethrow;
     } on Object {
-      _emitFailure(pipeline, request, load, decodeBackend, null, decodeClock);
+      final PixaPipeline? currentPipeline = pipeline;
+      final PixaPipelineLoad? currentLoad = load;
+      if (currentPipeline != null && currentLoad != null) {
+        _emitFailure(
+          currentPipeline,
+          request,
+          currentLoad,
+          decodeBackend,
+          null,
+          decodeClock,
+        );
+      }
       rethrow;
     } finally {
       permit?.release();
-      load.dispose();
+      load?.dispose();
     }
   }
 
@@ -700,7 +725,7 @@ final class _EngineDisplayDecoderBackend implements _DisplayDecoderBackend {
         options: animationOptions,
       );
     }
-    return MultiFrameImageStreamCompleter(
+    return _PixaMultiFrameImageStreamCompleter(
       codec: codec,
       scale: scale,
       debugLabel: debugLabel,
@@ -734,6 +759,41 @@ final class _EngineDisplayDecoderBackend implements _DisplayDecoderBackend {
       },
     );
   }
+}
+
+final class _PixaMultiFrameImageStreamCompleter
+    extends MultiFrameImageStreamCompleter {
+  _PixaMultiFrameImageStreamCompleter({
+    required super.codec,
+    required super.scale,
+    super.debugLabel,
+    super.informationCollector,
+  });
+
+  @override
+  void reportError({
+    DiagnosticsNode? context,
+    required Object exception,
+    StackTrace? stack,
+    InformationCollector? informationCollector,
+    bool silent = false,
+  }) {
+    if (!hasListeners && _isPixaCancellation(exception)) {
+      return;
+    }
+    super.reportError(
+      context: context,
+      exception: exception,
+      stack: stack,
+      informationCollector: informationCollector,
+      silent: silent,
+    );
+  }
+}
+
+bool _isPixaCancellation(Object exception) {
+  return exception is _DecodeCancelled ||
+      exception is PixaFailure && exception.stage == PixaStage.cancel;
 }
 
 /// Image stream completer that lets Pixa control animated frame scheduling.
@@ -799,6 +859,26 @@ final class PixaControlledAnimatedImageStreamCompleter
     if (!hasListeners) {
       _cancelTimer();
     }
+  }
+
+  @override
+  void reportError({
+    DiagnosticsNode? context,
+    required Object exception,
+    StackTrace? stack,
+    InformationCollector? informationCollector,
+    bool silent = false,
+  }) {
+    if (!hasListeners && _isPixaCancellation(exception)) {
+      return;
+    }
+    super.reportError(
+      context: context,
+      exception: exception,
+      stack: stack,
+      informationCollector: informationCollector,
+      silent: silent,
+    );
   }
 
   @override
