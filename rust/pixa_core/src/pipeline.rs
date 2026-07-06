@@ -2106,6 +2106,9 @@ enum RuntimeProcessor {
     Blur {
         sigma: f32,
     },
+    FastBlur {
+        sigma: f32,
+    },
     FlipHorizontal,
     FlipVertical,
     Grayscale,
@@ -2228,6 +2231,9 @@ fn parse_processor_descriptor(descriptor: &str) -> RuntimeResult<RuntimeProcesso
             degrees: parse_rotate_degrees(&args)?,
         }),
         "blur" => Ok(RuntimeProcessor::Blur {
+            sigma: required_processor_f32(&args, "sigma")?,
+        }),
+        "fastblur" => Ok(RuntimeProcessor::FastBlur {
             sigma: required_processor_f32(&args, "sigma")?,
         }),
         "fliphorizontal" | "fliph" => Ok(RuntimeProcessor::FlipHorizontal),
@@ -3219,6 +3225,7 @@ fn apply_processor(
             _ => return processor_descriptor_error("invalid rotate degrees"),
         },
         RuntimeProcessor::Blur { sigma } => image.blur(sigma),
+        RuntimeProcessor::FastBlur { sigma } => image.fast_blur(sigma),
         RuntimeProcessor::FlipHorizontal => image.fliph(),
         RuntimeProcessor::FlipVertical => image.flipv(),
         RuntimeProcessor::Grayscale => image.grayscale(),
@@ -5275,6 +5282,14 @@ mod tests {
                     "crop(x=1,y=1,width=1,height=1)".to_string(),
                 ],
                 [38, 38, 0, 255],
+            ),
+            (
+                "processor-fast-blur",
+                vec![
+                    "fastBlur(sigma=1.0)".to_string(),
+                    "crop(x=1,y=1,width=1,height=1)".to_string(),
+                ],
+                [47, 47, 0, 255],
             ),
         ];
 

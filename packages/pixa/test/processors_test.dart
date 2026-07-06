@@ -26,6 +26,7 @@ void main() {
     );
     expect(PixaProcessors.rotate(90), 'rotate(degrees=90)');
     expect(PixaProcessors.blur(2.5), 'blur(sigma=2.5)');
+    expect(PixaProcessors.fastBlur(1.5), 'fastBlur(sigma=1.5)');
     expect(
       PixaProcessors.tileCropResize(
         x: 1,
@@ -65,6 +66,8 @@ void main() {
     );
     expect(() => PixaProcessors.rotate(45), throwsArgumentError);
     expect(() => PixaProcessors.blur(double.nan), throwsRangeError);
+    expect(() => PixaProcessors.fastBlur(-0.1), throwsRangeError);
+    expect(() => PixaProcessors.fastBlur(double.nan), throwsRangeError);
     expect(
       () => PixaProcessors.tileCropResize(
         x: 0,

@@ -116,6 +116,12 @@ abstract final class PixaProcessors {
     return 'blur(sigma=${_formatDouble(sigma)})';
   }
 
+  /// Applies a faster approximate Gaussian blur. Range: 0..128.
+  static String fastBlur(double sigma) {
+    _checkFiniteRange(sigma, 0, 128, 'sigma');
+    return 'fastBlur(sigma=${_formatDouble(sigma)})';
+  }
+
   /// Mirrors pixels horizontally.
   static String flipHorizontal() => 'flipHorizontal()';
 

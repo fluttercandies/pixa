@@ -604,6 +604,7 @@ bool _isRuntimeDisplayProcessor(String descriptor) {
     'tilecropresize' ||
     'rotate' ||
     'blur' ||
+    'fastblur' ||
     'fliphorizontal' ||
     'fliph' ||
     'flipvertical' ||
