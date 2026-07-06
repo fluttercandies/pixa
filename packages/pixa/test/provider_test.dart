@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pixa/pixa_plugins.dart';
@@ -349,6 +350,110 @@ void main() {
     expect(decodeCalls, 2);
     expect(maxActiveDecodes, 1);
   });
+
+  test(
+    'PixaProvider does not report image errors when gated completion is cancelled',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-completion-cancel-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      await Pixa.configure(
+        PixaConfig(
+          cacheRootPath: cacheRoot.path,
+          decodeConcurrency: 2,
+          maxImageCompletionsPerFrame: 1,
+        ),
+      );
+
+      final FlutterExceptionHandler? previousOnError = FlutterError.onError;
+      final List<FlutterErrorDetails> cancelErrors = <FlutterErrorDetails>[];
+      final List<FlutterErrorDetails> unexpectedErrors =
+          <FlutterErrorDetails>[];
+      FlutterError.onError = (FlutterErrorDetails details) {
+        final Object exception = details.exception;
+        if (exception is PixaFailure && exception.stage == PixaStage.cancel) {
+          cancelErrors.add(details);
+          return;
+        }
+        unexpectedErrors.add(details);
+      };
+      addTearDown(() {
+        FlutterError.onError = previousOnError;
+      });
+
+      final Completer<void> firstDecoded = Completer<void>();
+      final Completer<void> secondDecoded = Completer<void>();
+
+      Future<ui.Codec> firstDecode(
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        final ui.Codec codec = await ui.instantiateImageCodec(_minimalGif());
+        firstDecoded.complete();
+        return codec;
+      }
+
+      Future<ui.Codec> secondDecode(
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        await firstDecoded.future;
+        final ui.Codec codec = await ui.instantiateImageCodec(_minimalGif());
+        secondDecoded.complete();
+        return codec;
+      }
+
+      final PixaProvider first = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.custom(
+            'completion-cancel-a',
+            () async => _minimalGif(),
+          ),
+          cachePolicy: const PixaCachePolicy.noStore(),
+        ),
+      );
+      final PixaProvider second = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.custom(
+            'completion-cancel-b',
+            () async => _minimalGif(),
+          ),
+          cachePolicy: const PixaCachePolicy.noStore(),
+        ),
+      );
+      final ImageStreamCompleter firstCompleter = first.loadImage(
+        first,
+        firstDecode,
+      );
+      final ImageStreamCompleter secondCompleter = second.loadImage(
+        second,
+        secondDecode,
+      );
+      final ImageStreamListener firstListener = ImageStreamListener((
+        ImageInfo image,
+        bool synchronousCall,
+      ) {
+        image.dispose();
+      });
+      final ImageStreamListener secondListener = ImageStreamListener((
+        ImageInfo image,
+        bool synchronousCall,
+      ) {
+        image.dispose();
+      });
+
+      firstCompleter.addListener(firstListener);
+      secondCompleter.addListener(secondListener);
+      await secondDecoded.future.timeout(const Duration(seconds: 5));
+      secondCompleter.removeListener(secondListener);
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      firstCompleter.removeListener(firstListener);
+
+      expect(cancelErrors, isEmpty);
+      expect(unexpectedErrors, isEmpty);
+    },
+  );
 
   test(
     'PixaProvider rejects decode work when queued decode budget is full',

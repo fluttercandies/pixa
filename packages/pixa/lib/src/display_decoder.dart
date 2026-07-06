@@ -187,16 +187,7 @@ final class PixaDisplayDecoder {
       );
       permit.release();
       permit = null;
-      try {
-        await _completionGate.wait(
-          maxPerFrame: maxCompletionsPerFrame,
-          cancelled: cancelled,
-          isCancelled: isCancelled,
-        );
-      } on Object {
-        codec.dispose();
-        rethrow;
-      }
+      await _completionGate.wait(maxPerFrame: maxCompletionsPerFrame);
       return codec;
     } on _DecodeCancelled {
       throw PixaFailure(
@@ -1068,15 +1059,8 @@ final class _ImageCompletionGate {
     );
   }
 
-  Future<void> wait({
-    required int maxPerFrame,
-    required Future<void> cancelled,
-    required bool Function() isCancelled,
-  }) {
+  Future<void> wait({required int maxPerFrame}) {
     final int frameBudget = maxPerFrame.clamp(1, 256).toInt();
-    if (isCancelled()) {
-      return Future<void>.error(const _DecodeCancelled());
-    }
     _scheduleFrameReset();
     if (_queue.isEmpty && _releasedThisFrame < frameBudget) {
       _releasedThisFrame++;
@@ -1084,15 +1068,8 @@ final class _ImageCompletionGate {
     }
     final _QueuedImageCompletion queued = _QueuedImageCompletion(
       maxPerFrame: frameBudget,
-      isCancelled: isCancelled,
     );
     _queue.add(queued);
-    unawaited(
-      cancelled.then((_) {
-        queued.cancel();
-        _scheduleFrameReset();
-      }),
-    );
     return queued.future;
   }
 
@@ -1102,9 +1079,8 @@ final class _ImageCompletionGate {
     }
     _frameScheduled = true;
     _frameFallbackTimer?.cancel();
-    // Flutter frame callbacks cannot be cancelled. A cancellable time-slice
-    // keeps bursty image delivery paced without leaving transient callbacks
-    // behind when the last listener is disposed before the next frame.
+    // Flutter frame callbacks cannot be cancelled. The time-slice fallback keeps
+    // bursty image delivery paced without leaving transient callbacks behind.
     _frameFallbackTimer = Timer(const Duration(milliseconds: 16), () {
       if (_frameScheduled) {
         _handleFrameBoundary();
@@ -1129,11 +1105,6 @@ final class _ImageCompletionGate {
   void _pump() {
     while (_queue.isNotEmpty) {
       final _QueuedImageCompletion queued = _queue.first;
-      if (queued.cancelled || queued.isCancelled()) {
-        _queue.removeFirst();
-        queued.completeError(const _DecodeCancelled());
-        continue;
-      }
       if (_releasedThisFrame >= queued.maxPerFrame) {
         return;
       }
@@ -1157,36 +1128,16 @@ final class _ImageCompletionGateSnapshot {
 }
 
 final class _QueuedImageCompletion {
-  _QueuedImageCompletion({
-    required this.maxPerFrame,
-    required this.isCancelled,
-  });
+  _QueuedImageCompletion({required this.maxPerFrame});
 
   final int maxPerFrame;
-  final bool Function() isCancelled;
   final Completer<void> _completer = Completer<void>.sync();
-  var _isCancelled = false;
 
   Future<void> get future => _completer.future;
-
-  bool get cancelled => _isCancelled;
-
-  void cancel() {
-    if (_isCancelled || _completer.isCompleted) {
-      return;
-    }
-    _isCancelled = true;
-  }
 
   void complete() {
     if (!_completer.isCompleted) {
       _completer.complete();
-    }
-  }
-
-  void completeError(Object error) {
-    if (!_completer.isCompleted) {
-      _completer.completeError(error);
     }
   }
 }
