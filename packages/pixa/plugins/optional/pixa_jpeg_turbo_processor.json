@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "modules": [
+    {
+      "moduleId": "pixa.processor.jpeg_turbo",
+      "packageName": "pixa",
+      "deployment": "hostLinkedPluginModule",
+      "abiVersion": 1,
+      "implementationLanguage": "rust",
+      "entrypointSymbol": "pixa_jpeg_turbo_processor_plugin_init",
+      "capabilities": ["processor"],
+      "processorOperations": ["tile:jpeg"],
+      "hostManagedRuntime": true,
+      "binaryMessages": true,
+      "ownedBuffers": true,
+      "streamHandles": true
+    }
+  ]
+}

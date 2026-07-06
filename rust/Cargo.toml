@@ -1,0 +1,15 @@
+[workspace]
+members = ["pixa_core", "pixa_runtime"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/fluttercandies/pixa"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

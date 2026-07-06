@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "modules": [
+    {
+      "moduleId": "pixa.processor.webp",
+      "packageName": "pixa",
+      "deployment": "hostLinkedPluginModule",
+      "abiVersion": 1,
+      "implementationLanguage": "rust",
+      "entrypointSymbol": "pixa_webp_processor_plugin_init",
+      "capabilities": ["processor"],
+      "processorOperations": ["tile:webp"],
+      "hostManagedRuntime": true,
+      "binaryMessages": true,
+      "ownedBuffers": true,
+      "streamHandles": true
+    }
+  ]
+}

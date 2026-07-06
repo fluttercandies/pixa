@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "modules": [
+    {
+      "moduleId": "pixa.cache_store",
+      "packageName": "pixa",
+      "deployment": "builtInHostModule",
+      "abiVersion": 1,
+      "implementationLanguage": "rust",
+      "capabilities": ["cacheStore"],
+      "cacheStoreNamespaces": ["default"],
+      "hostManagedRuntime": true,
+      "binaryMessages": true,
+      "ownedBuffers": true,
+      "streamHandles": true
+    },
+    {
+      "moduleId": "pixa.fetcher.s3",
+      "packageName": "pixa_fetcher_s3",
+      "deployment": "builtInHostModule",
+      "abiVersion": 1,
+      "implementationLanguage": "rust",
+      "capabilities": ["fetcher"],
+      "fetcherSourceKinds": ["s3", "s3-object"],
+      "hostManagedRuntime": true,
+      "binaryMessages": true,
+      "ownedBuffers": true,
+      "streamHandles": true
+    },
+    {
+      "moduleId": "pixa.decoder.qoi",
+      "packageName": "pixa",
+      "deployment": "hostLinkedPluginModule",
+      "abiVersion": 1,
+      "implementationLanguage": "rust",
+      "entrypointSymbol": "pixa_qoi_decoder_plugin_init",
+      "capabilities": ["decoder"],
+      "decoderMimeTypes": ["image/qoi", "image/x-qoi"],
+      "decoderCapabilities": {
+        "metadataProbe": true,
+        "staticDecode": true,
+        "animatedDecode": false,
+        "progressiveDecode": false,
+        "regionDecode": false,
+        "processorInput": true,
+        "streamingInput": true,
+        "defaultRuntimeDisplay": true,
+        "zeroCopyInput": true,
+        "ownedOutputBuffers": true,
+        "stable": true
+      },
+      "hostManagedRuntime": true,
+      "binaryMessages": true,
+      "ownedBuffers": true,
+      "streamHandles": true
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+name: pixa
+
+packages:
+  - packages/**
+  - examples/**
+
+command:
+  bootstrap:
+    usePubspecOverrides: true
+
+scripts:
+  format:
+    run: dart format .
+    description: Format Dart sources in the workspace.
+  analyze:
+    run: melos exec --fail-fast -- "dart analyze ."
+    description: Run static analysis for each package.
+  test:
+    run: melos exec --dir-exists=test --fail-fast --concurrency=1 -- "flutter test --concurrency=1"
+    description: Run Flutter tests for packages with a test directory.
+  test:integration:
+    run: melos exec --scope=pixa --concurrency=1 -- "flutter test test/integration"
+    description: Run Pixa package integration smoke tests.
+  test:golden:
+    run: melos exec --scope=pixa --concurrency=1 -- "flutter test test/pixa_image_golden_test.dart"
+    description: Run Pixa golden tests.
+  test:rust:
+    run: cargo test --manifest-path rust/Cargo.toml --all
+    description: Run Rust tests.
+  rust:fmt:
+    run: cargo fmt --manifest-path rust/Cargo.toml --all --check
+    description: Check Rust formatting.
+  rust:clippy:
+    run: cargo clippy --manifest-path rust/Cargo.toml --all-targets --all-features -- -D warnings
+    description: Run Rust clippy with warnings denied.
+  audit:rust:
+    run: cargo audit -f rust/Cargo.lock -D warnings
+    description: Audit Rust dependencies with RustSec advisories.
+  benchmark:rust:
+    run: cargo run --release --manifest-path rust/Cargo.toml -p pixa_core --example core_benchmark && cargo run --release --manifest-path rust/Cargo.toml -p pixa_runtime --example runtime_benchmark
+    description: Run Rust runtime hot-path benchmarks.
+  benchmark:dart:
+    run: melos exec --scope=pixa --concurrency=1 -- "flutter test benchmark/predictive_prefetch_benchmark_test.dart"
+    description: Run Dart/Flutter hot-path benchmarks.
+  benchmark:report:
+    run: dart run tool/pixa_benchmark_report.dart
+    description: Generate a local benchmark report across Rust and Flutter hot paths.
+  guard:
+    run: dart run tool/pixa_guard.dart
+    description: Enforce Pixa architecture and hot-path constraints.
+  platform:self-check:
+    run: dart run tool/pixa_platform_self_check.dart
+    description: Run runtime platform self-check and write a JSON report.
+  platform:evidence:self-test:
+    run: dart run tool/pixa_platform_evidence_self_test.dart
+    description: Run platform evidence verifier fixture tests.
+  platform:evidence:desktop:
+    run: dart run tool/pixa_platform_evidence.dart --require-platforms=linux,macos,windows --require-run-mode=integration-test --require-native-modules=jpeg-turbo-roi,webp-roi
+    description: Validate collected Linux, macOS, and Windows native ROI self-check reports.
+  platform:evidence:ci:
+    run: dart run tool/pixa_platform_evidence.dart --require-platforms=android,ios,linux,macos,windows --require-run-mode=integration-test --require-native-modules=jpeg-turbo-roi,webp-roi --require-example-smoke
+    description: Validate hosted CI native ROI self-check and example smoke reports.
+  release:preflight:
+    run: dart run tool/pixa_release_preflight.dart
+    description: Run the local release preflight gate.
+  codegen:
+    run: dart --version
+    packageFilters:
+      scope: pixa
+    description: No generated bindings are required for the hand-written runtime ABI.
+  example:
+    run: flutter analyze examples/pixa_gallery
+    description: Smoke check the gallery example.
+  build:android:
+    run: dart run tool/pixa_platform_build.dart --platform=android
+    description: Build a temporary Android app against Pixa runtime assets.
+  build:ios:
+    run: dart run tool/pixa_platform_build.dart --platform=ios
+    description: Build a temporary iOS app against Pixa runtime assets.
+  build:linux:
+    run: dart run tool/pixa_platform_build.dart --platform=linux
+    description: Build a temporary Linux app against Pixa runtime assets.
+  build:macos:
+    run: dart run tool/pixa_platform_build.dart --platform=macos
+    description: Build a temporary macOS app against Pixa runtime assets.
+  build:windows:
+    run: dart run tool/pixa_platform_build.dart --platform=windows
+    description: Build a temporary Windows app against Pixa runtime assets.

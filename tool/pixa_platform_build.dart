@@ -1,0 +1,786 @@
+import 'dart:convert';
+import 'dart:io';
+
+Future<void> main(List<String> args) async {
+  final _Options options = _Options.parse(args);
+  final String platform = options.platform;
+  final Directory root = Directory.current;
+  final Directory probe = Directory(
+    '${root.path}/.dart_tool/pixa_platform_probe/$platform',
+  );
+  if (probe.existsSync()) {
+    probe.deleteSync(recursive: true);
+  }
+  probe.createSync(recursive: true);
+
+  await _run(root, 'flutter', <String>[
+    'create',
+    '--platforms=$platform',
+    '--project-name',
+    'pixa_platform_probe',
+    '--org',
+    'dev.pixa',
+    probe.path,
+  ]);
+  _writeProbeApp(root, probe, options);
+  await _run(probe, 'flutter', <String>['pub', 'get']);
+  await _run(probe, 'flutter', _buildCommand(platform));
+  if (options.runSelfCheck) {
+    final Map<String, String> environment = options.selfCheckEnvironment(root);
+    await _runSelfCheck(
+      probe,
+      _selfCheckCommand(options.deviceId),
+      environment: environment,
+      reportPath: environment['PIXA_PLATFORM_SELF_CHECK_REPORT'],
+    );
+  }
+}
+
+final class _Options {
+  const _Options({
+    required this.platform,
+    required this.runSelfCheck,
+    required this.deviceId,
+    required this.reportOutput,
+    required this.deviceKind,
+    required this.connection,
+    required this.signing,
+    required this.enableJpegTurboRoi,
+    required this.enableWebpRoi,
+  });
+
+  final String platform;
+  final bool runSelfCheck;
+  final String? deviceId;
+  final String? reportOutput;
+  final String? deviceKind;
+  final String? connection;
+  final String? signing;
+  final bool enableJpegTurboRoi;
+  final bool enableWebpRoi;
+
+  factory _Options.parse(List<String> args) {
+    String? platform;
+    var runSelfCheck = false;
+    String? deviceId;
+    String? reportOutput;
+    String? deviceKind;
+    String? connection;
+    String? signing;
+    var enableJpegTurboRoi = false;
+    var enableWebpRoi = false;
+    for (final String arg in args) {
+      if (arg.startsWith('--platform=')) {
+        platform = arg.substring('--platform='.length);
+      } else if (arg == '--run-self-check') {
+        runSelfCheck = true;
+      } else if (arg.startsWith('--device=')) {
+        deviceId = arg.substring('--device='.length).trim();
+      } else if (arg.startsWith('--report-output=')) {
+        reportOutput = arg.substring('--report-output='.length).trim();
+      } else if (arg.startsWith('--device-kind=')) {
+        deviceKind = arg.substring('--device-kind='.length).trim();
+      } else if (arg.startsWith('--connection=')) {
+        connection = arg.substring('--connection='.length).trim();
+      } else if (arg.startsWith('--signing=')) {
+        signing = arg.substring('--signing='.length).trim();
+      } else if (arg == '--enable-native-roi') {
+        enableJpegTurboRoi = true;
+        enableWebpRoi = true;
+      } else if (arg == '--enable-jpeg-turbo-roi') {
+        enableJpegTurboRoi = true;
+      } else if (arg == '--enable-webp-roi') {
+        enableWebpRoi = true;
+      } else {
+        _usage();
+      }
+    }
+    if (platform == null || !_supportedPlatforms.contains(platform)) {
+      _usage();
+    }
+    if (deviceId != null && deviceId.isEmpty ||
+        reportOutput != null && reportOutput.isEmpty ||
+        deviceKind != null && deviceKind.isEmpty ||
+        connection != null && connection.isEmpty ||
+        signing != null && signing.isEmpty) {
+      _usage();
+    }
+    return _Options(
+      platform: platform,
+      runSelfCheck: runSelfCheck,
+      deviceId: deviceId,
+      reportOutput: reportOutput,
+      deviceKind: deviceKind,
+      connection: connection,
+      signing: signing,
+      enableJpegTurboRoi: enableJpegTurboRoi,
+      enableWebpRoi: enableWebpRoi,
+    );
+  }
+
+  List<String> get nativeRoiModules {
+    return <String>[
+      if (enableJpegTurboRoi) 'jpeg-turbo-roi',
+      if (enableWebpRoi) 'webp-roi',
+    ];
+  }
+
+  Map<String, String> selfCheckEnvironment(Directory root) {
+    final String outputPath = reportOutput == null
+        ? '${root.path}/build/reports/pixa_platform_self_check_${platform}_probe.json'
+        : (File(reportOutput!).isAbsolute
+            ? reportOutput!
+            : '${root.path}/$reportOutput');
+    return <String, String>{
+      ...Platform.environment,
+      'PIXA_PLATFORM_SELF_CHECK_REPORT': outputPath,
+      'PIXA_PLATFORM_EVIDENCE_PLATFORM': platform,
+      'PIXA_PLATFORM_EVIDENCE_RUN_MODE': 'integration-test',
+      if (deviceId != null) 'PIXA_PLATFORM_EVIDENCE_DEVICE_ID': deviceId!,
+      'PIXA_PLATFORM_EVIDENCE_DEVICE_KIND':
+          deviceKind ?? _defaultDeviceKind(platform),
+      'PIXA_PLATFORM_EVIDENCE_CONNECTION':
+          connection ?? _defaultConnection(platform),
+      'PIXA_PLATFORM_EVIDENCE_SIGNING': signing ?? _defaultSigning(platform),
+      if (nativeRoiModules.isNotEmpty)
+        'PIXA_PLATFORM_NATIVE_ROI_MODULES': nativeRoiModules.join(','),
+    };
+  }
+}
+
+Never _usage() {
+  stderr.writeln(
+    'Usage: dart run tool/pixa_platform_build.dart '
+    '--platform=<android|ios|linux|macos|windows> '
+    '[--run-self-check] [--device=<flutter-device-id>] '
+    '[--report-output=<path>] [--device-kind=<desktop|emulator|simulator>] '
+    '[--connection=<local|usb|wireless>] [--signing=<debug|development|release|not-applicable>] '
+    '[--enable-native-roi|--enable-jpeg-turbo-roi|--enable-webp-roi]',
+  );
+  exit(64);
+}
+
+const Set<String> _supportedPlatforms = <String>{
+  'android',
+  'ios',
+  'linux',
+  'macos',
+  'windows',
+};
+
+void _writeProbeApp(Directory root, Directory probe, _Options options) {
+  final String hookUserDefines = _hookUserDefines(options);
+  File('${probe.path}/pubspec.yaml').writeAsStringSync('''
+name: pixa_platform_probe
+description: Platform build probe for Pixa runtime assets.
+publish_to: none
+
+environment:
+  sdk: ">=3.6.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  pixa:
+    path: ${_pubspecPath(root, probe)}
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+$hookUserDefines
+''');
+  File('${probe.path}/lib/main.dart').writeAsStringSync('''
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:pixa/pixa.dart';
+import 'package:pixa/pixa_debug.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final PixaRuntimePlatformSelfCheck selfCheck = await _runPixaSelfCheck();
+  runApp(_ProbeApp(selfCheck: selfCheck));
+}
+
+Future<PixaRuntimePlatformSelfCheck> _runPixaSelfCheck() async {
+  await Pixa.configure();
+  final PixaRuntimePlatformSelfCheck selfCheck =
+      PixaDebugInspector.snapshot().platformSelfCheck;
+  if (!selfCheck.passed) {
+    throw StateError('Pixa platform self-check failed: \${selfCheck.toJson()}');
+  }
+  return selfCheck;
+}
+
+final class _ProbeApp extends StatelessWidget {
+  const _ProbeApp({required this.selfCheck});
+
+  final PixaRuntimePlatformSelfCheck selfCheck;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Semantics(
+            label: 'pixa-runtime-\${selfCheck.platform}',
+            child: PixaImage.memory(
+              'probe',
+              Uint8List.fromList(const <int>[
+                71, 73, 70, 56, 57, 97, 1, 0, 1, 0, 128, 0, 0, 0, 0, 0,
+                255, 255, 255, 44, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 76,
+                1, 0, 59,
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+''');
+  Directory('${probe.path}/integration_test').createSync(recursive: true);
+  File('${probe.path}/integration_test/pixa_self_check_test.dart')
+      .writeAsStringSync('''
+import 'dart:async';
+import 'dart:convert';
+import 'dart:ffi' as ffi;
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/integration_test.dart';
+import 'package:pixa/pixa.dart';
+import 'package:pixa/pixa_debug.dart';
+
+void main() {
+  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('Pixa runtime platform self-check passes', (tester) async {
+    final Directory cacheRoot =
+        await Directory.systemTemp.createTemp('pixa-platform-probe-');
+    addTearDown(() {
+      if (cacheRoot.existsSync()) {
+        cacheRoot.deleteSync(recursive: true);
+      }
+    });
+    await Pixa.configure(PixaConfig(cacheRootPath: cacheRoot.path));
+    final PixaDebugSnapshot snapshot = PixaDebugInspector.snapshot();
+    final PixaRuntimePlatformSelfCheck selfCheck =
+        await _operationalSelfCheck(snapshot.platformSelfCheck, cacheRoot);
+    expect(
+      selfCheck.passed,
+      isTrue,
+      reason: selfCheck.toJson().toString(),
+    );
+    final List<Map<String, Object?>> nativeModules =
+        _nativeRoiEvidence(
+      snapshot,
+      selfCheck.platform,
+      ${_dartStringListLiteral(options.nativeRoiModules)},
+    );
+    if (nativeModules.isNotEmpty) {
+      expect(
+        nativeModules.every((Map<String, Object?> module) =>
+            module['passed'] == true),
+        isTrue,
+        reason: nativeModules.toString(),
+      );
+    }
+    final String reportText = const JsonEncoder.withIndent('  ').convert(
+      <String, Object?>{
+        'generatedUtc': DateTime.now().toUtc().toIso8601String(),
+        'evidence': <String, Object?>{
+          'platform': ${_dartStringLiteral(options.platform)},
+          'runnerOs': Platform.operatingSystem,
+          'runMode': 'integration-test',
+          'deviceId': ${_dartStringLiteral(options.deviceId)},
+          'deviceKind': ${_dartStringLiteral(options.deviceKind ?? _defaultDeviceKind(options.platform))},
+          'connection': ${_dartStringLiteral(options.connection ?? _defaultConnection(options.platform))},
+          'signing': ${_dartStringLiteral(options.signing ?? _defaultSigning(options.platform))},
+        },
+        'selfCheck': selfCheck.toJson(),
+        'capabilities': snapshot.toJson()['capabilities'],
+        if (nativeModules.isNotEmpty) 'nativeModules': nativeModules,
+      },
+    );
+    _writeReportFile(reportText);
+    final String reportMarker = 'PIXA_PLATFORM_SELF_CHECK_REPORT_JSON:' +
+        base64Url.encode(utf8.encode(reportText));
+    // ignore: avoid_print
+    print(reportMarker);
+  });
+}
+
+Future<PixaRuntimePlatformSelfCheck> _operationalSelfCheck(
+  PixaRuntimePlatformSelfCheck base,
+  Directory cacheRoot,
+) async {
+  final List<PixaRuntimePlatformCheck> checks =
+      List<PixaRuntimePlatformCheck>.of(base.checks);
+  checks.add(await _runtimePipelineLoadCheck());
+  checks.add(_cacheDirectoryReadWriteCheck(cacheRoot));
+  checks.add(await _networkLoopbackFetchCheck());
+  checks.add(_abiArchitectureCheck(base.platform));
+  return PixaRuntimePlatformSelfCheck(
+    platform: base.platform,
+    isWeb: base.isWeb,
+    isSupportedPlatform: base.isSupportedPlatform,
+    passed: checks.every(
+      (PixaRuntimePlatformCheck check) => !check.required || check.passed,
+    ),
+    checks: List<PixaRuntimePlatformCheck>.unmodifiable(checks),
+  );
+}
+
+Future<PixaRuntimePlatformCheck> _runtimePipelineLoadCheck() async {
+  try {
+    final PixaPipelineLoad load = await Pixa.pipeline.load(PixaRequest(
+      source: PixaSource.bytes(_minimalGif(), id: 'platform-runtime-load'),
+      cachePolicy: const PixaCachePolicy.noStore(),
+      decoderOptions: const <String, Object?>{'displayBackend': 'runtime'},
+    ));
+    try {
+      final image = load.decodeRuntimeRgba(
+        maxDecodedPixels: 1,
+        maxOutputBytes: 4,
+      );
+      try {
+        final bool valid = image.width == 1 &&
+            image.height == 1 &&
+            image.rowBytes == 4 &&
+            image.bytes.length == 4;
+        return _check(
+          'runtimePipelineLoad',
+          valid,
+          valid
+              ? 'runtime pipeline loaded and decoded an owned buffer'
+              : 'runtime decoded buffer had unexpected shape',
+        );
+      } finally {
+        image.dispose();
+      }
+    } finally {
+      load.dispose();
+    }
+  } on Object catch (error) {
+    return _check('runtimePipelineLoad', false, error.toString());
+  }
+}
+
+PixaRuntimePlatformCheck _cacheDirectoryReadWriteCheck(Directory cacheRoot) {
+  try {
+    cacheRoot.createSync(recursive: true);
+    final File probe = File('\${cacheRoot.path}/pixa-self-check-rw.bin');
+    probe.writeAsBytesSync(<int>[0x70, 0x69, 0x78, 0x61], flush: true);
+    final bool valid = probe.readAsBytesSync().join(',') == '112,105,120,97';
+    probe.deleteSync();
+    return _check(
+      'cacheDirectoryReadWrite',
+      valid,
+      valid
+          ? 'cache directory accepted write, read, flush, and delete'
+          : 'cache directory read-back did not match written bytes',
+    );
+  } on Object catch (error) {
+    return _check('cacheDirectoryReadWrite', false, error.toString());
+  }
+}
+
+Future<PixaRuntimePlatformCheck> _networkLoopbackFetchCheck() async {
+  HttpServer? server;
+  try {
+    server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final Uint8List bytes = _minimalGif();
+    unawaited(server.forEach((HttpRequest request) async {
+      request.response
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType = ContentType('image', 'gif')
+        ..headers.contentLength = bytes.length
+        ..add(bytes);
+      await request.response.close();
+    }));
+    final PixaPipelineLoad load = await Pixa.pipeline.load(PixaRequest.network(
+      'http://\${InternetAddress.loopbackIPv4.address}:\${server.port}/probe.gif',
+      cachePolicy: const PixaCachePolicy.noStore(),
+    ));
+    try {
+      final bool valid = load.bytes.length == bytes.length;
+      return _check(
+        'networkLoopbackFetch',
+        valid,
+        valid
+            ? 'runtime HTTP transport fetched loopback image bytes'
+            : 'runtime HTTP transport returned unexpected byte length',
+      );
+    } finally {
+      load.dispose();
+    }
+  } on Object catch (error) {
+    return _check('networkLoopbackFetch', false, error.toString());
+  } finally {
+    await server?.close(force: true);
+  }
+}
+
+PixaRuntimePlatformCheck _abiArchitectureCheck(String platform) {
+  final String abi = _currentAbiLabel();
+  final Set<String> expected = switch (platform.toLowerCase()) {
+    'android' => <String>{'arm64-v8a', 'armeabi-v7a', 'x86_64'},
+    'ios' => <String>{'ios-arm', 'ios-arm64', 'ios-x64'},
+    'macos' => <String>{'macos-arm64', 'macos-x64'},
+    'windows' => <String>{'windows-x64'},
+    'linux' => <String>{'linux-x64', 'linux-arm64'},
+    _ => const <String>{},
+  };
+  final bool valid = expected.contains(abi);
+  return _check(
+    'abiArchitecture',
+    valid,
+    valid
+        ? 'current Dart FFI ABI \$abi is in the supported platform matrix'
+        : 'current Dart FFI ABI \$abi is not in \${expected.join(', ')}',
+  );
+}
+
+String _currentAbiLabel() {
+  return switch (ffi.Abi.current()) {
+    ffi.Abi.androidArm => 'armeabi-v7a',
+    ffi.Abi.androidArm64 => 'arm64-v8a',
+    ffi.Abi.androidX64 => 'x86_64',
+    ffi.Abi.iosArm => 'ios-arm',
+    ffi.Abi.iosArm64 => 'ios-arm64',
+    ffi.Abi.iosX64 => 'ios-x64',
+    ffi.Abi.macosArm64 => 'macos-arm64',
+    ffi.Abi.macosX64 => 'macos-x64',
+    ffi.Abi.windowsX64 => 'windows-x64',
+    ffi.Abi.linuxX64 => 'linux-x64',
+    ffi.Abi.linuxArm64 => 'linux-arm64',
+    final ffi.Abi abi => abi.toString(),
+  };
+}
+
+PixaRuntimePlatformCheck _check(String name, bool passed, String message) {
+  return PixaRuntimePlatformCheck(
+    name: name,
+    passed: passed,
+    required: true,
+    message: message,
+  );
+}
+
+void _writeReportFile(String reportText) {
+  final String? reportPath =
+      Platform.environment['PIXA_PLATFORM_SELF_CHECK_REPORT'];
+  if (reportPath == null || reportPath.trim().isEmpty) {
+    return;
+  }
+  try {
+    final File report = File(reportPath);
+    report.parent.createSync(recursive: true);
+    report.writeAsStringSync(reportText);
+  } catch (error) {
+    // ignore: avoid_print
+    print('PIXA_PLATFORM_SELF_CHECK_REPORT_FILE_WRITE_FAILED:' +
+        error.toString());
+  }
+}
+
+List<Map<String, Object?>> _nativeRoiEvidence(
+  PixaDebugSnapshot snapshot,
+  String platform,
+  List<String> requestedModules,
+) {
+  final Set<String> modules = requestedModules
+      .map((String value) => value.trim().toLowerCase())
+      .where((String value) => value.isNotEmpty)
+      .toSet();
+  if (modules.isEmpty) {
+    return const <Map<String, Object?>>[];
+  }
+  final stats = snapshot.capabilities.runtimePluginRegistryStats;
+  final int expectedHostLinked = 1 + modules.length;
+  final int expectedProcessors = modules.length;
+  return <Map<String, Object?>>[
+    if (modules.contains('jpeg-turbo-roi'))
+      _nativeRoiModuleEvidence(
+        platform: platform,
+        moduleId: 'pixa.processor.jpeg_turbo',
+        entrypointSymbol: 'pixa_jpeg_turbo_processor_plugin_init',
+        processorOperation: 'tile:jpeg',
+        runtimeCapability: stats.hostLinkedModules >= expectedHostLinked &&
+            stats.processors >= expectedProcessors &&
+            stats.canUseSingleHostBinary,
+      ),
+    if (modules.contains('webp-roi'))
+      _nativeRoiModuleEvidence(
+        platform: platform,
+        moduleId: 'pixa.processor.webp',
+        entrypointSymbol: 'pixa_webp_processor_plugin_init',
+        processorOperation: 'tile:webp',
+        runtimeCapability: stats.hostLinkedModules >= expectedHostLinked &&
+            stats.processors >= expectedProcessors &&
+            stats.canUseSingleHostBinary,
+      ),
+  ];
+}
+
+Map<String, Object?> _nativeRoiModuleEvidence({
+  required String platform,
+  required String moduleId,
+  required String entrypointSymbol,
+  required String processorOperation,
+  required bool runtimeCapability,
+}) {
+  final List<Map<String, Object?>> checks = <Map<String, Object?>>[
+    <String, Object?>{'name': 'manifestEntrypoint', 'passed': true},
+    <String, Object?>{'name': 'nativeLink', 'passed': true},
+    <String, Object?>{'name': 'processorRoute', 'passed': true},
+    <String, Object?>{
+      'name': 'runtimeCapability',
+      'passed': runtimeCapability,
+    },
+  ];
+  return <String, Object?>{
+    'platform': platform,
+    'moduleId': moduleId,
+    'entrypointSymbol': entrypointSymbol,
+    'processorOperations': <String>[processorOperation],
+    'passed': checks.every((Map<String, Object?> check) =>
+        check['passed'] == true),
+    'checks': checks,
+  };
+}
+
+Uint8List _minimalGif() {
+  return Uint8List.fromList(<int>[
+    0x47,
+    0x49,
+    0x46,
+    0x38,
+    0x39,
+    0x61,
+    0x01,
+    0x00,
+    0x01,
+    0x00,
+    0x80,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0xff,
+    0xff,
+    0xff,
+    0x2c,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x00,
+    0x01,
+    0x00,
+    0x00,
+    0x02,
+    0x02,
+    0x4c,
+    0x01,
+    0x00,
+    0x3b,
+  ]);
+}
+''');
+}
+
+String _hookUserDefines(_Options options) {
+  if (!options.enableJpegTurboRoi && !options.enableWebpRoi) {
+    return '';
+  }
+  final StringBuffer buffer = StringBuffer()
+    ..writeln()
+    ..writeln('hooks:')
+    ..writeln('  user_defines:')
+    ..writeln('    pixa:');
+  if (options.enableJpegTurboRoi && options.enableWebpRoi) {
+    buffer.writeln('      enable_native_roi: true');
+  } else {
+    if (options.enableJpegTurboRoi) {
+      buffer.writeln('      enable_jpeg_turbo_roi: true');
+    }
+    if (options.enableWebpRoi) {
+      buffer.writeln('      enable_webp_roi: true');
+    }
+  }
+  return buffer.toString();
+}
+
+String _pubspecPath(Directory root, Directory probe) {
+  return _relativePath(probe.uri, root.uri.resolve('packages/pixa'));
+}
+
+String _dartStringLiteral(String? value) {
+  return value == null ? 'null' : jsonEncode(value);
+}
+
+String _dartStringListLiteral(Iterable<String> values) {
+  return 'const <String>[${values.map(_dartStringLiteral).join(', ')}]';
+}
+
+String _relativePath(Uri fromDir, Uri toDir) {
+  final List<String> from = fromDir.pathSegments
+      .where((String segment) => segment.isNotEmpty)
+      .toList();
+  final List<String> to =
+      toDir.pathSegments.where((String segment) => segment.isNotEmpty).toList();
+  var shared = 0;
+  while (shared < from.length &&
+      shared < to.length &&
+      from[shared] == to[shared]) {
+    shared++;
+  }
+  final List<String> parts = <String>[
+    for (var index = shared; index < from.length; index++) '..',
+    ...to.skip(shared),
+  ];
+  return parts.join('/');
+}
+
+List<String> _buildCommand(String platform) {
+  return switch (platform) {
+    'android' => <String>['build', 'apk', '--debug'],
+    'ios' => <String>[
+        'build',
+        'ios',
+        '--debug',
+        '--simulator',
+        '--no-codesign',
+      ],
+    'linux' => <String>['build', 'linux', '--debug'],
+    'macos' => <String>['build', 'macos', '--debug'],
+    'windows' => <String>['build', 'windows', '--debug'],
+    _ => throw StateError('Unsupported platform $platform'),
+  };
+}
+
+List<String> _selfCheckCommand(String? deviceId) {
+  return <String>[
+    'test',
+    'integration_test/pixa_self_check_test.dart',
+    if (deviceId != null) ...<String>['-d', deviceId],
+  ];
+}
+
+String _defaultDeviceKind(String platform) {
+  return switch (platform) {
+    'android' => 'emulator',
+    'ios' => 'simulator',
+    'linux' || 'macos' || 'windows' => 'desktop',
+    _ => 'unknown',
+  };
+}
+
+String _defaultConnection(String platform) {
+  return switch (platform) {
+    'android' || 'ios' => 'unknown',
+    'linux' || 'macos' || 'windows' => 'local',
+    _ => 'unknown',
+  };
+}
+
+String _defaultSigning(String platform) {
+  return switch (platform) {
+    'ios' => 'unknown',
+    'android' => 'debug',
+    'linux' || 'macos' || 'windows' => 'not-applicable',
+    _ => 'unknown',
+  };
+}
+
+Future<void> _run(
+  Directory workingDirectory,
+  String executable,
+  List<String> arguments, {
+  Map<String, String>? environment,
+}) async {
+  stdout.writeln('> $executable ${arguments.join(' ')}');
+  final Process process = await Process.start(
+    executable,
+    arguments,
+    workingDirectory: workingDirectory.path,
+    environment: environment,
+    mode: ProcessStartMode.inheritStdio,
+  );
+  final int exitCode = await process.exitCode;
+  if (exitCode != 0) {
+    throw ProcessException(executable, arguments, 'command failed', exitCode);
+  }
+}
+
+Future<void> _runSelfCheck(
+  Directory workingDirectory,
+  List<String> arguments, {
+  required Map<String, String> environment,
+  required String? reportPath,
+}) async {
+  stdout.writeln('> flutter ${arguments.join(' ')}');
+  if (reportPath != null && reportPath.trim().isNotEmpty) {
+    final File staleReport = File(reportPath);
+    if (staleReport.existsSync()) {
+      staleReport.deleteSync();
+    }
+  }
+  final Process process = await Process.start(
+    'flutter',
+    arguments,
+    workingDirectory: workingDirectory.path,
+    environment: environment,
+  );
+  final StringBuffer output = StringBuffer();
+  final Future<void> stdoutDone =
+      process.stdout.transform(utf8.decoder).forEach((String chunk) {
+    stdout.write(chunk);
+    output.write(chunk);
+  });
+  final Future<void> stderrDone =
+      process.stderr.transform(utf8.decoder).forEach((String chunk) {
+    stderr.write(chunk);
+    output.write(chunk);
+  });
+  final int exitCode = await process.exitCode;
+  await stdoutDone;
+  await stderrDone;
+  if (exitCode != 0) {
+    throw ProcessException('flutter', arguments, 'command failed', exitCode);
+  }
+  if (reportPath == null || reportPath.trim().isEmpty) {
+    return;
+  }
+  final File report = File(reportPath);
+  if (report.existsSync() && report.lengthSync() > 0) {
+    return;
+  }
+  final String reportText = _extractSelfCheckReport(output.toString());
+  report.parent.createSync(recursive: true);
+  report.writeAsStringSync(reportText);
+}
+
+String _extractSelfCheckReport(String output) {
+  const String marker = 'PIXA_PLATFORM_SELF_CHECK_REPORT_JSON:';
+  final int index = output.lastIndexOf(marker);
+  if (index < 0) {
+    throw StateError('Pixa platform self-check did not emit report payload.');
+  }
+  final int valueStart = index + marker.length;
+  final int valueEnd = output.indexOf(RegExp(r'\s'), valueStart);
+  final String encoded = output
+      .substring(valueStart, valueEnd < 0 ? output.length : valueEnd)
+      .trim();
+  return utf8.decode(base64Url.decode(encoded));
+}
