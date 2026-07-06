@@ -46,6 +46,10 @@ void main() {
     expect(PixaProcessors.brighten(32), 'brighten(value=32)');
     expect(PixaProcessors.contrast(-12.5), 'contrast(value=-12.5)');
     expect(PixaProcessors.hueRotate(120), 'hueRotate(degrees=120)');
+    expect(
+      PixaProcessors.unsharpen(sigma: 1.25, threshold: 3),
+      'unsharpen(sigma=1.25,threshold=3)',
+    );
   });
 
   test('PixaProcessors validates bounded runtime processor arguments', () {
@@ -78,5 +82,17 @@ void main() {
     expect(() => PixaProcessors.contrast(256), throwsRangeError);
     expect(() => PixaProcessors.hueRotate(361), throwsRangeError);
     expect(() => PixaProcessors.hueRotate(-361), throwsRangeError);
+    expect(
+      () => PixaProcessors.unsharpen(sigma: double.infinity, threshold: 1),
+      throwsRangeError,
+    );
+    expect(
+      () => PixaProcessors.unsharpen(sigma: 1, threshold: -1),
+      throwsRangeError,
+    );
+    expect(
+      () => PixaProcessors.unsharpen(sigma: 1, threshold: 256),
+      throwsRangeError,
+    );
   });
 }

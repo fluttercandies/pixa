@@ -146,6 +146,13 @@ abstract final class PixaProcessors {
     return 'hueRotate(degrees=$degrees)';
   }
 
+  /// Applies an unsharp mask. [sigma] range: 0..128, [threshold] range: 0..255.
+  static String unsharpen({required double sigma, required int threshold}) {
+    _checkFiniteRange(sigma, 0, 128, 'sigma');
+    RangeError.checkValueInInterval(threshold, 0, 255, 'threshold');
+    return 'unsharpen(sigma=${_formatDouble(sigma)},threshold=$threshold)';
+  }
+
   static void _checkFiniteRange(
     double value,
     double min,

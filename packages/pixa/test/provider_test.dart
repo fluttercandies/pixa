@@ -1226,7 +1226,7 @@ void main() {
             () async => _minimalGif(),
           ),
           cachePolicy: const PixaCachePolicy.noStore(),
-          processors: const <String>['flipHorizontal()'],
+          processors: const <String>['unsharp-mask(sigma=1.0,threshold=1)'],
         ),
       );
       final ImageStreamCompleter completer = provider.loadImage(provider, (

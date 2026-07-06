@@ -2119,6 +2119,10 @@ enum RuntimeProcessor {
     HueRotate {
         degrees: i32,
     },
+    Unsharpen {
+        sigma: f32,
+        threshold: i32,
+    },
     Watermark(WatermarkSpec),
 }
 
@@ -2238,6 +2242,10 @@ fn parse_processor_descriptor(descriptor: &str) -> RuntimeResult<RuntimeProcesso
         }),
         "huerotate" => Ok(RuntimeProcessor::HueRotate {
             degrees: required_processor_i32_alias(&args, "degrees", "angle", -360, 360)?,
+        }),
+        "unsharpen" | "unsharpmask" => Ok(RuntimeProcessor::Unsharpen {
+            sigma: required_processor_f32(&args, "sigma")?,
+            threshold: required_processor_i32_range(&args, "threshold", 0, 255)?,
         }),
         "watermark" => Ok(RuntimeProcessor::Watermark(WatermarkSpec {
             text: required_processor_text(&args, "text")?,
@@ -2609,6 +2617,21 @@ fn required_processor_i32_alias(
         (Some(value), _) | (_, Some(value)) => Ok(value),
         (None, None) => processor_descriptor_error(format!("missing processor argument {name}")),
     }
+}
+
+fn required_processor_i32_range(
+    args: &HashMap<String, String>,
+    name: &'static str,
+    min: i32,
+    max: i32,
+) -> RuntimeResult<i32> {
+    optional_processor_i32_range(args, name, min, max)?.ok_or_else(|| {
+        RuntimeError::new(
+            "processor",
+            false,
+            format!("missing processor argument {name}"),
+        )
+    })
 }
 
 fn optional_processor_i32_range(
@@ -3207,6 +3230,7 @@ fn apply_processor(
         RuntimeProcessor::Brighten { value } => image.brighten(value),
         RuntimeProcessor::Contrast { value } => image.adjust_contrast(value),
         RuntimeProcessor::HueRotate { degrees } => image.huerotate(degrees),
+        RuntimeProcessor::Unsharpen { sigma, threshold } => image.unsharpen(sigma, threshold),
         RuntimeProcessor::Watermark(ref spec) => apply_watermark_processor(image, spec),
     };
     validate_processor_dimensions(&processed, limits)?;
@@ -5243,6 +5267,14 @@ mod tests {
                     "contrast(value=50)".to_string(),
                 ],
                 [110, 0, 0, 255],
+            ),
+            (
+                "processor-unsharpen",
+                vec![
+                    "unsharpen(sigma=1.0,threshold=1)".to_string(),
+                    "crop(x=1,y=1,width=1,height=1)".to_string(),
+                ],
+                [38, 38, 0, 255],
             ),
         ];
 

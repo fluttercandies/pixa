@@ -593,12 +593,9 @@ final class _RetainedRuntimeCodec implements ui.Codec {
 }
 
 bool _isRuntimeDisplayProcessor(String descriptor) {
-  final String operation = descriptor
-      .split('(')
-      .first
-      .trim()
-      .replaceAll('_', '')
-      .toLowerCase();
+  final String operation = _normalizeRuntimeProcessorOperation(
+    descriptor.split('(').first,
+  );
   return switch (operation) {
     'resize' ||
     'resizeexact' ||
@@ -618,9 +615,24 @@ bool _isRuntimeDisplayProcessor(String descriptor) {
     'brightness' ||
     'contrast' ||
     'huerotate' ||
+    'unsharpen' ||
+    'unsharpmask' ||
     'watermark' => true,
     _ => false,
   };
+}
+
+String _normalizeRuntimeProcessorOperation(String operation) {
+  final String lower = operation.trim().toLowerCase();
+  final StringBuffer buffer = StringBuffer();
+  for (final int codeUnit in lower.codeUnits) {
+    final bool isDigit = codeUnit >= 0x30 && codeUnit <= 0x39;
+    final bool isAsciiLower = codeUnit >= 0x61 && codeUnit <= 0x7a;
+    if (isDigit || isAsciiLower) {
+      buffer.writeCharCode(codeUnit);
+    }
+  }
+  return buffer.toString();
 }
 
 final class _EngineDisplayDecoderBackend implements _DisplayDecoderBackend {
