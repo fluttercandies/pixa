@@ -1059,6 +1059,7 @@ final class _ImageCompletionGate {
   final ListQueue<_QueuedImageCompletion> _queue =
       ListQueue<_QueuedImageCompletion>();
   Timer? _frameFallbackTimer;
+  int? _frameCallbackId;
   var _releasedThisFrame = 0;
   var _frameScheduled = false;
 
@@ -1090,8 +1091,14 @@ final class _ImageCompletionGate {
     }
     _frameScheduled = true;
     _frameFallbackTimer?.cancel();
-    // Flutter frame callbacks cannot be cancelled. The time-slice fallback keeps
-    // bursty image delivery paced without leaving transient callbacks behind.
+    late final int frameCallbackId;
+    frameCallbackId = SchedulerBinding.instance.scheduleFrameCallback((_) {
+      if (_frameCallbackId == frameCallbackId) {
+        _frameCallbackId = null;
+      }
+      _handleFrameBoundary();
+    });
+    _frameCallbackId = frameCallbackId;
     _frameFallbackTimer = Timer(const Duration(milliseconds: 16), () {
       if (_frameScheduled) {
         _handleFrameBoundary();
@@ -1104,6 +1111,11 @@ final class _ImageCompletionGate {
       return;
     }
     _frameScheduled = false;
+    final int? frameCallbackId = _frameCallbackId;
+    if (frameCallbackId != null) {
+      SchedulerBinding.instance.cancelFrameCallbackWithId(frameCallbackId);
+      _frameCallbackId = null;
+    }
     _frameFallbackTimer?.cancel();
     _frameFallbackTimer = null;
     _releasedThisFrame = 0;

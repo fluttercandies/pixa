@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pixa/pixa_plugins.dart';
 import 'package:pixa/pixa_debug.dart';
@@ -688,6 +689,134 @@ void main() {
       final Map<String, Object?> drainedDisplayDecoder =
           drainedSnapshot['displayDecoder']! as Map<String, Object?>;
       expect(drainedDisplayDecoder['completionQueueDepth'], 0);
+    },
+  );
+
+  test(
+    'PixaProvider releases queued completions on Flutter frame boundary',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-completion-frame-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      await Pixa.configure(
+        PixaConfig(
+          cacheRootPath: cacheRoot.path,
+          decodeConcurrency: 2,
+          maxImageCompletionsPerFrame: 1,
+        ),
+      );
+      await _waitForCompletionGateIdle();
+      final int transientCallbacksBefore =
+          SchedulerBinding.instance.transientCallbackCount;
+
+      final Completer<void> firstDecodeReturned = Completer<void>();
+      final Completer<void> secondDecodeReturned = Completer<void>();
+
+      Future<ui.Codec> firstDecode(
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        final ui.Codec codec = await ui.instantiateImageCodec(_minimalGif());
+        firstDecodeReturned.complete();
+        return codec;
+      }
+
+      Future<ui.Codec> secondDecode(
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        final ui.Codec codec = await ui.instantiateImageCodec(_minimalGif());
+        secondDecodeReturned.complete();
+        return codec;
+      }
+
+      final PixaProvider first = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.custom(
+            'completion-frame-a',
+            () async => _minimalGif(),
+          ),
+          cachePolicy: const PixaCachePolicy.noStore(),
+        ),
+      );
+      final PixaProvider second = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.custom(
+            'completion-frame-b',
+            () async => _minimalGif(),
+          ),
+          cachePolicy: const PixaCachePolicy.noStore(),
+        ),
+      );
+      final ImageStreamCompleter firstCompleter = first.loadImage(
+        first,
+        firstDecode,
+      );
+      final ImageStreamCompleter secondCompleter = second.loadImage(
+        second,
+        secondDecode,
+      );
+      final Completer<ImageInfo> firstImage = Completer<ImageInfo>();
+      final Completer<ImageInfo> secondImage = Completer<ImageInfo>();
+      final List<ImageInfo> retainedImages = <ImageInfo>[];
+      addTearDown(() {
+        for (final ImageInfo image in retainedImages) {
+          image.dispose();
+        }
+      });
+      final ImageStreamListener firstListener = ImageStreamListener((
+        ImageInfo image,
+        bool synchronousCall,
+      ) {
+        retainedImages.add(image);
+        if (!firstImage.isCompleted) {
+          firstImage.complete(image);
+        }
+      });
+      final ImageStreamListener secondListener = ImageStreamListener((
+        ImageInfo image,
+        bool synchronousCall,
+      ) {
+        retainedImages.add(image);
+        if (!secondImage.isCompleted) {
+          secondImage.complete(image);
+        }
+      });
+      addTearDown(() {
+        firstCompleter.removeListener(firstListener);
+        secondCompleter.removeListener(secondListener);
+      });
+
+      firstCompleter.addListener(firstListener);
+      secondCompleter.addListener(secondListener);
+      await Future.wait<void>(<Future<void>>[
+        firstDecodeReturned.future,
+        secondDecodeReturned.future,
+      ]).timeout(const Duration(seconds: 5));
+      await Future<void>.delayed(Duration.zero);
+
+      final Map<String, Object?> beforeFrame = PixaDebugInspector.snapshot()
+          .toJson();
+      final Map<String, Object?> beforeDisplayDecoder =
+          beforeFrame['displayDecoder']! as Map<String, Object?>;
+      expect(beforeDisplayDecoder['completionQueueDepth'], 1);
+      expect(secondImage.isCompleted, isFalse);
+      expect(
+        SchedulerBinding.instance.transientCallbackCount,
+        greaterThan(transientCallbacksBefore),
+      );
+
+      _pumpFlutterFrame();
+      await Future<void>.delayed(Duration.zero);
+
+      final Map<String, Object?> afterFrame = PixaDebugInspector.snapshot()
+          .toJson();
+      final Map<String, Object?> afterDisplayDecoder =
+          afterFrame['displayDecoder']! as Map<String, Object?>;
+      expect(afterDisplayDecoder['completionQueueDepth'], 0);
+      await firstImage.future.timeout(const Duration(seconds: 5));
+      await secondImage.future.timeout(const Duration(seconds: 5));
     },
   );
 
@@ -1469,6 +1598,15 @@ void main() {
 
     expect(image.request.lowRes, same(explicit));
   });
+}
+
+Duration _testFrameTimestamp = Duration.zero;
+
+void _pumpFlutterFrame() {
+  final SchedulerBinding binding = SchedulerBinding.instance;
+  _testFrameTimestamp += const Duration(milliseconds: 1);
+  binding.handleBeginFrame(_testFrameTimestamp);
+  binding.handleDrawFrame();
 }
 
 Future<void> _waitForCompletionGateIdle() async {
