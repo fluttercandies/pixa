@@ -108,8 +108,7 @@ final class PixaPredictivePrefetcher {
   final PixaPrefetchRunner? _runPrefetch;
   final Set<String> _inFlight = <String>{};
   final Set<String> _pendingKeys = <String>{};
-  final Set<String> _recent = <String>{};
-  final List<String> _recentOrder = <String>[];
+  final LinkedHashSet<String> _recent = LinkedHashSet<String>();
   final ListQueue<_QueuedPrefetch> _pending = ListQueue<_QueuedPrefetch>();
   _PrefetchBatch? _pendingBatch;
   int _active = 0;
@@ -187,7 +186,6 @@ final class PixaPredictivePrefetcher {
   /// Clears in-memory dedupe history. Does not cancel active operations.
   void clearHistory() {
     _recent.clear();
-    _recentOrder.clear();
   }
 
   List<PixaRequest> _plannedRequests(
@@ -291,7 +289,6 @@ final class PixaPredictivePrefetcher {
       _active--;
       if (!completed && work.generation != _generation) {
         _recent.remove(work.key);
-        _recentOrder.remove(work.key);
       }
       _pumpQueue();
     }
@@ -325,12 +322,12 @@ final class PixaPredictivePrefetcher {
     if (recentCapacity == 0) {
       return;
     }
-    if (_recent.add(key)) {
-      _recentOrder.add(key);
+    if (!_recent.add(key)) {
+      _recent.remove(key);
+      _recent.add(key);
     }
-    while (_recentOrder.length > recentCapacity) {
-      final String evicted = _recentOrder.removeAt(0);
-      _recent.remove(evicted);
+    while (_recent.length > recentCapacity) {
+      _recent.remove(_recent.first);
     }
   }
 

@@ -125,6 +125,57 @@ void main() {
     expect(avgMicros, lessThan(maxAvgMicros));
   });
 
+  test('predictive prefetch recent eviction benchmark', () async {
+    final int iterations = _envInt('PIXA_BENCH_RECENT_EVICT_ITERS', 12000);
+    final int recentCapacity = _envInt(
+      'PIXA_BENCH_RECENT_EVICT_CAPACITY',
+      4096,
+    );
+    final int maxAvgMicros = _envInt(
+      'PIXA_BENCH_RECENT_EVICT_MAX_AVG_MICROS',
+      70,
+    );
+    var scheduled = 0;
+    final PixaPredictivePrefetcher prefetcher = PixaPredictivePrefetcher(
+      requestBuilder: (int index) => PixaRequest.network(
+        'https://images.example.test/recent/$index.jpg',
+        targetSize: const PixaTargetSize(width: 96, height: 96),
+      ),
+      target: PixaPrefetchTarget.diskOnly,
+      forwardItemCount: 1,
+      backwardItemCount: 0,
+      maxConcurrent: 1,
+      recentCapacity: recentCapacity,
+      runPrefetch: (PixaRequest request, {required PixaPrefetchTarget target}) {
+        scheduled += 1;
+        return Future<void>.value();
+      },
+    );
+
+    final Stopwatch stopwatch = Stopwatch()..start();
+    for (var iteration = 0; iteration < iterations; iteration++) {
+      await prefetcher.prefetchAround(
+        firstVisibleIndex: iteration,
+        lastVisibleIndex: iteration,
+        itemCount: iterations + 2,
+      );
+    }
+    stopwatch.stop();
+
+    final PixaPredictivePrefetcherSnapshot snapshot = prefetcher.snapshot();
+    final int totalMicros = stopwatch.elapsedMicroseconds;
+    final double avgMicros = totalMicros / iterations;
+    // ignore: avoid_print
+    print(
+      'scroll_prefetch_recent_eviction,$iterations,$totalMicros,'
+      '${avgMicros.toStringAsFixed(1)},$scheduled,'
+      '${snapshot.recent}',
+    );
+    expect(scheduled, iterations);
+    expect(snapshot.recent, recentCapacity);
+    expect(avgMicros, lessThan(maxAvgMicros));
+  });
+
   test('flutter engine decode benchmark', () async {
     final int iterations = _envInt('PIXA_BENCH_DECODE_ITERS', 500);
     final Uint8List bytes = _minimalGif();
