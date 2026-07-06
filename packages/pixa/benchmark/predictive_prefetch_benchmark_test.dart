@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pixa/pixa.dart';
+import 'package:pixa/src/image_format_catalog.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -227,6 +228,46 @@ void main() {
       'request_cache_key_memoized_hot_path,$reads,$totalMicros,'
       '${avgNs.toStringAsFixed(1)},$checksum',
     );
+    expect(avgNs, lessThan(maxAvgNs));
+  });
+
+  test('format route capability lookup hot path benchmark', () {
+    final int iterations = _envInt('PIXA_BENCH_FORMAT_ROUTE_ITERS', 60000);
+    final int maxAvgNs = _envInt('PIXA_BENCH_FORMAT_ROUTE_MAX_AVG_NS', 900);
+    const PixaImageFormatCatalog catalog = PixaImageFormatCatalog();
+    var runtimeDefaults = 0;
+
+    expect(
+      catalog.routeForMimeType('image/x-icon')?.defaultRuntimeDisplay,
+      isTrue,
+    );
+    expect(
+      catalog.routeForMimeType('image/png')?.defaultRuntimeDisplay,
+      isFalse,
+    );
+
+    final Stopwatch stopwatch = Stopwatch()..start();
+    for (var iteration = 0; iteration < iterations; iteration++) {
+      final PixaImageFormatRoute? route = catalog.routeForMimeType(
+        iteration.isEven ? 'image/x-icon' : 'image/png',
+      );
+      if (route == null) {
+        fail('built-in image MIME should resolve to a route');
+      }
+      if (route.defaultRuntimeDisplay) {
+        runtimeDefaults += 1;
+      }
+    }
+    stopwatch.stop();
+
+    final int totalMicros = stopwatch.elapsedMicroseconds;
+    final double avgNs = totalMicros * 1000 / iterations;
+    // ignore: avoid_print
+    print(
+      'format_route_capability_lookup,$iterations,$totalMicros,'
+      '${avgNs.toStringAsFixed(1)},$runtimeDefaults',
+    );
+    expect(runtimeDefaults, iterations ~/ 2);
     expect(avgNs, lessThan(maxAvgNs));
   });
 

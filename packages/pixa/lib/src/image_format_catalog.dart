@@ -28,13 +28,7 @@ final class PixaImageFormatRoute {
 
   /// Creates a route for a built-in image format descriptor.
   factory PixaImageFormatRoute.builtIn(PixaImageFormatDescriptor descriptor) {
-    return PixaImageFormatRoute._(
-      source: PixaImageFormatRouteSource.builtIn,
-      capabilities: PixaImageFormatRouteCapabilities.runtime(
-        _runtimeCapabilityFor(descriptor.format),
-      ),
-      builtInDescriptor: descriptor,
-    );
+    return _builtInRouteForDescriptor(descriptor);
   }
 
   /// Creates a route for a plugin decoder descriptor.
@@ -86,6 +80,27 @@ final class PixaImageFormatRoute {
   /// Whether ordinary display should select the runtime backend.
   bool get defaultRuntimeDisplay => capabilities.defaultRuntimeDisplay;
 }
+
+PixaImageFormatRoute _builtInRouteForDescriptor(
+  PixaImageFormatDescriptor descriptor,
+) {
+  final PixaImageFormatRoute? cached = _builtInRouteCache[descriptor.format];
+  if (cached != null) {
+    return cached;
+  }
+  final PixaImageFormatRoute route = PixaImageFormatRoute._(
+    source: PixaImageFormatRouteSource.builtIn,
+    capabilities: PixaImageFormatRouteCapabilities.runtime(
+      _runtimeCapabilityFor(descriptor.format),
+    ),
+    builtInDescriptor: descriptor,
+  );
+  _builtInRouteCache[descriptor.format] = route;
+  return route;
+}
+
+final Map<PixaImageMetadataFormat, PixaImageFormatRoute> _builtInRouteCache =
+    <PixaImageMetadataFormat, PixaImageFormatRoute>{};
 
 /// Unified decoder/display capabilities for one resolved format route.
 final class PixaImageFormatRouteCapabilities {
@@ -222,12 +237,20 @@ final class PixaImageFormatCatalog {
 
   /// Resolves a route from a MIME type.
   PixaImageFormatRoute? routeForMimeType(Object? mimeType) {
-    final PixaImageFormatDescriptor? builtIn =
-        pixaImageFormatDescriptorForMimeType(mimeType);
-    if (builtIn != null) {
-      return PixaImageFormatRoute.builtIn(builtIn);
+    if (mimeType is String) {
+      final PixaImageFormatRoute? fastRoute =
+          _builtInRoutesByMimeType()[mimeType];
+      if (fastRoute != null) {
+        return fastRoute;
+      }
     }
     final String? normalized = _normalizeMimeType(mimeType);
+    final PixaImageFormatRoute? builtIn = normalized == null
+        ? null
+        : _builtInRoutesByMimeType()[normalized];
+    if (builtIn != null) {
+      return builtIn;
+    }
     final PixaDecoderDescriptor? decoder = normalized == null
         ? null
         : registry?.decoderForMimeType(normalized);
@@ -238,12 +261,20 @@ final class PixaImageFormatCatalog {
 
   /// Resolves a route from a stable format id.
   PixaImageFormatRoute? routeForFormatId(Object? formatId) {
-    final PixaImageFormatDescriptor? builtIn =
-        pixaImageFormatDescriptorForFormatId(formatId);
-    if (builtIn != null) {
-      return PixaImageFormatRoute.builtIn(builtIn);
+    if (formatId is String) {
+      final PixaImageFormatRoute? fastRoute =
+          _builtInRoutesByFormatId()[formatId];
+      if (fastRoute != null) {
+        return fastRoute;
+      }
     }
     final String? normalized = _normalizeFormatId(formatId);
+    final PixaImageFormatRoute? builtIn = normalized == null
+        ? null
+        : _builtInRoutesByFormatId()[normalized];
+    if (builtIn != null) {
+      return builtIn;
+    }
     final PixaDecoderDescriptor? decoder = normalized == null
         ? null
         : registry?.decoderForFormatId(normalized);
@@ -296,20 +327,79 @@ final class PixaImageFormatCatalog {
   }
 }
 
+Map<String, PixaImageFormatRoute> _builtInRoutesByMimeType() {
+  final Map<String, PixaImageFormatRoute>? cached = _cachedBuiltInRoutesByMime;
+  if (cached != null) {
+    return cached;
+  }
+  final Map<String, PixaImageFormatRoute> routes =
+      <String, PixaImageFormatRoute>{};
+  for (final PixaImageFormatDescriptor descriptor
+      in pixaBuiltinImageFormatDescriptors) {
+    final PixaImageFormatRoute route = PixaImageFormatRoute.builtIn(descriptor);
+    for (final String mimeType in descriptor.mimeTypes) {
+      routes[mimeType] = route;
+    }
+  }
+  return _cachedBuiltInRoutesByMime =
+      Map<String, PixaImageFormatRoute>.unmodifiable(routes);
+}
+
+Map<String, PixaImageFormatRoute> _builtInRoutesByFormatId() {
+  final Map<String, PixaImageFormatRoute>? cached =
+      _cachedBuiltInRoutesByFormatId;
+  if (cached != null) {
+    return cached;
+  }
+  return _cachedBuiltInRoutesByFormatId =
+      Map<String, PixaImageFormatRoute>.unmodifiable(
+        <String, PixaImageFormatRoute>{
+          for (final PixaImageFormatDescriptor descriptor
+              in pixaBuiltinImageFormatDescriptors)
+            descriptor.formatId: PixaImageFormatRoute.builtIn(descriptor),
+        },
+      );
+}
+
+Map<String, PixaImageFormatRoute>? _cachedBuiltInRoutesByMime;
+Map<String, PixaImageFormatRoute>? _cachedBuiltInRoutesByFormatId;
+
 PixaRuntimeImageFormatCapability? _runtimeCapabilityFor(
   PixaImageMetadataFormat format,
 ) {
-  try {
-    for (final PixaRuntimeImageFormatCapability capability
-        in PixaRuntimeCapabilities.current().imageFormats) {
-      if (capability.format == format) {
-        return capability;
-      }
-    }
-  } on Object {
-    return null;
+  return _runtimeCapabilitiesByFormat()[format];
+}
+
+Map<PixaImageMetadataFormat, PixaRuntimeImageFormatCapability>
+_runtimeCapabilitiesByFormat() {
+  final Map<PixaImageMetadataFormat, PixaRuntimeImageFormatCapability>? cached =
+      _cachedRuntimeCapabilitiesByFormat;
+  if (cached != null) {
+    return cached;
   }
-  return null;
+  final Map<PixaImageMetadataFormat, PixaRuntimeImageFormatCapability>
+  capabilities = _readRuntimeCapabilitiesByFormat();
+  _cachedRuntimeCapabilitiesByFormat = capabilities;
+  return capabilities;
+}
+
+Map<PixaImageMetadataFormat, PixaRuntimeImageFormatCapability>?
+_cachedRuntimeCapabilitiesByFormat;
+
+Map<PixaImageMetadataFormat, PixaRuntimeImageFormatCapability>
+_readRuntimeCapabilitiesByFormat() {
+  try {
+    return Map<
+      PixaImageMetadataFormat,
+      PixaRuntimeImageFormatCapability
+    >.unmodifiable(<PixaImageMetadataFormat, PixaRuntimeImageFormatCapability>{
+      for (final PixaRuntimeImageFormatCapability capability
+          in PixaRuntimeCapabilities.current().imageFormats)
+        capability.format: capability,
+    });
+  } on Object {
+    return const <PixaImageMetadataFormat, PixaRuntimeImageFormatCapability>{};
+  }
 }
 
 String? _firstNormalized(

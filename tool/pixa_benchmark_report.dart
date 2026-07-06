@@ -76,6 +76,7 @@ const Map<String, List<String>> _requiredCoverage = <String, List<String>>{
   ],
   'scroll prefetch': <String>['scroll_prefetch_planning'],
   'request key hot path': <String>['request_cache_key_memoized_hot_path'],
+  'format route hot path': <String>['format_route_capability_lookup'],
   'animated image': <String>['flutter_animated_gif_frames'],
   'runtime ABI overhead': <String>['runtime_small_fnv1a64_32b'],
 };

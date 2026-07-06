@@ -113,6 +113,22 @@ void main() {
     expect(pixaIsRuntimeOnlyDisplayMime('image/png; charset=binary'), isFalse);
   });
 
+  test('Dart built-in image format routes are memoized for hot lookup', () {
+    const PixaImageFormatCatalog catalog = PixaImageFormatCatalog();
+
+    final PixaImageFormatRoute? firstPng = catalog.routeForMimeType(
+      'image/png',
+    );
+    final PixaImageFormatRoute? secondPng = catalog.routeForMimeType(
+      'image/png',
+    );
+    final PixaImageFormatRoute? ico = catalog.routeForFormatId('ico');
+
+    expect(firstPng, isNotNull);
+    expect(identical(firstPng, secondPng), isTrue);
+    expect(ico?.defaultRuntimeDisplay, isTrue);
+  });
+
   test('Dart display MIME policy marks stable runtime-only raster formats', () {
     for (final PixaImageMetadataFormat format
         in _stableRuntimeOnlyRasterFormats) {
