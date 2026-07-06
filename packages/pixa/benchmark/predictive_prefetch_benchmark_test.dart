@@ -25,10 +25,7 @@ void main() {
       backwardItemCount: 64,
       maxConcurrent: 16,
       recentCapacity: 4096,
-      runPrefetch: (
-        PixaRequest request, {
-        required PixaPrefetchTarget target,
-      }) {
+      runPrefetch: (PixaRequest request, {required PixaPrefetchTarget target}) {
         scheduled += 1;
         return Future<void>.value();
       },
@@ -64,10 +61,11 @@ void main() {
 
     final Stopwatch stopwatch = Stopwatch()..start();
     for (var iteration = 0; iteration < iterations; iteration++) {
-      final ui.ImmutableBuffer buffer =
-          await ui.ImmutableBuffer.fromUint8List(bytes);
-      final ui.Codec codec =
-          await PaintingBinding.instance.instantiateImageCodecWithSize(buffer);
+      final ui.ImmutableBuffer buffer = await ui.ImmutableBuffer.fromUint8List(
+        bytes,
+      );
+      final ui.Codec codec = await PaintingBinding.instance
+          .instantiateImageCodecWithSize(buffer);
       final ui.FrameInfo frame = await codec.getNextFrame();
       decodedPixels += frame.image.width * frame.image.height;
       frame.image.dispose();

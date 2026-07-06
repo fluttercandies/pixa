@@ -126,10 +126,7 @@ sealed class PixaCacheLookup {
 /// Cache hit.
 final class PixaCacheHit extends PixaCacheLookup {
   /// Creates a cache hit.
-  const PixaCacheHit({
-    required this.payload,
-    required this.isStale,
-  });
+  const PixaCacheHit({required this.payload, required this.isStale});
 
   /// Cached bytes.
   final PixaBytePayload payload;

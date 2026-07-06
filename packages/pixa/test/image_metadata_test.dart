@@ -5,8 +5,9 @@ import 'package:pixa/pixa.dart';
 
 void main() {
   test('parses progressive JPEG metadata from encoded headers', () {
-    final PixaImageMetadata metadata =
-        PixaImageMetadata.parseEncoded(_jpegWithSof(0xc2, 4096, 2048));
+    final PixaImageMetadata metadata = PixaImageMetadata.parseEncoded(
+      _jpegWithSof(0xc2, 4096, 2048),
+    );
 
     expect(metadata.width, 4096);
     expect(metadata.height, 2048);
@@ -17,8 +18,9 @@ void main() {
   });
 
   test('parses animated WebP metadata from encoded headers', () {
-    final PixaImageMetadata metadata =
-        PixaImageMetadata.parseEncoded(_webpVp8xHeader(1024, 768));
+    final PixaImageMetadata metadata = PixaImageMetadata.parseEncoded(
+      _webpVp8xHeader(1024, 768),
+    );
 
     expect(metadata.width, 1024);
     expect(metadata.height, 768);
@@ -28,8 +30,9 @@ void main() {
   });
 
   test('parses BMP metadata from encoded headers', () {
-    final PixaImageMetadata metadata =
-        PixaImageMetadata.parseEncoded(_bmpInfoHeader(800, -600));
+    final PixaImageMetadata metadata = PixaImageMetadata.parseEncoded(
+      _bmpInfoHeader(800, -600),
+    );
 
     expect(metadata.width, 800);
     expect(metadata.height, 600);
@@ -39,8 +42,9 @@ void main() {
   });
 
   test('parses WBMP metadata from encoded headers', () {
-    final PixaImageMetadata metadata =
-        PixaImageMetadata.parseEncoded(_wbmpImage(17, 9));
+    final PixaImageMetadata metadata = PixaImageMetadata.parseEncoded(
+      _wbmpImage(17, 9),
+    );
 
     expect(metadata.width, 17);
     expect(metadata.height, 9);
@@ -50,12 +54,9 @@ void main() {
   });
 
   test('parses largest ICO entry from encoded directory headers', () {
-    final PixaImageMetadata metadata =
-        PixaImageMetadata.parseEncoded(_icoHeader(<(int, int)>[
-      (16, 16),
-      (0, 0),
-      (48, 32),
-    ]));
+    final PixaImageMetadata metadata = PixaImageMetadata.parseEncoded(
+      _icoHeader(<(int, int)>[(16, 16), (0, 0), (48, 32)]),
+    );
 
     expect(metadata.width, 256);
     expect(metadata.height, 256);
@@ -67,25 +68,26 @@ void main() {
   test('parses additional runtime-backed format metadata', () {
     final List<(PixaImageMetadataFormat, Uint8List, int, int)> fixtures =
         <(PixaImageMetadataFormat, Uint8List, int, int)>[
-      (PixaImageMetadataFormat.tiff, _tiffRgba1x1(), 1, 1),
-      (PixaImageMetadataFormat.pnm, _pnmRgb1x1(), 1, 1),
-      (PixaImageMetadataFormat.qoi, _qoiRgba1x1(), 1, 1),
-      (PixaImageMetadataFormat.tga, _tgaRgb1x1(), 1, 1),
-      (PixaImageMetadataFormat.dds, _ddsDxt1_4x4(), 4, 4),
-      (PixaImageMetadataFormat.hdr, _hdrRgb1x1(), 1, 1),
-      (PixaImageMetadataFormat.farbfeld, _farbfeldRgba1x1(), 1, 1),
-      (PixaImageMetadataFormat.pcx, _pcxRgb1x1(), 1, 1),
-      (PixaImageMetadataFormat.sgi, _sgiRgb1x1(), 1, 1),
-      (PixaImageMetadataFormat.xbm, _xbm1x1(), 1, 1),
-      (PixaImageMetadataFormat.xpm, _xpm1x1(), 1, 1),
-    ];
+          (PixaImageMetadataFormat.tiff, _tiffRgba1x1(), 1, 1),
+          (PixaImageMetadataFormat.pnm, _pnmRgb1x1(), 1, 1),
+          (PixaImageMetadataFormat.qoi, _qoiRgba1x1(), 1, 1),
+          (PixaImageMetadataFormat.tga, _tgaRgb1x1(), 1, 1),
+          (PixaImageMetadataFormat.dds, _ddsDxt1_4x4(), 4, 4),
+          (PixaImageMetadataFormat.hdr, _hdrRgb1x1(), 1, 1),
+          (PixaImageMetadataFormat.farbfeld, _farbfeldRgba1x1(), 1, 1),
+          (PixaImageMetadataFormat.pcx, _pcxRgb1x1(), 1, 1),
+          (PixaImageMetadataFormat.sgi, _sgiRgb1x1(), 1, 1),
+          (PixaImageMetadataFormat.xbm, _xbm1x1(), 1, 1),
+          (PixaImageMetadataFormat.xpm, _xpm1x1(), 1, 1),
+        ];
 
     for (final (
           PixaImageMetadataFormat format,
           Uint8List bytes,
           int width,
-          int height
-        ) in fixtures) {
+          int height,
+        )
+        in fixtures) {
       final PixaImageMetadata metadata = PixaImageMetadata.parseEncoded(bytes);
       expect(metadata.width, width);
       expect(metadata.height, height);
@@ -102,18 +104,7 @@ Uint8List _jpegWithSof(int marker, int width, int height) {
   bytes.add(<int>[0xff, marker, 0x00, 0x11, 0x08]);
   bytes.add(_be16(height));
   bytes.add(_be16(width));
-  bytes.add(<int>[
-    0x03,
-    0x01,
-    0x11,
-    0x00,
-    0x02,
-    0x11,
-    0x01,
-    0x03,
-    0x11,
-    0x01,
-  ]);
+  bytes.add(<int>[0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01]);
   return bytes.toBytes();
 }
 
@@ -134,10 +125,10 @@ List<int> _be16(int value) => <int>[(value >> 8) & 0xff, value & 0xff];
 List<int> _le16(int value) => <int>[value & 0xff, (value >> 8) & 0xff];
 
 List<int> _le24(int value) => <int>[
-      value & 0xff,
-      (value >> 8) & 0xff,
-      (value >> 16) & 0xff,
-    ];
+  value & 0xff,
+  (value >> 8) & 0xff,
+  (value >> 16) & 0xff,
+];
 
 List<int> _le32(int value) {
   final int unsigned = value.toUnsigned(32);
@@ -224,12 +215,7 @@ Uint8List _tiffRgba1x1() {
 }
 
 List<int> _tiffEntry(int tag, int type, int count, int value) {
-  return <int>[
-    ..._le16(tag),
-    ..._le16(type),
-    ..._le32(count),
-    ..._le32(value),
-  ];
+  return <int>[..._le16(tag), ..._le16(type), ..._le32(count), ..._le32(value)];
 }
 
 Uint8List _qoiRgba1x1() {

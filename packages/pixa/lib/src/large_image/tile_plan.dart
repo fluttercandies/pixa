@@ -10,8 +10,8 @@ import 'transform_scale.dart';
 final class PixaLargeImageSize {
   /// Creates source image dimensions.
   const PixaLargeImageSize({required this.width, required this.height})
-      : assert(width > 0),
-        assert(height > 0);
+    : assert(width > 0),
+      assert(height > 0);
 
   /// Source width in pixels.
   final int width;
@@ -61,7 +61,8 @@ final class PixaLargeImageTile {
   final int decodedHeight;
 
   /// Stable key for Flutter widget identity.
-  String get key => 's$sampleSize-r$row-c$column-${sourceRect.width.round()}x'
+  String get key =>
+      's$sampleSize-r$row-c$column-${sourceRect.width.round()}x'
       '${sourceRect.height.round()}';
 
   /// Builds the Pixa request for this tile.
@@ -122,19 +123,16 @@ final class PixaLargeImageTilePlan {
   /// This is primarily useful for diagnostics and tests. Renderers should use
   /// [visibleTiles], then prefetch [prefetchTiles] through the pipeline.
   List<PixaLargeImageTile> get tiles => <PixaLargeImageTile>[
-        ...visibleTiles,
-        ...prefetchTiles,
-      ];
+    ...visibleTiles,
+    ...prefetchTiles,
+  ];
 
   /// Number of visible and prefetch tiles in this plan.
   int get tileCount => visibleTiles.length + prefetchTiles.length;
 }
 
 final class _RawTilePlan {
-  const _RawTilePlan({
-    required this.visibleTiles,
-    required this.prefetchTiles,
-  });
+  const _RawTilePlan({required this.visibleTiles, required this.prefetchTiles});
 
   final List<PixaLargeImageTile> visibleTiles;
 
@@ -149,9 +147,9 @@ final class PixaLargeImageTilePlanner {
     this.tileSize = 512,
     this.cacheExtentScreens = 1.0,
     this.maxVisibleTiles = 96,
-  })  : assert(tileSize > 0),
-        assert(cacheExtentScreens >= 0),
-        assert(maxVisibleTiles > 0);
+  }) : assert(tileSize > 0),
+       assert(cacheExtentScreens >= 0),
+       assert(maxVisibleTiles > 0);
 
   /// Source image dimensions.
   final PixaLargeImageSize imageSize;
@@ -186,8 +184,10 @@ final class PixaLargeImageTilePlanner {
       imageSize.width.toDouble(),
       imageSize.height.toDouble(),
     );
-    final Rect visibleRect =
-        _visibleSourceRect(transform, viewportSize).intersect(imageBounds);
+    final Rect visibleRect = _visibleSourceRect(
+      transform,
+      viewportSize,
+    ).intersect(imageBounds);
     if (visibleRect.isEmpty) {
       return PixaLargeImageTilePlan._(
         visibleRect: visibleRect,
@@ -203,8 +203,11 @@ final class PixaLargeImageTilePlanner {
       0.000001,
     );
     int sampleSize = _chooseSampleSize(scale, devicePixelRatio);
-    Rect cacheRect = _inflateForCache(visibleRect, viewportSize, scale)
-        .intersect(imageBounds);
+    Rect cacheRect = _inflateForCache(
+      visibleRect,
+      viewportSize,
+      scale,
+    ).intersect(imageBounds);
     _RawTilePlan raw = _rawPlan(visibleRect, cacheRect, sampleSize);
     while (raw.visibleTiles.length > maxVisibleTiles) {
       final int nextSample = sampleSize * 2;
@@ -231,8 +234,10 @@ final class PixaLargeImageTilePlanner {
   }
 
   _RawTilePlan _rawPlan(Rect visibleRect, Rect cacheRect, int sampleSize) {
-    final List<PixaLargeImageTile> visibleTiles =
-        _sortByDistance(_tilesFor(visibleRect, sampleSize), visibleRect.center);
+    final List<PixaLargeImageTile> visibleTiles = _sortByDistance(
+      _tilesFor(visibleRect, sampleSize),
+      visibleRect.center,
+    );
     final Set<String> visibleKeys = <String>{
       for (final PixaLargeImageTile tile in visibleTiles) tile.key,
     };
@@ -315,36 +320,52 @@ final class PixaLargeImageTilePlanner {
 
   List<PixaLargeImageTile> _tilesFor(Rect rect, int sampleSize) {
     final int tileSpan = tileSize * sampleSize;
-    final int maxColumn =
-        math.max(0, ((imageSize.width - 1) / tileSpan).floor());
+    final int maxColumn = math.max(
+      0,
+      ((imageSize.width - 1) / tileSpan).floor(),
+    );
     final int maxRow = math.max(0, ((imageSize.height - 1) / tileSpan).floor());
     final int firstColumn = (rect.left / tileSpan).floor().clamp(0, maxColumn);
-    final int lastColumn =
-        ((rect.right - 0.001) / tileSpan).floor().clamp(firstColumn, maxColumn);
+    final int lastColumn = ((rect.right - 0.001) / tileSpan).floor().clamp(
+      firstColumn,
+      maxColumn,
+    );
     final int firstRow = (rect.top / tileSpan).floor().clamp(0, maxRow);
-    final int lastRow =
-        ((rect.bottom - 0.001) / tileSpan).floor().clamp(firstRow, maxRow);
+    final int lastRow = ((rect.bottom - 0.001) / tileSpan).floor().clamp(
+      firstRow,
+      maxRow,
+    );
     final List<PixaLargeImageTile> tiles = <PixaLargeImageTile>[];
     for (int row = firstRow; row <= lastRow; row++) {
       for (int column = firstColumn; column <= lastColumn; column++) {
         final double left = column * tileSpan.toDouble();
         final double top = row * tileSpan.toDouble();
-        final double right =
-            math.min(left + tileSpan, imageSize.width.toDouble());
-        final double bottom =
-            math.min(top + tileSpan, imageSize.height.toDouble());
-        final int decodedWidth =
-            math.max(1, ((right - left) / sampleSize).ceil());
-        final int decodedHeight =
-            math.max(1, ((bottom - top) / sampleSize).ceil());
-        tiles.add(PixaLargeImageTile._(
-          sampleSize: sampleSize,
-          row: row,
-          column: column,
-          sourceRect: Rect.fromLTRB(left, top, right, bottom),
-          decodedWidth: decodedWidth,
-          decodedHeight: decodedHeight,
-        ));
+        final double right = math.min(
+          left + tileSpan,
+          imageSize.width.toDouble(),
+        );
+        final double bottom = math.min(
+          top + tileSpan,
+          imageSize.height.toDouble(),
+        );
+        final int decodedWidth = math.max(
+          1,
+          ((right - left) / sampleSize).ceil(),
+        );
+        final int decodedHeight = math.max(
+          1,
+          ((bottom - top) / sampleSize).ceil(),
+        );
+        tiles.add(
+          PixaLargeImageTile._(
+            sampleSize: sampleSize,
+            row: row,
+            column: column,
+            sourceRect: Rect.fromLTRB(left, top, right, bottom),
+            decodedWidth: decodedWidth,
+            decodedHeight: decodedHeight,
+          ),
+        );
       }
     }
     return tiles;

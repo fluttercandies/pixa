@@ -39,9 +39,9 @@ final class PixaRuntimeContract {
     this.binaryMessages = true,
     this.ownedBuffers = true,
     this.streamHandles = true,
-  })  : deployment = PixaRuntimeDeployment.builtInHostModule,
-        assetId = null,
-        entrypointSymbol = null;
+  }) : deployment = PixaRuntimeDeployment.builtInHostModule,
+       assetId = null,
+       entrypointSymbol = null;
 
   /// Creates a descriptor for a plugin linked into Pixa's host binary.
   const PixaRuntimeContract.hostLinkedPluginModule({
@@ -54,8 +54,8 @@ final class PixaRuntimeContract {
     this.binaryMessages = true,
     this.ownedBuffers = true,
     this.streamHandles = true,
-  })  : deployment = PixaRuntimeDeployment.hostLinkedPluginModule,
-        assetId = null;
+  }) : deployment = PixaRuntimeDeployment.hostLinkedPluginModule,
+       assetId = null;
 
   /// Creates a descriptor for an asset module using Pixa's host ABI.
   const PixaRuntimeContract.assetModule({
@@ -269,13 +269,13 @@ final class PixaDecoderCapabilities {
     this.progressiveDecode = false,
     this.regionDecode = false,
     this.defaultRuntimeDisplay = false,
-  })  : metadataProbe = true,
-        staticDecode = true,
-        processorInput = true,
-        streamingInput = true,
-        zeroCopyInput = true,
-        ownedOutputBuffers = true,
-        stable = true;
+  }) : metadataProbe = true,
+       staticDecode = true,
+       processorInput = true,
+       streamingInput = true,
+       zeroCopyInput = true,
+       ownedOutputBuffers = true,
+       stable = true;
 
   /// Explicit Dart decoder defaults for opt-in non-default plugin paths.
   const PixaDecoderCapabilities.dartBytes({
@@ -288,8 +288,8 @@ final class PixaDecoderCapabilities {
     this.streamingInput = false,
     this.defaultRuntimeDisplay = false,
     this.stable = true,
-  })  : zeroCopyInput = false,
-        ownedOutputBuffers = false;
+  }) : zeroCopyInput = false,
+       ownedOutputBuffers = false;
 
   /// Can read dimensions/flags from bounded headers.
   final bool metadataProbe;
@@ -520,19 +520,19 @@ final class PixaCacheStoreCapabilities {
 
   /// Pixa's runtime image-cache store capabilities.
   const PixaCacheStoreCapabilities.runtimeImageCache()
-      : this(
-          binaryValues: true,
-          metadataSidecar: true,
-          atomicWrites: true,
-          checksumValidation: true,
-          ttl: true,
-          namespaceIsolation: true,
-          sizeEviction: true,
-          corruptionRecovery: true,
-          concurrentEntryGuards: true,
-          ownedReadBuffers: true,
-          dartStorageRuntime: false,
-        );
+    : this(
+        binaryValues: true,
+        metadataSidecar: true,
+        atomicWrites: true,
+        checksumValidation: true,
+        ttl: true,
+        namespaceIsolation: true,
+        sizeEviction: true,
+        corruptionRecovery: true,
+        concurrentEntryGuards: true,
+        ownedReadBuffers: true,
+        dartStorageRuntime: false,
+      );
 
   /// Stores encoded image bytes as binary values.
   final bool binaryValues;
@@ -720,20 +720,24 @@ final class PixaRegistry {
     String? formatId,
     String? mimeType,
   }) {
-    final String? normalizedFormatId =
-        formatId == null ? null : _normalizeRouteClaim(formatId).ifNotEmpty;
+    final String? normalizedFormatId = formatId == null
+        ? null
+        : _normalizeRouteClaim(formatId).ifNotEmpty;
     if (normalizedFormatId != null) {
-      final PixaDecoderDescriptor? decoder =
-          decoderForFormatId(normalizedFormatId);
+      final PixaDecoderDescriptor? decoder = decoderForFormatId(
+        normalizedFormatId,
+      );
       if (decoder != null) {
         return decoder;
       }
     }
-    final String? normalizedMimeType =
-        mimeType == null ? null : _normalizeMimeType(mimeType).ifNotEmpty;
+    final String? normalizedMimeType = mimeType == null
+        ? null
+        : _normalizeMimeType(mimeType).ifNotEmpty;
     if (normalizedMimeType != null) {
-      final PixaDecoderDescriptor? decoder =
-          decoderForMimeType(normalizedMimeType);
+      final PixaDecoderDescriptor? decoder = decoderForMimeType(
+        normalizedMimeType,
+      );
       if (decoder != null) {
         return decoder;
       }
@@ -759,7 +763,8 @@ final class PixaRegistry {
   /// Registered cache-key contributors.
   List<PixaCacheKeyContributorDescriptor> get cacheKeyContributors =>
       List<PixaCacheKeyContributorDescriptor>.unmodifiable(
-          _cacheKeyContributors.values);
+        _cacheKeyContributors.values,
+      );
 
   /// Registered debug panels.
   List<PixaDebugPanelDescriptor> get debugPanels =>
@@ -831,16 +836,22 @@ final class PixaRegistry {
             count + decoder.signatures.length,
       ),
       decodersWithMetadataProbe: _decoders.values
-          .where((PixaDecoderDescriptor decoder) =>
-              decoder.capabilities.metadataProbe)
+          .where(
+            (PixaDecoderDescriptor decoder) =>
+                decoder.capabilities.metadataProbe,
+          )
           .length,
       decodersWithRegionDecode: _decoders.values
-          .where((PixaDecoderDescriptor decoder) =>
-              decoder.capabilities.regionDecode)
+          .where(
+            (PixaDecoderDescriptor decoder) =>
+                decoder.capabilities.regionDecode,
+          )
           .length,
       decodersWithStreamingInput: _decoders.values
-          .where((PixaDecoderDescriptor decoder) =>
-              decoder.capabilities.streamingInput)
+          .where(
+            (PixaDecoderDescriptor decoder) =>
+                decoder.capabilities.streamingInput,
+          )
           .length,
       runtimeHandlers: runtimeHandlers,
       dartHandlers: dartHandlers,
@@ -930,15 +941,23 @@ final class PixaRegistry {
   /// Registers a cache store descriptor.
   void registerCacheStore(PixaCacheStoreDescriptor cacheStore) {
     _validateExecutionContract(
-        cacheStore, cacheStore.executionKind, 'cache store');
+      cacheStore,
+      cacheStore.executionKind,
+      'cache store',
+    );
     _putUnique(_cacheStores, cacheStore, 'cache store');
-    _claim(_cacheStoreNamespaces, cacheStore.namespace, cacheStore.id,
-        'cache store namespace');
+    _claim(
+      _cacheStoreNamespaces,
+      cacheStore.namespace,
+      cacheStore.id,
+      'cache store namespace',
+    );
   }
 
   /// Registers a cache-key contributor descriptor.
   void registerCacheKeyContributor(
-      PixaCacheKeyContributorDescriptor contributor) {
+    PixaCacheKeyContributorDescriptor contributor,
+  ) {
     _putUnique(_cacheKeyContributors, contributor, 'cache-key contributor');
   }
 
@@ -1099,7 +1118,8 @@ void _claim(
   final String? existing = claims[key];
   if (existing != null && existing != ownerId) {
     throw StateError(
-        'Pixa $label "$rawKey" is already registered by "$existing".');
+      'Pixa $label "$rawKey" is already registered by "$existing".',
+    );
   }
   claims[key] = ownerId;
 }

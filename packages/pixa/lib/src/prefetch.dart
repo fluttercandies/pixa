@@ -11,10 +11,11 @@ import 'request.dart';
 typedef PixaIndexedRequestBuilder = PixaRequest? Function(int index);
 
 /// Runs one prefetch operation.
-typedef PixaPrefetchRunner = Future<void> Function(
-  PixaRequest request, {
-  required PixaPrefetchTarget target,
-});
+typedef PixaPrefetchRunner =
+    Future<void> Function(
+      PixaRequest request, {
+      required PixaPrefetchTarget target,
+    });
 
 /// Component-agnostic predictive prefetcher for scrollable galleries.
 final class PixaPredictivePrefetcher {
@@ -27,11 +28,11 @@ final class PixaPredictivePrefetcher {
     this.maxConcurrent = 2,
     this.recentCapacity = 256,
     PixaPrefetchRunner? runPrefetch,
-  })  : assert(forwardItemCount >= 0),
-        assert(backwardItemCount >= 0),
-        assert(maxConcurrent > 0),
-        assert(recentCapacity >= 0),
-        _runPrefetch = runPrefetch;
+  }) : assert(forwardItemCount >= 0),
+       assert(backwardItemCount >= 0),
+       assert(maxConcurrent > 0),
+       assert(recentCapacity >= 0),
+       _runPrefetch = runPrefetch;
 
   /// Creates requests for item indexes.
   final PixaIndexedRequestBuilder requestBuilder;
@@ -133,8 +134,10 @@ final class PixaPredictivePrefetcher {
   }
 
   Iterable<int> _plannedIndexes(int first, int last, int itemCount) sync* {
-    final int forwardEnd =
-        math.min(itemCount - 1, last.saturatingAdd(forwardItemCount));
+    final int forwardEnd = math.min(
+      itemCount - 1,
+      last.saturatingAdd(forwardItemCount),
+    );
     for (int index = last + 1; index <= forwardEnd; index++) {
       yield index;
     }
@@ -155,14 +158,16 @@ final class PixaPredictivePrefetcher {
     for (final PixaRequest request in requests) {
       final String key = _dedupeKeyFor(request, target);
       _pendingKeys.add(key);
-      _pending.add(_QueuedPrefetch(
-        request: request,
-        key: key,
-        target: target,
-        context: context,
-        generation: generation,
-        batch: batch,
-      ));
+      _pending.add(
+        _QueuedPrefetch(
+          request: request,
+          key: key,
+          target: target,
+          context: context,
+          generation: generation,
+          batch: batch,
+        ),
+      );
     }
     _pumpQueue();
     return batch.future;
@@ -251,8 +256,7 @@ final class PixaPredictivePrefetcher {
   String _dedupeKeyFor(PixaRequest request, PixaPrefetchTarget target) {
     return switch (target) {
       PixaPrefetchTarget.diskOnly ||
-      PixaPrefetchTarget.encodedMemory =>
-        request.encodedCacheKey.value,
+      PixaPrefetchTarget.encodedMemory => request.encodedCacheKey.value,
       PixaPrefetchTarget.decodedPrewarm => request.cacheKey.value,
     };
   }

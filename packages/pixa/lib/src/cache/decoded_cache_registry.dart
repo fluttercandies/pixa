@@ -32,8 +32,9 @@ final class PixaDecodedCacheRegistry {
         namespaceKeys.remove(key);
       }
     }
-    _keysByNamespace
-        .removeWhere((String namespace, Set<Object> keys) => keys.isEmpty);
+    _keysByNamespace.removeWhere(
+      (String namespace, Set<Object> keys) => keys.isEmpty,
+    );
     return List<Object>.of(keys);
   }
 
@@ -46,8 +47,9 @@ final class PixaDecodedCacheRegistry {
         cacheKeys.remove(key);
       }
     }
-    _keysByCacheKey
-        .removeWhere((String cacheKey, Set<Object> keys) => keys.isEmpty);
+    _keysByCacheKey.removeWhere(
+      (String cacheKey, Set<Object> keys) => keys.isEmpty,
+    );
     return List<Object>.of(keys);
   }
 

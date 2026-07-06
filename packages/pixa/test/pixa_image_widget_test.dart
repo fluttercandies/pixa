@@ -11,8 +11,9 @@ import 'package:pixa/pixa.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('PixaImage renders placeholder while source is unresolved',
-      (WidgetTester tester) async {
+  testWidgets('PixaImage renders placeholder while source is unresolved', (
+    WidgetTester tester,
+  ) async {
     await _configure('pixa-widget-placeholder-');
     final Completer<Uint8List> bytes = Completer<Uint8List>();
     final PixaRequest request = PixaRequest(
@@ -20,14 +21,16 @@ void main() {
       cachePolicy: const PixaCachePolicy.noStore(),
     );
 
-    await tester.pumpWidget(MaterialApp(
-      home: PixaImage(
-        request: request,
-        placeholder: const PixaPlaceholder.widget(
-          SizedBox(key: Key('placeholder')),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PixaImage(
+          request: request,
+          placeholder: const PixaPlaceholder.widget(
+            SizedBox(key: Key('placeholder')),
+          ),
         ),
       ),
-    ));
+    );
     await tester.pump();
 
     expect(find.byKey(const Key('placeholder')), findsOneWidget);
@@ -35,8 +38,9 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('PixaImage renders decoded image from Flutter ImageCache',
-      (WidgetTester tester) async {
+  testWidgets('PixaImage renders decoded image from Flutter ImageCache', (
+    WidgetTester tester,
+  ) async {
     await _configure('pixa-widget-success-');
     const PixaTargetSize layoutTarget = PixaTargetSize(width: 1, height: 1);
     final PixaRequest request = PixaRequest(
@@ -47,12 +51,14 @@ void main() {
     );
     await _seedDecodedCache(tester, request.copyWith(targetSize: layoutTarget));
 
-    await tester.pumpWidget(MaterialApp(
-      home: MediaQuery(
-        data: const MediaQueryData(devicePixelRatio: 1),
-        child: PixaImage(width: 1, height: 1, request: request),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(devicePixelRatio: 1),
+          child: PixaImage(width: 1, height: 1, request: request),
+        ),
       ),
-    ));
+    );
 
     await _pumpUntil(tester, find.byType(RawImage));
 
@@ -60,38 +66,43 @@ void main() {
     expect(find.byType(RawImage), findsOneWidget);
   });
 
-  testWidgets('PixaImage progress builder receives controller progress',
-      (WidgetTester tester) async {
+  testWidgets('PixaImage progress builder receives controller progress', (
+    WidgetTester tester,
+  ) async {
     await _configure('pixa-widget-progress-');
     final Completer<Uint8List> bytes = Completer<Uint8List>();
     final PixaController controller = PixaController();
     addTearDown(controller.dispose);
 
-    await tester.pumpWidget(MaterialApp(
-      home: PixaImage(
-        controller: controller,
-        request: PixaRequest(
-          source: PixaSource.custom('progress', () => bytes.future),
-          cachePolicy: const PixaCachePolicy.noStore(),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PixaImage(
+          controller: controller,
+          request: PixaRequest(
+            source: PixaSource.custom('progress', () => bytes.future),
+            cachePolicy: const PixaCachePolicy.noStore(),
+          ),
+          progressBuilder: (BuildContext context, PixaProgress? progress) {
+            return Text(
+              progress?.fraction?.toStringAsFixed(2) ?? 'none',
+              key: const Key('progress'),
+            );
+          },
         ),
-        progressBuilder: (BuildContext context, PixaProgress? progress) {
-          return Text(
-            progress?.fraction?.toStringAsFixed(2) ?? 'none',
-            key: const Key('progress'),
-          );
-        },
       ),
-    ));
+    );
     await tester.pump();
 
-    controller.setState(const PixaLoading(
-      progress: PixaProgress(
-        requestId: 7,
-        stage: PixaStage.fetch,
-        receivedBytes: 1,
-        expectedBytes: 4,
+    controller.setState(
+      const PixaLoading(
+        progress: PixaProgress(
+          requestId: 7,
+          stage: PixaStage.fetch,
+          receivedBytes: 1,
+          expectedBytes: 4,
+        ),
       ),
-    ));
+    );
     await tester.pump();
 
     expect(find.text('0.25'), findsOneWidget);
@@ -99,40 +110,48 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('PixaImage renders progressive preview from load progress',
-      (WidgetTester tester) async {
+  testWidgets('PixaImage renders progressive preview from load progress', (
+    WidgetTester tester,
+  ) async {
     await _configure('pixa-widget-progressive-preview-');
     final Completer<Uint8List> bytes = Completer<Uint8List>();
     final PixaController controller = PixaController();
     addTearDown(controller.dispose);
 
-    await tester.pumpWidget(MaterialApp(
-      home: PixaImage(
-        controller: controller,
-        request: PixaRequest(
-          source: PixaSource.custom('progressive-preview', () => bytes.future),
-          cachePolicy: const PixaCachePolicy.noStore(),
-        ),
-        placeholder: const PixaPlaceholder.widget(
-          SizedBox(key: Key('placeholder')),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PixaImage(
+          controller: controller,
+          request: PixaRequest(
+            source: PixaSource.custom(
+              'progressive-preview',
+              () => bytes.future,
+            ),
+            cachePolicy: const PixaCachePolicy.noStore(),
+          ),
+          placeholder: const PixaPlaceholder.widget(
+            SizedBox(key: Key('placeholder')),
+          ),
         ),
       ),
-    ));
+    );
     await tester.pump();
 
-    controller.setState(PixaLoading(
-      progress: PixaProgress(
-        requestId: 8,
-        stage: PixaStage.fetch,
-        receivedBytes: 24,
-        expectedBytes: 48,
-        progressivePreview: PixaProgressivePreview(
-          bytes: _progressiveJpegWithScan(),
-          mimeType: 'image/jpeg',
-          sequence: 1,
+    controller.setState(
+      PixaLoading(
+        progress: PixaProgress(
+          requestId: 8,
+          stage: PixaStage.fetch,
+          receivedBytes: 24,
+          expectedBytes: 48,
+          progressivePreview: PixaProgressivePreview(
+            bytes: _progressiveJpegWithScan(),
+            mimeType: 'image/jpeg',
+            sequence: 1,
+          ),
         ),
       ),
-    ));
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
@@ -148,15 +167,16 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('PixaImage error builder retry reloads the provider generation',
-      (WidgetTester tester) async {
+  testWidgets('PixaImage error builder retry reloads the provider generation', (
+    WidgetTester tester,
+  ) async {
     await _configure('pixa-widget-retry-');
     const PixaTargetSize layoutTarget = PixaTargetSize(width: 1, height: 1);
     final PixaController controller = PixaController();
     addTearDown(controller.dispose);
     final ui.Image retryImage =
         await tester.runAsync(() => createTestImage(width: 1, height: 1)) ??
-            (throw StateError('Failed to create decoded retry image.'));
+        (throw StateError('Failed to create decoded retry image.'));
     addTearDown(retryImage.dispose);
     var attempts = 0;
     late final PixaRequest request;
@@ -177,25 +197,31 @@ void main() {
       }
     });
 
-    await tester.pumpWidget(MaterialApp(
-      home: MediaQuery(
-        data: const MediaQueryData(devicePixelRatio: 1),
-        child: PixaImage(
-          controller: controller,
-          width: 1,
-          height: 1,
-          request: request,
-          errorBuilder:
-              (BuildContext context, PixaFailure failure, VoidCallback retry) {
-            return TextButton(
-              key: const Key('retry'),
-              onPressed: retry,
-              child: const Text('retry'),
-            );
-          },
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(devicePixelRatio: 1),
+          child: PixaImage(
+            controller: controller,
+            width: 1,
+            height: 1,
+            request: request,
+            errorBuilder:
+                (
+                  BuildContext context,
+                  PixaFailure failure,
+                  VoidCallback retry,
+                ) {
+                  return TextButton(
+                    key: const Key('retry'),
+                    onPressed: retry,
+                    child: const Text('retry'),
+                  );
+                },
+          ),
         ),
       ),
-    ));
+    );
     await tester.runAsync(_allowAsyncWork);
     await tester.pump();
 
@@ -211,8 +237,9 @@ void main() {
     expect(controller.generation, 1);
   });
 
-  testWidgets('PixaImage detaches external controller on dispose',
-      (WidgetTester tester) async {
+  testWidgets('PixaImage detaches external controller on dispose', (
+    WidgetTester tester,
+  ) async {
     await _configure('pixa-widget-dispose-');
     final PixaController controller = PixaController();
     addTearDown(controller.dispose);
@@ -224,12 +251,11 @@ void main() {
     );
     await _seedDecodedCache(tester, request);
 
-    await tester.pumpWidget(MaterialApp(
-      home: PixaImage(
-        controller: controller,
-        request: request,
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PixaImage(controller: controller, request: request),
       ),
-    ));
+    );
     await tester.pump();
 
     expect(controller.isAttached, isTrue);
@@ -240,109 +266,114 @@ void main() {
     expect(controller.isAttached, isFalse);
   });
 
-  testWidgets('PixaImage updates controller visibility when scrolled offscreen',
-      (WidgetTester tester) async {
-    await _configure('pixa-widget-scroll-');
-    final ScrollController scrollController = ScrollController();
-    addTearDown(scrollController.dispose);
-    final PixaController controller = PixaController();
-    addTearDown(controller.dispose);
-    final PixaRequest request = PixaRequest(
-      source: PixaSource.custom('scroll', () async {
-        throw StateError('decoded cache should satisfy this widget test');
-      }),
-      cachePolicy: const PixaCachePolicy.noStore(),
-    );
-    await _seedDecodedCache(tester, request);
+  testWidgets(
+    'PixaImage updates controller visibility when scrolled offscreen',
+    (WidgetTester tester) async {
+      await _configure('pixa-widget-scroll-');
+      final ScrollController scrollController = ScrollController();
+      addTearDown(scrollController.dispose);
+      final PixaController controller = PixaController();
+      addTearDown(controller.dispose);
+      final PixaRequest request = PixaRequest(
+        source: PixaSource.custom('scroll', () async {
+          throw StateError('decoded cache should satisfy this widget test');
+        }),
+        cachePolicy: const PixaCachePolicy.noStore(),
+      );
+      await _seedDecodedCache(tester, request);
 
-    await tester.pumpWidget(MaterialApp(
-      home: SizedBox(
-        height: 100,
-        child: SingleChildScrollView(
-          controller: scrollController,
-          child: Column(
-            children: <Widget>[
-              SizedBox(
-                height: 60,
-                child: PixaImage(
-                  controller: controller,
-                  request: request,
-                ),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            height: 100,
+            child: SingleChildScrollView(
+              controller: scrollController,
+              child: Column(
+                children: <Widget>[
+                  SizedBox(
+                    height: 60,
+                    child: PixaImage(controller: controller, request: request),
+                  ),
+                  const SizedBox(height: 600),
+                ],
               ),
-              const SizedBox(height: 600),
-            ],
+            ),
           ),
         ),
-      ),
-    ));
-    await tester.pump();
+      );
+      await tester.pump();
 
-    expect(controller.isVisible, isTrue);
+      expect(controller.isVisible, isTrue);
 
-    scrollController.jumpTo(200);
-    await tester.pump();
-    await tester.pump();
+      scrollController.jumpTo(200);
+      await tester.pump();
+      await tester.pump();
 
-    expect(controller.isVisible, isFalse);
+      expect(controller.isVisible, isFalse);
 
-    scrollController.jumpTo(0);
-    await tester.pump();
-    await tester.pump();
+      scrollController.jumpTo(0);
+      await tester.pump();
+      await tester.pump();
 
-    expect(controller.isVisible, isTrue);
-  });
+      expect(controller.isVisible, isTrue);
+    },
+  );
 
   testWidgets(
-      'PixaImage owned controller does not rebuild on scroll visibility',
-      (WidgetTester tester) async {
-    await _configure('pixa-widget-owned-scroll-');
-    final ScrollController scrollController = ScrollController();
-    addTearDown(scrollController.dispose);
-    final Completer<Uint8List> bytes = Completer<Uint8List>();
-    final PixaRequest request = PixaRequest(
-      source: PixaSource.custom('owned-scroll', () => bytes.future),
-      cachePolicy: const PixaCachePolicy.noStore(),
-    );
-    var placeholderBuilds = 0;
+    'PixaImage owned controller does not rebuild on scroll visibility',
+    (WidgetTester tester) async {
+      await _configure('pixa-widget-owned-scroll-');
+      final ScrollController scrollController = ScrollController();
+      addTearDown(scrollController.dispose);
+      final Completer<Uint8List> bytes = Completer<Uint8List>();
+      final PixaRequest request = PixaRequest(
+        source: PixaSource.custom('owned-scroll', () => bytes.future),
+        cachePolicy: const PixaCachePolicy.noStore(),
+      );
+      var placeholderBuilds = 0;
 
-    await tester.pumpWidget(MaterialApp(
-      home: SizedBox(
-        height: 100,
-        child: SingleChildScrollView(
-          controller: scrollController,
-          child: Column(
-            children: <Widget>[
-              SizedBox(
-                height: 60,
-                child: PixaImage(
-                  request: request,
-                  placeholder: PixaPlaceholder.widget(
-                    _BuildCounter(
-                      onBuild: () => placeholderBuilds++,
-                      child: const SizedBox(key: Key('owned-placeholder')),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            height: 100,
+            child: SingleChildScrollView(
+              controller: scrollController,
+              child: Column(
+                children: <Widget>[
+                  SizedBox(
+                    height: 60,
+                    child: PixaImage(
+                      request: request,
+                      placeholder: PixaPlaceholder.widget(
+                        _BuildCounter(
+                          onBuild: () => placeholderBuilds++,
+                          child: const SizedBox(key: Key('owned-placeholder')),
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(height: 600),
+                ],
               ),
-              const SizedBox(height: 600),
-            ],
+            ),
           ),
         ),
-      ),
-    ));
-    await tester.pump();
-    final int initialBuilds = placeholderBuilds;
+      );
+      await tester.pump();
+      final int initialBuilds = placeholderBuilds;
 
-    scrollController.jumpTo(200);
-    await tester.pump();
-    await tester.pump();
+      scrollController.jumpTo(200);
+      await tester.pump();
+      await tester.pump();
 
-    expect(find.byKey(const Key('owned-placeholder')), findsOneWidget);
-    expect(placeholderBuilds, initialBuilds);
-  });
+      expect(find.byKey(const Key('owned-placeholder')), findsOneWidget);
+      expect(placeholderBuilds, initialBuilds);
+    },
+  );
 
-  testWidgets('PixaImage forwards gapless playback to Flutter Image',
-      (WidgetTester tester) async {
+  testWidgets('PixaImage forwards gapless playback to Flutter Image', (
+    WidgetTester tester,
+  ) async {
     await _configure('pixa-widget-gapless-');
     final PixaRequest request = PixaRequest(
       source: PixaSource.custom('gapless', () async {
@@ -352,12 +383,9 @@ void main() {
     );
     await _seedDecodedCache(tester, request);
 
-    await tester.pumpWidget(MaterialApp(
-      home: PixaImage(
-        gaplessPlayback: true,
-        request: request,
-      ),
-    ));
+    await tester.pumpWidget(
+      MaterialApp(home: PixaImage(gaplessPlayback: true, request: request)),
+    );
     await tester.pump();
 
     final Image image = tester.widget<Image>(find.byType(Image).first);
@@ -366,8 +394,9 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('PixaImage derives target size from layout and DPR',
-      (WidgetTester tester) async {
+  testWidgets('PixaImage derives target size from layout and DPR', (
+    WidgetTester tester,
+  ) async {
     await _configure('pixa-widget-layout-target-');
     final Completer<Uint8List> bytes = Completer<Uint8List>();
     final PixaRequest request = PixaRequest(
@@ -375,30 +404,35 @@ void main() {
       cachePolicy: const PixaCachePolicy.noStore(),
     );
 
-    await tester.pumpWidget(MaterialApp(
-      home: MediaQuery(
-        data: const MediaQueryData(devicePixelRatio: 2),
-        child: Center(
-          child: SizedBox(
-            width: 80,
-            height: 40,
-            child: PixaImage(request: request),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(devicePixelRatio: 2),
+          child: Center(
+            child: SizedBox(
+              width: 80,
+              height: 40,
+              child: PixaImage(request: request),
+            ),
           ),
         ),
       ),
-    ));
+    );
     await tester.pump();
 
     final Image image = tester.widget<Image>(find.byType(Image).first);
     final PixaProvider provider = image.image as PixaProvider;
-    expect(provider.request.targetSize,
-        const PixaTargetSize(width: 160, height: 80));
+    expect(
+      provider.request.targetSize,
+      const PixaTargetSize(width: 160, height: 80),
+    );
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
 
-  testWidgets('PixaImage preserves explicit request target size',
-      (WidgetTester tester) async {
+  testWidgets('PixaImage preserves explicit request target size', (
+    WidgetTester tester,
+  ) async {
     await _configure('pixa-widget-explicit-target-');
     final Completer<Uint8List> bytes = Completer<Uint8List>();
     final PixaRequest request = PixaRequest(
@@ -407,30 +441,35 @@ void main() {
       cachePolicy: const PixaCachePolicy.noStore(),
     );
 
-    await tester.pumpWidget(MaterialApp(
-      home: MediaQuery(
-        data: const MediaQueryData(devicePixelRatio: 3),
-        child: Center(
-          child: SizedBox(
-            width: 80,
-            height: 40,
-            child: PixaImage(request: request),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(devicePixelRatio: 3),
+          child: Center(
+            child: SizedBox(
+              width: 80,
+              height: 40,
+              child: PixaImage(request: request),
+            ),
           ),
         ),
       ),
-    ));
+    );
     await tester.pump();
 
     final Image image = tester.widget<Image>(find.byType(Image).first);
     final PixaProvider provider = image.image as PixaProvider;
-    expect(provider.request.targetSize,
-        const PixaTargetSize(width: 500, height: 300));
+    expect(
+      provider.request.targetSize,
+      const PixaTargetSize(width: 500, height: 300),
+    );
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
 
-  testWidgets('PixaImage skips layout probing for explicit target size',
-      (WidgetTester tester) async {
+  testWidgets('PixaImage skips layout probing for explicit target size', (
+    WidgetTester tester,
+  ) async {
     await _configure('pixa-widget-explicit-target-layout-');
     final Completer<Uint8List> bytes = Completer<Uint8List>();
     final PixaRequest request = PixaRequest(
@@ -439,14 +478,16 @@ void main() {
       cachePolicy: const PixaCachePolicy.noStore(),
     );
 
-    await tester.pumpWidget(MaterialApp(
-      home: PixaImage(
-        request: request,
-        placeholder: const PixaPlaceholder.widget(
-          SizedBox(key: Key('explicit-target-placeholder')),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PixaImage(
+          request: request,
+          placeholder: const PixaPlaceholder.widget(
+            SizedBox(key: Key('explicit-target-placeholder')),
+          ),
         ),
       ),
-    ));
+    );
     await tester.pump();
 
     expect(
@@ -457,7 +498,9 @@ void main() {
       findsNothing,
     );
     expect(
-        find.byKey(const Key('explicit-target-placeholder')), findsOneWidget);
+      find.byKey(const Key('explicit-target-placeholder')),
+      findsOneWidget,
+    );
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
@@ -500,7 +543,7 @@ Future<void> _seedDecodedCache(
 }) async {
   final ui.Image image =
       await tester.runAsync(() => createTestImage(width: 1, height: 1)) ??
-          (throw StateError('Failed to create decoded test image.'));
+      (throw StateError('Failed to create decoded test image.'));
   addTearDown(image.dispose);
   _seedDecodedCacheSync(request, generation: generation, image: image);
 }

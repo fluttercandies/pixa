@@ -44,16 +44,16 @@ final class PixaLargeImage extends StatefulWidget {
     this.maxPrefetchTiles = 64,
     this.evictDecodedTilesOnExit = true,
     this.clipBehavior = Clip.hardEdge,
-  })  : assert(imageWidth > 0),
-        assert(imageHeight > 0),
-        assert(tileSize > 0),
-        assert(cacheExtentScreens >= 0),
-        assert(maxVisibleTiles > 0),
-        assert(maxScale > 0),
-        assert(doubleTapZoomScale > 0),
-        assert(overviewTargetPixels > 0),
-        assert(maxPrefetchTiles >= 0),
-        assert(prefetchTarget != PixaPrefetchTarget.decodedPrewarm);
+  }) : assert(imageWidth > 0),
+       assert(imageHeight > 0),
+       assert(tileSize > 0),
+       assert(cacheExtentScreens >= 0),
+       assert(maxVisibleTiles > 0),
+       assert(maxScale > 0),
+       assert(doubleTapZoomScale > 0),
+       assert(overviewTargetPixels > 0),
+       assert(maxPrefetchTiles >= 0),
+       assert(prefetchTarget != PixaPrefetchTarget.decodedPrewarm);
 
   /// Creates a tiled network image viewer.
   factory PixaLargeImage.network(

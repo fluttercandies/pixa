@@ -12,25 +12,31 @@ Future<void> main(List<String> args) async {
     }
     if (input.config.code.linkModePreference == LinkModePreference.static) {
       throw UnsupportedError(
-          'Pixa runtime core currently requires dynamic loading.');
+        'Pixa runtime core currently requires dynamic loading.',
+      );
     }
 
-    final Uri coreManifest =
-        input.packageRoot.resolve('plugins/pixa_plugins.json');
-    final List<Uri> officialOptionalManifests =
-        _officialOptionalManifests(input);
+    final Uri coreManifest = input.packageRoot.resolve(
+      'plugins/pixa_plugins.json',
+    );
+    final List<Uri> officialOptionalManifests = _officialOptionalManifests(
+      input,
+    );
     final PixaRuntimePluginBuildPlan pluginPlan =
         PixaRuntimePluginBuildPlan.load(
-      coreManifest: coreManifest,
-      additionalManifests: officialOptionalManifests,
-      userManifest: input.userDefines.path('plugin_manifest'),
-      userManifestDirectory:
-          input.userDefines.path('plugin_manifest_directory'),
+          coreManifest: coreManifest,
+          additionalManifests: officialOptionalManifests,
+          userManifest: input.userDefines.path('plugin_manifest'),
+          userManifestDirectory: input.userDefines.path(
+            'plugin_manifest_directory',
+          ),
+        );
+    final Uri pluginPlanOutput = input.outputDirectory.resolve(
+      'pixa_plugin_plan.json',
     );
-    final Uri pluginPlanOutput =
-        input.outputDirectory.resolve('pixa_plugin_plan.json');
-    await File.fromUri(pluginPlanOutput)
-        .writeAsString(pluginPlan.toPrettyJson());
+    await File.fromUri(
+      pluginPlanOutput,
+    ).writeAsString(pluginPlan.toPrettyJson());
 
     final Uri rustWorkspace = input.packageRoot.resolve('../../rust/');
     final String? targetTriple = _rustTarget(input.config.code);
@@ -46,13 +52,17 @@ Future<void> main(List<String> args) async {
       ],
       if (targetTriple != null) ...<String>['--target', targetTriple],
     ];
-    final Map<String, String> environment =
-        Map<String, String>.of(Platform.environment);
+    final Map<String, String> environment = Map<String, String>.of(
+      Platform.environment,
+    );
     environment['PIXA_PLUGIN_PLAN'] = pluginPlanOutput.toFilePath();
     _configureRustToolchainEnvironment(environment);
     _configureNativeRoiEnvironment(environment, pluginPlan);
     _configureAppleCompileEnvironment(
-        environment, input.config.code, targetTriple);
+      environment,
+      input.config.code,
+      targetTriple,
+    );
     _configureCrossCompileEnvironment(environment, targetTriple);
     _configureReleaseLinkingEnvironment(environment, targetTriple);
     _clearStaleAndroidTurboJpegCmakeCaches(
@@ -69,11 +79,13 @@ Future<void> main(List<String> args) async {
       environment: environment,
     );
     if (result.exitCode != 0) {
-      throw ProcessException(
-        cargo,
-        command,
-        'Rust build failed.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}',
-        result.exitCode,
+      _throwRustBuildFailure(
+        cargo: cargo,
+        command: command,
+        rustWorkspace: rustWorkspace,
+        outputDirectory: input.outputDirectory,
+        environment: environment,
+        result: result,
       );
     }
 
@@ -86,7 +98,8 @@ Future<void> main(List<String> args) async {
     final File builtFile = File.fromUri(builtLibrary);
     if (!builtFile.existsSync()) {
       throw StateError(
-          'Rust build completed but $builtLibrary was not produced.');
+        'Rust build completed but $builtLibrary was not produced.',
+      );
     }
 
     final Uri bundledLibrary = input.outputDirectory.resolve(libraryName);
@@ -107,6 +120,52 @@ Future<void> main(List<String> args) async {
       ),
     );
   });
+}
+
+Never _throwRustBuildFailure({
+  required String cargo,
+  required List<String> command,
+  required Uri rustWorkspace,
+  required Uri outputDirectory,
+  required Map<String, String> environment,
+  required ProcessResult result,
+}) {
+  final File logFile = File.fromUri(
+    outputDirectory.resolve('pixa_rust_build_failure.log'),
+  );
+  logFile.parent.createSync(recursive: true);
+  final String diagnostic =
+      '''
+Pixa Rust build failed.
+command: $cargo ${command.join(' ')}
+workingDirectory: ${rustWorkspace.toFilePath()}
+exitCode: ${result.exitCode}
+CARGO: ${environment['CARGO'] ?? ''}
+RUSTC: ${environment['RUSTC'] ?? ''}
+TARGET_PATH: ${environment[Platform.isWindows ? 'Path' : 'PATH'] ?? ''}
+TURBOJPEG_SOURCE: ${environment['TURBOJPEG_SOURCE'] ?? ''}
+TURBOJPEG_STATIC: ${environment['TURBOJPEG_STATIC'] ?? ''}
+stdout:
+${result.stdout}
+stderr:
+${result.stderr}
+''';
+  logFile.writeAsStringSync(diagnostic);
+  stderr.writeln('Pixa Rust build failed. Full log: ${logFile.path}');
+  stderr.writeln(_tailText(diagnostic, 24000));
+  throw ProcessException(
+    cargo,
+    command,
+    'Rust build failed. Full log: ${logFile.path}',
+    result.exitCode,
+  );
+}
+
+String _tailText(String value, int maxChars) {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return value.substring(value.length - maxChars);
 }
 
 Set<String> _cargoFeatures(PixaRuntimePluginBuildPlan pluginPlan) {
@@ -199,14 +258,18 @@ void _clearStaleAndroidTurboJpegCmakeCaches(
 }
 
 List<Uri> _officialOptionalManifests(BuildInput input) {
-  final bool enableAllNativeRoi =
-      _boolUserDefine(input, 'enable_native_roi', defaultValue: false);
+  final bool enableAllNativeRoi = _boolUserDefine(
+    input,
+    'enable_native_roi',
+    defaultValue: false,
+  );
   final List<Uri> manifests = <Uri>[];
   if (enableAllNativeRoi ||
       _boolUserDefine(input, 'enable_jpeg_turbo_roi', defaultValue: false)) {
     manifests.add(
-      input.packageRoot
-          .resolve('plugins/optional/pixa_jpeg_turbo_processor.json'),
+      input.packageRoot.resolve(
+        'plugins/optional/pixa_jpeg_turbo_processor.json',
+      ),
     );
   }
   if (enableAllNativeRoi ||
@@ -235,8 +298,8 @@ bool _boolUserDefine(
       '1' || 'true' || 'yes' || 'on' => true,
       '0' || 'false' || 'no' || 'off' => false,
       _ => throw ArgumentError(
-          'hooks.user_defines.pixa.$key must be a boolean-like value.',
-        ),
+        'hooks.user_defines.pixa.$key must be a boolean-like value.',
+      ),
     };
   }
   throw ArgumentError('hooks.user_defines.pixa.$key must be a boolean.');
@@ -321,8 +384,9 @@ List<Uri> _rustBuildInputs(Uri rustWorkspace) {
     'pixa_core/src/',
     'pixa_runtime/src/',
   ]) {
-    final Directory directory =
-        Directory.fromUri(rustWorkspace.resolve(sourceDir));
+    final Directory directory = Directory.fromUri(
+      rustWorkspace.resolve(sourceDir),
+    );
     if (!directory.existsSync()) {
       continue;
     }
@@ -332,9 +396,9 @@ List<Uri> _rustBuildInputs(Uri rustWorkspace) {
       }
     }
   }
-  return inputs.toList()
-    ..sort(
-        (Uri left, Uri right) => left.toString().compareTo(right.toString()));
+  return inputs.toList()..sort(
+    (Uri left, Uri right) => left.toString().compareTo(right.toString()),
+  );
 }
 
 String _libraryName(OS os) {
@@ -354,9 +418,10 @@ String? _rustTarget(CodeConfig codeConfig) {
     (OS.android, Architecture.arm) => 'armv7-linux-androideabi',
     (OS.android, Architecture.x64) => 'x86_64-linux-android',
     (OS.android, Architecture.ia32) => 'i686-linux-android',
-    (OS.iOS, Architecture.arm64) => _isIOSSimulator(codeConfig)
-        ? 'aarch64-apple-ios-sim'
-        : 'aarch64-apple-ios',
+    (OS.iOS, Architecture.arm64) =>
+      _isIOSSimulator(codeConfig)
+          ? 'aarch64-apple-ios-sim'
+          : 'aarch64-apple-ios',
     (OS.iOS, Architecture.x64) =>
       _isIOSSimulator(codeConfig) ? 'x86_64-apple-ios' : null,
     (OS.macOS, Architecture.arm64) => 'aarch64-apple-darwin',
@@ -399,12 +464,10 @@ void _configureAppleCompileEnvironment(
   environment['CARGO_TARGET_${targetEnv}_AR'] = ar;
   _setTargetToolEnvironment(environment, 'CC', targetTriple, clang);
   _setTargetToolEnvironment(environment, 'AR', targetTriple, ar);
-  _setTargetFlagsEnvironment(
-    environment,
-    'CFLAGS',
-    targetTriple,
-    <String>['-isysroot', sdkRoot],
-  );
+  _setTargetFlagsEnvironment(environment, 'CFLAGS', targetTriple, <String>[
+    '-isysroot',
+    sdkRoot,
+  ]);
   if (codeConfig.targetOS == OS.macOS) {
     environment.putIfAbsent(
       'MACOSX_DEPLOYMENT_TARGET',
@@ -433,8 +496,9 @@ void _configureCrossCompileEnvironment(
     'armv7-linux-androideabi' => 'armv7a-linux-androideabi21-clang',
     'x86_64-linux-android' => 'x86_64-linux-android21-clang',
     'i686-linux-android' => 'i686-linux-android21-clang',
-    _ =>
-      throw UnsupportedError('Unsupported Android Rust target $targetTriple'),
+    _ => throw UnsupportedError(
+      'Unsupported Android Rust target $targetTriple',
+    ),
   };
   final String clangxx = '$clang++';
   final String extension = Platform.isWindows ? '.cmd' : '';
@@ -473,25 +537,18 @@ void _configureReleaseLinkingEnvironment(
   }
   final List<String> codegenOptions = switch (targetTriple) {
     final String target when target.contains('apple') => <String>[
-        'link-arg=-Wl,-dead_strip',
-      ],
+      'link-arg=-Wl,-dead_strip',
+    ],
     final String target
         when target.contains('linux') || target.contains('android') =>
-      <String>[
-        'link-arg=-Wl,--gc-sections',
-        'link-arg=-Wl,--as-needed',
-      ],
+      <String>['link-arg=-Wl,--gc-sections', 'link-arg=-Wl,--as-needed'],
     final String target when target.contains('windows-msvc') => <String>[
-        'link-arg=/OPT:REF',
-        'link-arg=/OPT:ICF',
-      ],
+      'link-arg=/OPT:REF',
+      'link-arg=/OPT:ICF',
+    ],
     _ => const <String>[],
   };
-  _appendTargetRustCodegenOptions(
-    environment,
-    targetTriple,
-    codegenOptions,
-  );
+  _appendTargetRustCodegenOptions(environment, targetTriple, codegenOptions);
 }
 
 void _setTargetToolEnvironment(
@@ -564,7 +621,8 @@ void _configureAndroidCmakeEnvironment(
   final File toolchain = File('$ndkPath/build/cmake/android.toolchain.cmake');
   if (!toolchain.existsSync()) {
     throw StateError(
-        'Android NDK CMake toolchain not found: ${toolchain.path}');
+      'Android NDK CMake toolchain not found: ${toolchain.path}',
+    );
   }
   final Directory cmakeBin = _androidCmakeBin(environment);
   final String extension = Platform.isWindows ? '.exe' : '';
@@ -578,12 +636,7 @@ void _configureAndroidCmakeEnvironment(
   }
 
   _prependPath(environment, cmakeBin.path);
-  _setTargetCmakeEnvironment(
-    environment,
-    targetTriple,
-    'CMAKE',
-    cmake.path,
-  );
+  _setTargetCmakeEnvironment(environment, targetTriple, 'CMAKE', cmake.path);
   _setTargetCmakeEnvironment(
     environment,
     targetTriple,
@@ -614,9 +667,7 @@ void _setTargetCmakeEnvironment(
 String _xcrun(List<String> arguments) {
   final ProcessResult result = Process.runSync('xcrun', arguments);
   if (result.exitCode != 0) {
-    throw StateError(
-      'xcrun ${arguments.join(' ')} failed: ${result.stderr}',
-    );
+    throw StateError('xcrun ${arguments.join(' ')} failed: ${result.stderr}');
   }
   final String output = result.stdout.toString().trim();
   if (output.isEmpty) {
@@ -640,11 +691,9 @@ String _androidNdkPath(Map<String, String> environment) {
   if (!ndkRoot.existsSync()) {
     throw StateError('Android NDK directory not found: ${ndkRoot.path}');
   }
-  final List<Directory> versions = ndkRoot
-      .listSync()
-      .whereType<Directory>()
-      .toList()
-    ..sort((Directory a, Directory b) => b.path.compareTo(a.path));
+  final List<Directory> versions =
+      ndkRoot.listSync().whereType<Directory>().toList()
+        ..sort((Directory a, Directory b) => b.path.compareTo(a.path));
   if (versions.isEmpty) {
     throw StateError('No Android NDK versions found in ${ndkRoot.path}.');
   }
@@ -668,17 +717,19 @@ Directory _androidCmakeBin(Map<String, String> environment) {
   final Directory cmakeRoot = Directory('$androidHome/cmake');
   if (!cmakeRoot.existsSync()) {
     throw StateError(
-        'Android SDK CMake directory not found: ${cmakeRoot.path}');
+      'Android SDK CMake directory not found: ${cmakeRoot.path}',
+    );
   }
-  final List<Directory> versions = cmakeRoot
-      .listSync()
-      .whereType<Directory>()
-      .where((Directory directory) {
-    return File('${directory.path}/bin/cmake').existsSync() &&
-        File('${directory.path}/bin/ninja').existsSync();
-  }).toList()
-    ..sort((Directory left, Directory right) => _compareDottedVersions(
-        _pathBasename(right.path), _pathBasename(left.path)));
+  final List<Directory> versions =
+      cmakeRoot.listSync().whereType<Directory>().where((Directory directory) {
+        return File('${directory.path}/bin/cmake').existsSync() &&
+            File('${directory.path}/bin/ninja').existsSync();
+      }).toList()..sort(
+        (Directory left, Directory right) => _compareDottedVersions(
+          _pathBasename(right.path),
+          _pathBasename(left.path),
+        ),
+      );
   if (versions.isEmpty) {
     throw StateError(
       'No Android SDK CMake install with Ninja found in ${cmakeRoot.path}.',
@@ -715,19 +766,24 @@ String _androidNdkHostTag(String ndkPath) {
   final Directory prebuilt = Directory('$ndkPath/toolchains/llvm/prebuilt');
   if (!prebuilt.existsSync()) {
     throw StateError(
-        'Android NDK prebuilt directory not found: ${prebuilt.path}');
+      'Android NDK prebuilt directory not found: ${prebuilt.path}',
+    );
   }
   final String osPrefix = switch (Platform.operatingSystem) {
     'macos' => 'darwin',
     'linux' => 'linux',
     'windows' => 'windows',
     _ => throw UnsupportedError(
-        'Unsupported host OS for Android NDK: ${Platform.operatingSystem}'),
+      'Unsupported host OS for Android NDK: ${Platform.operatingSystem}',
+    ),
   };
-  final List<Directory> hosts =
-      prebuilt.listSync().whereType<Directory>().where((Directory directory) {
-    return _pathBasename(directory.path).startsWith(osPrefix);
-  }).toList();
+  final List<Directory> hosts = prebuilt
+      .listSync()
+      .whereType<Directory>()
+      .where((Directory directory) {
+        return _pathBasename(directory.path).startsWith(osPrefix);
+      })
+      .toList();
   if (hosts.isEmpty) {
     throw StateError('No Android NDK prebuilt host matching $osPrefix.');
   }

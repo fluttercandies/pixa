@@ -43,8 +43,10 @@ final class PixaVersionConstraint {
 
 List<int> _parse(String version) {
   final String core = version.split('-').first;
-  final List<int> parts =
-      core.split('.').map((String part) => int.tryParse(part) ?? 0).toList();
+  final List<int> parts = core
+      .split('.')
+      .map((String part) => int.tryParse(part) ?? 0)
+      .toList();
   return <int>[
     parts.isNotEmpty ? parts[0] : 0,
     parts.length > 1 ? parts[1] : 0,

@@ -21,12 +21,15 @@ Future<void> main(List<String> args) async {
       'PIXA_PLATFORM_SELF_CHECK_REPORT': outputPath,
       'PIXA_PLATFORM_EVIDENCE_PLATFORM': platform,
       'PIXA_PLATFORM_EVIDENCE_RUN_MODE': 'flutter-test',
-      'PIXA_PLATFORM_EVIDENCE_DEVICE_KIND':
-          Platform.isAndroid || Platform.isIOS ? 'unknown' : 'desktop',
-      'PIXA_PLATFORM_EVIDENCE_CONNECTION':
-          Platform.isAndroid || Platform.isIOS ? 'unknown' : 'local',
-      'PIXA_PLATFORM_EVIDENCE_SIGNING':
-          Platform.isIOS ? 'unknown' : 'not-applicable',
+      'PIXA_PLATFORM_EVIDENCE_DEVICE_KIND': Platform.isAndroid || Platform.isIOS
+          ? 'unknown'
+          : 'desktop',
+      'PIXA_PLATFORM_EVIDENCE_CONNECTION': Platform.isAndroid || Platform.isIOS
+          ? 'unknown'
+          : 'local',
+      'PIXA_PLATFORM_EVIDENCE_SIGNING': Platform.isIOS
+          ? 'unknown'
+          : 'not-applicable',
     },
   );
 

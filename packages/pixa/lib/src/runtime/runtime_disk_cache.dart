@@ -21,8 +21,10 @@ final class PixaRuntimeDiskCache {
     required PixaCacheKey key,
   }) {
     return _withUtf8(rootPath, (Pointer<Uint8> rootPtr, int rootLen) {
-      return _withUtf8(namespace,
-          (Pointer<Uint8> namespacePtr, int namespaceLen) {
+      return _withUtf8(namespace, (
+        Pointer<Uint8> namespacePtr,
+        int namespaceLen,
+      ) {
         return _withUtf8(key.value, (Pointer<Uint8> keyPtr, int keyLen) {
           final Pointer<UintPtr> outLen = allocator.calloc<UintPtr>();
           try {
@@ -55,8 +57,10 @@ final class PixaRuntimeDiskCache {
     bool allowStale = false,
   }) {
     return _withUtf8(rootPath, (Pointer<Uint8> rootPtr, int rootLen) {
-      return _withUtf8(namespace,
-          (Pointer<Uint8> namespacePtr, int namespaceLen) {
+      return _withUtf8(namespace, (
+        Pointer<Uint8> namespacePtr,
+        int namespaceLen,
+      ) {
         return _withUtf8(key.value, (Pointer<Uint8> keyPtr, int keyLen) {
           final int result = _diskContains(
             rootPtr,
@@ -87,8 +91,10 @@ final class PixaRuntimeDiskCache {
     Duration? ttl,
   }) {
     return _withUtf8(rootPath, (Pointer<Uint8> rootPtr, int rootLen) {
-      return _withUtf8(namespace,
-          (Pointer<Uint8> namespacePtr, int namespaceLen) {
+      return _withUtf8(namespace, (
+        Pointer<Uint8> namespacePtr,
+        int namespaceLen,
+      ) {
         return _withUtf8(key.value, (Pointer<Uint8> keyPtr, int keyLen) {
           return _withBytes(bytes, (Pointer<Uint8> bytesPtr, int bytesLen) {
             final int result = _diskWrite(
@@ -112,11 +118,19 @@ final class PixaRuntimeDiskCache {
   /// Removes one encoded cache entry.
   bool remove({required String namespace, required PixaCacheKey key}) {
     return _withUtf8(rootPath, (Pointer<Uint8> rootPtr, int rootLen) {
-      return _withUtf8(namespace,
-          (Pointer<Uint8> namespacePtr, int namespaceLen) {
+      return _withUtf8(namespace, (
+        Pointer<Uint8> namespacePtr,
+        int namespaceLen,
+      ) {
         return _withUtf8(key.value, (Pointer<Uint8> keyPtr, int keyLen) {
-          return _diskRemove(rootPtr, rootLen, namespacePtr, namespaceLen,
-                  keyPtr, keyLen) ==
+          return _diskRemove(
+                rootPtr,
+                rootLen,
+                namespacePtr,
+                namespaceLen,
+                keyPtr,
+                keyLen,
+              ) ==
               0;
         });
       });
@@ -126,10 +140,16 @@ final class PixaRuntimeDiskCache {
   /// Clears all entries in one namespace.
   bool clearNamespace(String namespace) {
     return _withUtf8(rootPath, (Pointer<Uint8> rootPtr, int rootLen) {
-      return _withUtf8(namespace,
-          (Pointer<Uint8> namespacePtr, int namespaceLen) {
+      return _withUtf8(namespace, (
+        Pointer<Uint8> namespacePtr,
+        int namespaceLen,
+      ) {
         return _diskClearNamespace(
-                rootPtr, rootLen, namespacePtr, namespaceLen) ==
+              rootPtr,
+              rootLen,
+              namespacePtr,
+              namespaceLen,
+            ) ==
             0;
       });
     });
@@ -163,17 +183,18 @@ T _withBytes<T>(Uint8List bytes, T Function(Pointer<Uint8>, int) operation) {
 }
 
 @Native<
-    Int32 Function(
-      Pointer<Uint8>,
-      UintPtr,
-      Pointer<Uint8>,
-      UintPtr,
-      Pointer<Uint8>,
-      UintPtr,
-      Pointer<Uint8>,
-      UintPtr,
-      Int64,
-    )>(
+  Int32 Function(
+    Pointer<Uint8>,
+    UintPtr,
+    Pointer<Uint8>,
+    UintPtr,
+    Pointer<Uint8>,
+    UintPtr,
+    Pointer<Uint8>,
+    UintPtr,
+    Int64,
+  )
+>(
   assetId: 'package:pixa/pixa_runtime',
   symbol: 'pixa_disk_write',
   isLeaf: false,
@@ -191,19 +212,16 @@ external int _diskWrite(
 );
 
 @Native<
-    Pointer<Uint8> Function(
-      Pointer<Uint8>,
-      UintPtr,
-      Pointer<Uint8>,
-      UintPtr,
-      Pointer<Uint8>,
-      UintPtr,
-      Pointer<UintPtr>,
-    )>(
-  assetId: 'package:pixa/pixa_runtime',
-  symbol: 'pixa_disk_read',
-  isLeaf: false,
-)
+  Pointer<Uint8> Function(
+    Pointer<Uint8>,
+    UintPtr,
+    Pointer<Uint8>,
+    UintPtr,
+    Pointer<Uint8>,
+    UintPtr,
+    Pointer<UintPtr>,
+  )
+>(assetId: 'package:pixa/pixa_runtime', symbol: 'pixa_disk_read', isLeaf: false)
 external Pointer<Uint8> _diskRead(
   Pointer<Uint8> rootPtr,
   int rootLen,
@@ -215,15 +233,16 @@ external Pointer<Uint8> _diskRead(
 );
 
 @Native<
-    Int32 Function(
-      Pointer<Uint8>,
-      UintPtr,
-      Pointer<Uint8>,
-      UintPtr,
-      Pointer<Uint8>,
-      UintPtr,
-      Bool,
-    )>(
+  Int32 Function(
+    Pointer<Uint8>,
+    UintPtr,
+    Pointer<Uint8>,
+    UintPtr,
+    Pointer<Uint8>,
+    UintPtr,
+    Bool,
+  )
+>(
   assetId: 'package:pixa/pixa_runtime',
   symbol: 'pixa_disk_contains',
   isLeaf: false,
@@ -239,14 +258,15 @@ external int _diskContains(
 );
 
 @Native<
-    Int32 Function(
-      Pointer<Uint8>,
-      UintPtr,
-      Pointer<Uint8>,
-      UintPtr,
-      Pointer<Uint8>,
-      UintPtr,
-    )>(
+  Int32 Function(
+    Pointer<Uint8>,
+    UintPtr,
+    Pointer<Uint8>,
+    UintPtr,
+    Pointer<Uint8>,
+    UintPtr,
+  )
+>(
   assetId: 'package:pixa/pixa_runtime',
   symbol: 'pixa_disk_remove',
   isLeaf: false,

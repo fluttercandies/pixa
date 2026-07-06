@@ -10,63 +10,72 @@ void main() {
     expect(Pixa.version, '0.1.0-dev.1');
   });
 
-  test('Pixa.configure rejects incompatible plugins before runtime probing',
-      () async {
-    final _TestPlugin plugin = _TestPlugin(
-      id: 'future-plugin',
-      compatiblePixaVersions: const PixaVersionConstraint(
-        minimumInclusive: '99.0.0',
-      ),
-    );
+  test(
+    'Pixa.configure rejects incompatible plugins before runtime probing',
+    () async {
+      final _TestPlugin plugin = _TestPlugin(
+        id: 'future-plugin',
+        compatiblePixaVersions: const PixaVersionConstraint(
+          minimumInclusive: '99.0.0',
+        ),
+      );
 
-    await expectLater(
-      Pixa.configure(PixaConfig(
-        cacheRootPath: 'unused',
-        plugins: <PixaPlugin>[plugin],
-      )),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('0.1.0-dev.1'),
-      )),
-    );
-  });
+      await expectLater(
+        Pixa.configure(
+          PixaConfig(cacheRootPath: 'unused', plugins: <PixaPlugin>[plugin]),
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (StateError error) => error.message,
+            'message',
+            contains('0.1.0-dev.1'),
+          ),
+        ),
+      );
+    },
+  );
 
-  test('Pixa.configure rejects duplicate plugin ids before runtime probing',
-      () async {
-    const _TestPlugin first = _TestPlugin(id: 'duplicate');
-    const _TestPlugin second = _TestPlugin(id: 'duplicate');
+  test(
+    'Pixa.configure rejects duplicate plugin ids before runtime probing',
+    () async {
+      const _TestPlugin first = _TestPlugin(id: 'duplicate');
+      const _TestPlugin second = _TestPlugin(id: 'duplicate');
 
-    await expectLater(
-      Pixa.configure(const PixaConfig(
-        cacheRootPath: 'unused',
-        plugins: <PixaPlugin>[first, second],
-      )),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('Duplicate Pixa plugin id "duplicate"'),
-      )),
-    );
-  });
+      await expectLater(
+        Pixa.configure(
+          const PixaConfig(
+            cacheRootPath: 'unused',
+            plugins: <PixaPlugin>[first, second],
+          ),
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (StateError error) => error.message,
+            'message',
+            contains('Duplicate Pixa plugin id "duplicate"'),
+          ),
+        ),
+      );
+    },
+  );
 
   test('PixaRegistry rejects conflicting fetcher source kinds', () {
     final PixaRegistry registry = PixaRegistry();
-    registry.registerFetcher(const _FetcherDescriptor(
-      id: 'first',
-      sourceKinds: <String>{'s3'},
-    ));
+    registry.registerFetcher(
+      const _FetcherDescriptor(id: 'first', sourceKinds: <String>{'s3'}),
+    );
 
     expect(
-      () => registry.registerFetcher(const _FetcherDescriptor(
-        id: 'second',
-        sourceKinds: <String>{'s3'},
-      )),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('already registered'),
-      )),
+      () => registry.registerFetcher(
+        const _FetcherDescriptor(id: 'second', sourceKinds: <String>{'s3'}),
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('already registered'),
+        ),
+      ),
     );
   });
 
@@ -93,11 +102,11 @@ void main() {
   test('PixaRuntimeContract supports single-binary host linked modules', () {
     const PixaRuntimeContract contract =
         PixaRuntimeContract.hostLinkedPluginModule(
-      moduleId: 'third.party.decoder',
-      packageName: 'pixa_decoder_third_party',
-      implementationLanguage: 'zig',
-      entrypointSymbol: 'pixa_plugin_init',
-    );
+          moduleId: 'third.party.decoder',
+          packageName: 'pixa_decoder_third_party',
+          implementationLanguage: 'zig',
+          entrypointSymbol: 'pixa_plugin_init',
+        );
 
     expect(contract.deployment, PixaRuntimeDeployment.hostLinkedPluginModule);
     expect(contract.canLinkIntoHostBinary, isTrue);
@@ -109,8 +118,9 @@ void main() {
   });
 
   test('PixaRequest plugin execution policy is explicit variant material', () {
-    final PixaRequest runtimeOnly =
-        PixaRequest.network('https://images.example.test/a.gif');
+    final PixaRequest runtimeOnly = PixaRequest.network(
+      'https://images.example.test/a.gif',
+    );
     final PixaRequest dartAllowed = runtimeOnly.copyWith(
       pluginExecutionPolicy:
           const PixaPluginExecutionPolicy.runtimeFirstWithDart(),
@@ -122,39 +132,49 @@ void main() {
     expect(dartAllowed.encodedCacheKey, runtimeOnly.encodedCacheKey);
   });
 
-  test('PixaRegistry rejects runtime descriptors without runtime contracts',
-      () {
-    final PixaRegistry registry = PixaRegistry();
+  test(
+    'PixaRegistry rejects runtime descriptors without runtime contracts',
+    () {
+      final PixaRegistry registry = PixaRegistry();
 
-    expect(
-      () => registry.registerDecoder(const _BadRuntimeDecoderDescriptor()),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('runtime contract'),
-      )),
-    );
-  });
-
-  test('PixaRegistry rejects runtime descriptors without zero-copy contract',
-      () {
-    final PixaRegistry registry = PixaRegistry();
-
-    expect(
-      () => registry.registerDecoder(const _RuntimeDecoderDescriptor(
-        id: 'bad-Runtime-owned-buffer',
-        runtime: PixaRuntimeContract.builtInHostModule(
-          moduleId: 'bad.runtime.buffer',
-          ownedBuffers: false,
+      expect(
+        () => registry.registerDecoder(const _BadRuntimeDecoderDescriptor()),
+        throwsA(
+          isA<StateError>().having(
+            (StateError error) => error.message,
+            'message',
+            contains('runtime contract'),
+          ),
         ),
-      )),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('owned buffers'),
-      )),
-    );
-  });
+      );
+    },
+  );
+
+  test(
+    'PixaRegistry rejects runtime descriptors without zero-copy contract',
+    () {
+      final PixaRegistry registry = PixaRegistry();
+
+      expect(
+        () => registry.registerDecoder(
+          const _RuntimeDecoderDescriptor(
+            id: 'bad-Runtime-owned-buffer',
+            runtime: PixaRuntimeContract.builtInHostModule(
+              moduleId: 'bad.runtime.buffer',
+              ownedBuffers: false,
+            ),
+          ),
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (StateError error) => error.message,
+            'message',
+            contains('owned buffers'),
+          ),
+        ),
+      );
+    },
+  );
 
   test('PixaRegistry supports explicit pure Dart plugin descriptors', () {
     final PixaRegistry registry = PixaRegistry()
@@ -164,33 +184,45 @@ void main() {
       ..registerCacheStore(const _DartCacheStoreDescriptor());
 
     expect(
-        registry.fetchers.single.executionKind, PixaPluginExecutionKind.dart);
+      registry.fetchers.single.executionKind,
+      PixaPluginExecutionKind.dart,
+    );
     expect(
-        registry.decoders.single.executionKind, PixaPluginExecutionKind.dart);
+      registry.decoders.single.executionKind,
+      PixaPluginExecutionKind.dart,
+    );
     expect(
-        registry.processors.single.executionKind, PixaPluginExecutionKind.dart);
-    expect(registry.cacheStores.single.executionKind,
-        PixaPluginExecutionKind.dart);
+      registry.processors.single.executionKind,
+      PixaPluginExecutionKind.dart,
+    );
+    expect(
+      registry.cacheStores.single.executionKind,
+      PixaPluginExecutionKind.dart,
+    );
   });
 
   test('PixaRegistry architecture snapshot separates plugin runtimes', () {
     final PixaRegistry registry = PixaRegistry()
-      ..registerFetcher(const _FetcherDescriptor(
-        id: 'external-fetcher',
-        sourceKinds: <String>{'external-source'},
-      ))
-      ..registerDecoder(const _RuntimeDecoderDescriptor(
-        id: 'runtime-decoder',
-        runtime: PixaRuntimeContract.hostLinkedPluginModule(
-          moduleId: 'third.party.decoder',
-          entrypointSymbol: 'pixa_plugin_init_decoder',
-          implementationLanguage: 'c',
+      ..registerFetcher(
+        const _FetcherDescriptor(
+          id: 'external-fetcher',
+          sourceKinds: <String>{'external-source'},
         ),
-      ))
+      )
+      ..registerDecoder(
+        const _RuntimeDecoderDescriptor(
+          id: 'runtime-decoder',
+          runtime: PixaRuntimeContract.hostLinkedPluginModule(
+            moduleId: 'third.party.decoder',
+            entrypointSymbol: 'pixa_plugin_init_decoder',
+            implementationLanguage: 'c',
+          ),
+        ),
+      )
       ..registerProcessor(const _DartProcessorDescriptor());
 
-    final PixaRegistryArchitectureSnapshot snapshot =
-        registry.architectureSnapshot();
+    final PixaRegistryArchitectureSnapshot snapshot = registry
+        .architectureSnapshot();
 
     expect(snapshot.fetchers, 1);
     expect(snapshot.decoders, 1);
@@ -207,77 +239,88 @@ void main() {
     expect(snapshot.linkableRuntimeModules, 1);
     expect(snapshot.runtimeCanUseSingleHostBinary, isTrue);
     expect(snapshot.defaultHotPathUsesRuntimeOnly, isFalse);
-    expect(
-      snapshot.toJson()['runtimeCanUseSingleHostBinary'],
-      isTrue,
-    );
+    expect(snapshot.toJson()['runtimeCanUseSingleHostBinary'], isTrue);
   });
 
-  test('PixaImage and PixaProvider factories expose plugin execution policy',
-      () {
-    const PixaPluginExecutionPolicy policy =
-        PixaPluginExecutionPolicy.runtimeFirstWithDart();
+  test(
+    'PixaImage and PixaProvider factories expose plugin execution policy',
+    () {
+      const PixaPluginExecutionPolicy policy =
+          PixaPluginExecutionPolicy.runtimeFirstWithDart();
 
-    final PixaImage image = PixaImage.network(
-      'https://images.example.test/a.gif',
-      pluginExecutionPolicy: policy,
-    );
-    final PixaProvider provider = PixaProvider.network(
-      'https://images.example.test/a.gif',
-      pluginExecutionPolicy: policy,
-    );
+      final PixaImage image = PixaImage.network(
+        'https://images.example.test/a.gif',
+        pluginExecutionPolicy: policy,
+      );
+      final PixaProvider provider = PixaProvider.network(
+        'https://images.example.test/a.gif',
+        pluginExecutionPolicy: policy,
+      );
 
-    expect(image.request.pluginExecutionPolicy, policy);
-    expect(provider.request.pluginExecutionPolicy, policy);
-  });
+      expect(image.request.pluginExecutionPolicy, policy);
+      expect(provider.request.pluginExecutionPolicy, policy);
+    },
+  );
 
   test('PixaRegistry rejects Dart descriptors without Dart handlers', () {
     final PixaRegistry registry = PixaRegistry();
 
     expect(
       () => registry.registerDecoder(const _BadDartDecoderDescriptor()),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('Dart handler contract'),
-      )),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('Dart handler contract'),
+        ),
+      ),
     );
   });
 
   test('PixaRegistry rejects conflicting decoder priorities', () {
     final PixaRegistry registry = PixaRegistry();
-    registry.registerDecoder(const _DecoderDescriptor(
-      id: 'first',
-      mimeTypes: <String>{'image/x-pixa-test'},
-      formatIds: <String>{'pixa-test'},
-      priority: 10,
-    ));
+    registry.registerDecoder(
+      const _DecoderDescriptor(
+        id: 'first',
+        mimeTypes: <String>{'image/x-pixa-test'},
+        formatIds: <String>{'pixa-test'},
+        priority: 10,
+      ),
+    );
 
     expect(
-      () => registry.registerDecoder(const _DecoderDescriptor(
-        id: 'second',
-        mimeTypes: <String>{'IMAGE/X-PIXA-TEST'},
-        formatIds: <String>{'other-test'},
-        priority: 10,
-      )),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('already registered'),
-      )),
+      () => registry.registerDecoder(
+        const _DecoderDescriptor(
+          id: 'second',
+          mimeTypes: <String>{'IMAGE/X-PIXA-TEST'},
+          formatIds: <String>{'other-test'},
+          priority: 10,
+        ),
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('already registered'),
+        ),
+      ),
     );
     expect(
-      () => registry.registerDecoder(const _DecoderDescriptor(
-        id: 'third',
-        mimeTypes: <String>{'image/third-test'},
-        formatIds: <String>{'PIXA-TEST'},
-        priority: 10,
-      )),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('already registered'),
-      )),
+      () => registry.registerDecoder(
+        const _DecoderDescriptor(
+          id: 'third',
+          mimeTypes: <String>{'image/third-test'},
+          formatIds: <String>{'PIXA-TEST'},
+          priority: 10,
+        ),
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('already registered'),
+        ),
+      ),
     );
   });
 
@@ -300,8 +343,10 @@ void main() {
       ..registerDecoder(high);
 
     expect(registry.decoderForMimeType('IMAGE/X-PIXA-TEST'), high);
-    expect(registry.decoderForMimeType(' image/x-pixa-test; variant=large '),
-        high);
+    expect(
+      registry.decoderForMimeType(' image/x-pixa-test; variant=large '),
+      high,
+    );
     expect(registry.decoderForFormatId('PIXA-TEST'), high);
     expect(registry.decoderForFormatId(' pixa-test '), high);
     expect(registry.decoderForFormatId('png'), isNull);
@@ -322,9 +367,7 @@ void main() {
           formatId: 'signature',
         ),
       ],
-      capabilities: PixaDecoderCapabilities.runtimeRaster(
-        regionDecode: true,
-      ),
+      capabilities: PixaDecoderCapabilities.runtimeRaster(regionDecode: true),
     );
     const _DecoderDescriptor high = _DecoderDescriptor(
       id: 'high-signature',
@@ -338,22 +381,27 @@ void main() {
           formatId: 'signature',
         ),
       ],
-      capabilities: PixaDecoderCapabilities.runtimeRaster(
-        regionDecode: true,
-      ),
+      capabilities: PixaDecoderCapabilities.runtimeRaster(regionDecode: true),
     );
     registry
       ..registerDecoder(low)
       ..registerDecoder(high);
 
-    final Uint8List payload = Uint8List.fromList(
-      <int>[0x00, 0x00, 0x00, 0x00, 0x66, 0x74, 0x79, 0x70],
-    );
+    final Uint8List payload = Uint8List.fromList(<int>[
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x66,
+      0x74,
+      0x79,
+      0x70,
+    ]);
     expect(registry.decoderForSignature(payload), high);
     expect(registry.decoderForPayload(payload), high);
 
-    final PixaRegistryArchitectureSnapshot snapshot =
-        registry.architectureSnapshot();
+    final PixaRegistryArchitectureSnapshot snapshot = registry
+        .architectureSnapshot();
     expect(snapshot.decoderSignatureRoutes, 2);
     expect(snapshot.decodersWithMetadataProbe, 2);
     expect(snapshot.decodersWithRegionDecode, 2);
@@ -362,124 +410,142 @@ void main() {
   });
 
   test(
-      'PixaImageFormatCatalog preserves built-in routes and resolves custom formats',
-      () {
-    final PixaRegistry registry = PixaRegistry();
-    const _DecoderDescriptor builtInConflict = _DecoderDescriptor(
-      id: 'conflicting-png',
-      mimeTypes: <String>{'image/png'},
-      formatIds: <String>{'png'},
-      priority: 1000,
-    );
-    const _RuntimeDecoderDescriptor custom = _RuntimeDecoderDescriptor(
-      id: 'custom-runtime-format',
-      mimeTypes: <String>{'image/x-pixa-custom'},
-      formatIds: <String>{'pixa-custom'},
-      priority: 100,
-      runtime: PixaRuntimeContract.hostLinkedPluginModule(
-        moduleId: 'third.party.custom.decoder',
-        entrypointSymbol: 'pixa_plugin_init_custom_decoder',
-        implementationLanguage: 'rust',
-      ),
-      signatures: <PixaDecoderSignature>[
-        PixaDecoderSignature(
-          offset: 0,
-          magic: <int>[0x50, 0x58, 0x43, 0x31],
-          mimeType: 'image/x-pixa-custom',
-          formatId: 'pixa-custom',
+    'PixaImageFormatCatalog preserves built-in routes and resolves custom formats',
+    () {
+      final PixaRegistry registry = PixaRegistry();
+      const _DecoderDescriptor builtInConflict = _DecoderDescriptor(
+        id: 'conflicting-png',
+        mimeTypes: <String>{'image/png'},
+        formatIds: <String>{'png'},
+        priority: 1000,
+      );
+      const _RuntimeDecoderDescriptor custom = _RuntimeDecoderDescriptor(
+        id: 'custom-runtime-format',
+        mimeTypes: <String>{'image/x-pixa-custom'},
+        formatIds: <String>{'pixa-custom'},
+        priority: 100,
+        runtime: PixaRuntimeContract.hostLinkedPluginModule(
+          moduleId: 'third.party.custom.decoder',
+          entrypointSymbol: 'pixa_plugin_init_custom_decoder',
+          implementationLanguage: 'rust',
         ),
-      ],
-      capabilities: PixaDecoderCapabilities.runtimeRaster(
-        defaultRuntimeDisplay: true,
-        regionDecode: true,
-      ),
-    );
-    registry
-      ..registerDecoder(builtInConflict)
-      ..registerDecoder(custom);
+        signatures: <PixaDecoderSignature>[
+          PixaDecoderSignature(
+            offset: 0,
+            magic: <int>[0x50, 0x58, 0x43, 0x31],
+            mimeType: 'image/x-pixa-custom',
+            formatId: 'pixa-custom',
+          ),
+        ],
+        capabilities: PixaDecoderCapabilities.runtimeRaster(
+          defaultRuntimeDisplay: true,
+          regionDecode: true,
+        ),
+      );
+      registry
+        ..registerDecoder(builtInConflict)
+        ..registerDecoder(custom);
 
-    final PixaImageFormatCatalog catalog =
-        PixaImageFormatCatalog(registry: registry);
-    final PixaImageFormatRoute png = catalog.routeForMimeType('image/png')!;
-    expect(png.source, PixaImageFormatRouteSource.builtIn);
-    expect(png.pluginDecoder, isNull);
-    expect(png.formatId, 'png');
+      final PixaImageFormatCatalog catalog = PixaImageFormatCatalog(
+        registry: registry,
+      );
+      final PixaImageFormatRoute png = catalog.routeForMimeType('image/png')!;
+      expect(png.source, PixaImageFormatRouteSource.builtIn);
+      expect(png.pluginDecoder, isNull);
+      expect(png.formatId, 'png');
 
-    final PixaImageFormatRoute customRoute = catalog.routeForPayload(
-      Uint8List.fromList(<int>[0x50, 0x58, 0x43, 0x31, 0x00]),
-    )!;
-    expect(customRoute.source, PixaImageFormatRouteSource.plugin);
-    expect(customRoute.pluginDecoder, custom);
-    expect(customRoute.mimeType, 'image/x-pixa-custom');
-    expect(customRoute.formatId, 'pixa-custom');
-    expect(customRoute.capabilities.metadataProbe, isTrue);
-    expect(customRoute.capabilities.staticDecode, isTrue);
-    expect(customRoute.capabilities.runtimeDisplay, isTrue);
-    expect(customRoute.capabilities.zeroCopyInput, isTrue);
-    expect(customRoute.capabilities.ownedOutputBuffers, isTrue);
-    expect(customRoute.defaultRuntimeDisplay, isTrue);
-    expect(customRoute.regionDecode, isTrue);
-  });
+      final PixaImageFormatRoute customRoute = catalog.routeForPayload(
+        Uint8List.fromList(<int>[0x50, 0x58, 0x43, 0x31, 0x00]),
+      )!;
+      expect(customRoute.source, PixaImageFormatRouteSource.plugin);
+      expect(customRoute.pluginDecoder, custom);
+      expect(customRoute.mimeType, 'image/x-pixa-custom');
+      expect(customRoute.formatId, 'pixa-custom');
+      expect(customRoute.capabilities.metadataProbe, isTrue);
+      expect(customRoute.capabilities.staticDecode, isTrue);
+      expect(customRoute.capabilities.runtimeDisplay, isTrue);
+      expect(customRoute.capabilities.zeroCopyInput, isTrue);
+      expect(customRoute.capabilities.ownedOutputBuffers, isTrue);
+      expect(customRoute.defaultRuntimeDisplay, isTrue);
+      expect(customRoute.regionDecode, isTrue);
+    },
+  );
 
   test('PixaRegistry rejects invalid decoder route claims', () {
     final PixaRegistry registry = PixaRegistry();
 
     expect(
-      () => registry.registerDecoder(const _DecoderDescriptor(
-        id: 'bad-decoder',
-        mimeTypes: <String>{' ; variant=large'},
-        priority: 10,
-      )),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('decoder MIME type'),
-      )),
+      () => registry.registerDecoder(
+        const _DecoderDescriptor(
+          id: 'bad-decoder',
+          mimeTypes: <String>{' ; variant=large'},
+          priority: 10,
+        ),
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('decoder MIME type'),
+        ),
+      ),
     );
     expect(
-      () => registry.registerDecoder(const _DecoderDescriptor(
-        id: 'bad-format-decoder',
-        mimeTypes: <String>{},
-        formatIds: <String>{' '},
-        priority: 10,
-      )),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('decoder format id'),
-      )),
+      () => registry.registerDecoder(
+        const _DecoderDescriptor(
+          id: 'bad-format-decoder',
+          mimeTypes: <String>{},
+          formatIds: <String>{' '},
+          priority: 10,
+        ),
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('decoder format id'),
+        ),
+      ),
     );
     expect(
-      () => registry.registerDecoder(const _DecoderDescriptor(
-        id: 'route-less-decoder',
-        mimeTypes: <String>{},
-        formatIds: <String>{},
-        priority: 10,
-      )),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('route'),
-      )),
+      () => registry.registerDecoder(
+        const _DecoderDescriptor(
+          id: 'route-less-decoder',
+          mimeTypes: <String>{},
+          formatIds: <String>{},
+          priority: 10,
+        ),
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('route'),
+        ),
+      ),
     );
     expect(
-      () => registry.registerDecoder(const _DecoderDescriptor(
-        id: 'bad-signature-decoder',
-        mimeTypes: <String>{},
-        signatures: <PixaDecoderSignature>[
-          PixaDecoderSignature(
-            offset: 4096,
-            magic: <int>[0x01],
-            mimeType: 'image/bad-signature',
-          ),
-        ],
-        priority: 10,
-      )),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('4096'),
-      )),
+      () => registry.registerDecoder(
+        const _DecoderDescriptor(
+          id: 'bad-signature-decoder',
+          mimeTypes: <String>{},
+          signatures: <PixaDecoderSignature>[
+            PixaDecoderSignature(
+              offset: 4096,
+              magic: <int>[0x01],
+              mimeType: 'image/bad-signature',
+            ),
+          ],
+          priority: 10,
+        ),
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('4096'),
+        ),
+      ),
     );
   });
 
@@ -487,45 +553,57 @@ void main() {
     final PixaRegistry registry = PixaRegistry();
 
     expect(
-      () => registry.registerDecoder(const _RuntimeDecoderDescriptor(
-        id: 'bad-runtime-copying-decoder',
-        runtime: PixaRuntimeContract.builtInHostModule(
-          moduleId: 'bad.runtime.copying.decoder',
+      () => registry.registerDecoder(
+        const _RuntimeDecoderDescriptor(
+          id: 'bad-runtime-copying-decoder',
+          runtime: PixaRuntimeContract.builtInHostModule(
+            moduleId: 'bad.runtime.copying.decoder',
+          ),
+          capabilities: PixaDecoderCapabilities.dartBytes(),
         ),
-        capabilities: PixaDecoderCapabilities.dartBytes(),
-      )),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('zero-copy'),
-      )),
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('zero-copy'),
+        ),
+      ),
     );
   });
 
   test('PixaRegistry rejects processor and cache store conflicts', () {
     final PixaRegistry registry = PixaRegistry();
     registry
-      ..registerProcessor(const _ProcessorDescriptor(
-        id: 'resize-a',
-        operations: <String>{'resize'},
-      ))
-      ..registerCacheStore(const _CacheStoreDescriptor(
-        id: 'private-store-a',
-        namespace: 'private',
-      ));
+      ..registerProcessor(
+        const _ProcessorDescriptor(
+          id: 'resize-a',
+          operations: <String>{'resize'},
+        ),
+      )
+      ..registerCacheStore(
+        const _CacheStoreDescriptor(
+          id: 'private-store-a',
+          namespace: 'private',
+        ),
+      );
 
     expect(
-      () => registry.registerProcessor(const _ProcessorDescriptor(
-        id: 'resize-b',
-        operations: <String>{'resize'},
-      )),
+      () => registry.registerProcessor(
+        const _ProcessorDescriptor(
+          id: 'resize-b',
+          operations: <String>{'resize'},
+        ),
+      ),
       throwsA(isA<StateError>()),
     );
     expect(
-      () => registry.registerCacheStore(const _CacheStoreDescriptor(
-        id: 'private-store-b',
-        namespace: 'private',
-      )),
+      () => registry.registerCacheStore(
+        const _CacheStoreDescriptor(
+          id: 'private-store-b',
+          namespace: 'private',
+        ),
+      ),
       throwsA(isA<StateError>()),
     );
   });
@@ -708,10 +786,10 @@ final class _RuntimeDecoderDescriptor
     List<PixaDecoderSignature>? signatures,
     int priority = 10,
     this.capabilities = const PixaDecoderCapabilities.runtimeRaster(),
-  })  : _mimeTypes = mimeTypes,
-        _formatIds = formatIds,
-        _signatures = signatures,
-        _priority = priority;
+  }) : _mimeTypes = mimeTypes,
+       _formatIds = formatIds,
+       _signatures = signatures,
+       _priority = priority;
 
   @override
   final String id;
@@ -843,10 +921,7 @@ final class _NoopProcessor implements PixaProcessor {
   const _NoopProcessor();
 
   @override
-  PixaBytePayload process(
-    PixaBytePayload input,
-    PixaProcessorContext context,
-  ) {
+  PixaBytePayload process(PixaBytePayload input, PixaProcessorContext context) {
     return input;
   }
 }

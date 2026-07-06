@@ -7,8 +7,9 @@ import 'package:pixa/pixa.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('PixaImage error recovery surface remains stable',
-      (WidgetTester tester) async {
+  testWidgets('PixaImage error recovery surface remains stable', (
+    WidgetTester tester,
+  ) async {
     await _configure('pixa-golden-error-');
     final PixaRequest request = PixaRequest(
       source: PixaSource.custom('golden-error', () async {
@@ -17,25 +18,31 @@ void main() {
       cachePolicy: const PixaCachePolicy.noStore(),
     );
 
-    await tester.pumpWidget(MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Center(
-        child: RepaintBoundary(
-          key: const Key('pixa-golden-target'),
-          child: SizedBox(
-            width: 180,
-            height: 120,
-            child: PixaImage(
-              request: request,
-              errorBuilder: (BuildContext context, PixaFailure failure,
-                  VoidCallback retry) {
-                return const _DeterministicErrorSurface();
-              },
+    await tester.pumpWidget(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: Center(
+          child: RepaintBoundary(
+            key: const Key('pixa-golden-target'),
+            child: SizedBox(
+              width: 180,
+              height: 120,
+              child: PixaImage(
+                request: request,
+                errorBuilder:
+                    (
+                      BuildContext context,
+                      PixaFailure failure,
+                      VoidCallback retry,
+                    ) {
+                      return const _DeterministicErrorSurface();
+                    },
+              ),
             ),
           ),
         ),
       ),
-    ));
+    );
     await tester.pump();
     await tester.runAsync(() async {
       await Future<void>.delayed(const Duration(milliseconds: 20));

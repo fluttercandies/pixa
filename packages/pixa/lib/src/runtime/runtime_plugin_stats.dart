@@ -19,17 +19,17 @@ final class PixaRuntimePluginRegistryStats {
 
   /// Empty registry stats.
   const PixaRuntimePluginRegistryStats.empty()
-      : this(
-          modules: 0,
-          builtInModules: 0,
-          hostLinkedModules: 0,
-          assetModules: 0,
-          linkableModules: 0,
-          fetchers: 0,
-          decoders: 0,
-          processors: 0,
-          cacheStores: 0,
-        );
+    : this(
+        modules: 0,
+        builtInModules: 0,
+        hostLinkedModules: 0,
+        assetModules: 0,
+        linkableModules: 0,
+        fetchers: 0,
+        decoders: 0,
+        processors: 0,
+        cacheStores: 0,
+      );
 
   /// Decodes the internal `PXM1` binary stats payload.
   factory PixaRuntimePluginRegistryStats.decode(Uint8List bytes) {

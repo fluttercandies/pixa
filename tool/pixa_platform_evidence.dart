@@ -32,12 +32,14 @@ void main(List<String> args) {
         if (nativeModuleReport != null) {
           continue;
         }
-        failures.addAll(_nativeModuleReportFailures(
-          candidates,
-          platform,
-          module,
-          requiredRunMode: options.requiredRunMode,
-        ));
+        failures.addAll(
+          _nativeModuleReportFailures(
+            candidates,
+            platform,
+            module,
+            requiredRunMode: options.requiredRunMode,
+          ),
+        );
       }
       if (options.requireExampleSmoke) {
         final _Report? exampleReport = _firstAcceptableExampleReport(
@@ -46,11 +48,13 @@ void main(List<String> args) {
           requiredRunMode: options.requiredRunMode,
         );
         if (exampleReport == null) {
-          failures.addAll(_exampleReportFailures(
-            reports,
-            platform,
-            requiredRunMode: options.requiredRunMode,
-          ));
+          failures.addAll(
+            _exampleReportFailures(
+              reports,
+              platform,
+              requiredRunMode: options.requiredRunMode,
+            ),
+          );
         }
       }
       continue;
@@ -175,8 +179,9 @@ final class _Options {
             .where((String value) => value.isNotEmpty)
             .toList(growable: false);
       } else if (arg.startsWith('--require-run-mode=')) {
-        requiredRunMode =
-            _string(arg.substring('--require-run-mode='.length).trim());
+        requiredRunMode = _string(
+          arg.substring('--require-run-mode='.length).trim(),
+        );
       } else if (arg.startsWith('--require-native-modules=')) {
         requiredNativeModules = arg
             .substring('--require-native-modules='.length)
@@ -192,7 +197,8 @@ final class _Options {
     }
     if (reportsPath.isEmpty || requiredPlatforms.isEmpty) {
       throw ArgumentError(
-          'reports path and required platforms must be non-empty');
+        'reports path and required platforms must be non-empty',
+      );
     }
     if (requiredRunMode != null && requiredRunMode.isEmpty) {
       throw ArgumentError('required run mode must be non-empty');
@@ -278,7 +284,8 @@ List<_Report> _readReports(String reportsPath) {
   final Directory directory = Directory(reportsPath);
   if (!directory.existsSync()) {
     throw StateError(
-        'Platform evidence directory does not exist: $reportsPath');
+      'Platform evidence directory does not exist: $reportsPath',
+    );
   }
   final List<_Report> reports = <_Report>[];
   for (final FileSystemEntity entity in directory.listSync(recursive: true)) {
@@ -318,8 +325,10 @@ _Report _parseReport(String path, Map<String, Object?> json) {
   final List<Object?> checks = selfCheck?['checks'] is List
       ? _list(selfCheck!['checks'], '$path:selfCheck.checks')
       : const <Object?>[];
-  final Set<String> passedChecks =
-      _passedCheckNames(checks, '$path:selfCheck.checks[]');
+  final Set<String> passedChecks = _passedCheckNames(
+    checks,
+    '$path:selfCheck.checks[]',
+  );
   final List<Object?> exampleChecks = exampleSmoke?['checks'] is List
       ? _list(exampleSmoke!['checks'], '$path:exampleSmoke.checks')
       : const <Object?>[];
@@ -332,8 +341,10 @@ _Report _parseReport(String path, Map<String, Object?> json) {
     nativeModules: _parseNativeModuleReports(path, json, evidence),
     hasSelfCheck: selfCheck != null,
     exampleSmokePassed: exampleSmoke?['passed'] == true,
-    exampleSmokeChecks:
-        _passedCheckNames(exampleChecks, '$path:exampleSmoke.checks[]'),
+    exampleSmokeChecks: _passedCheckNames(
+      exampleChecks,
+      '$path:exampleSmoke.checks[]',
+    ),
   );
 }
 
@@ -365,8 +376,10 @@ List<_NativeModuleReport> _parseNativeModuleReports(
   if (rawNativeModules == null) {
     return const <_NativeModuleReport>[];
   }
-  final List<Object?> nativeModules =
-      _list(rawNativeModules, '$path:nativeModules');
+  final List<Object?> nativeModules = _list(
+    rawNativeModules,
+    '$path:nativeModules',
+  );
   return <_NativeModuleReport>[
     for (final Object? nativeModule in nativeModules)
       _parseNativeModuleReport(
@@ -383,13 +396,17 @@ _NativeModuleReport _parseNativeModuleReport(
   final Set<String> passedChecks = <String>{};
   final Object? rawChecks = json['checks'];
   if (rawChecks is List) {
-    for (final Object? check
-        in _list(rawChecks, '$path:nativeModules.checks')) {
+    for (final Object? check in _list(
+      rawChecks,
+      '$path:nativeModules.checks',
+    )) {
       if (check is! Map) {
         continue;
       }
-      final Map<String, Object?> typed =
-          _object(check, '$path:nativeModules.checks[]');
+      final Map<String, Object?> typed = _object(
+        check,
+        '$path:nativeModules.checks[]',
+      );
       if (typed['passed'] != true) {
         continue;
       }
@@ -399,8 +416,10 @@ _NativeModuleReport _parseNativeModuleReport(
       }
     }
   } else if (rawChecks is Map) {
-    final Map<String, Object?> typed =
-        _object(rawChecks, '$path:nativeModules.checks');
+    final Map<String, Object?> typed = _object(
+      rawChecks,
+      '$path:nativeModules.checks',
+    );
     for (final MapEntry<String, Object?> entry in typed.entries) {
       if (entry.value == true) {
         passedChecks.add(entry.key);
@@ -435,8 +454,10 @@ _NativeModuleReport _parseNativeModuleReport(
 
 List<_Report> _passingReports(List<_Report> reports, String platform) {
   return reports
-      .where((_Report report) =>
-          report.platform == platform && report.hasSelfCheck && report.passed)
+      .where(
+        (_Report report) =>
+            report.platform == platform && report.hasSelfCheck && report.passed,
+      )
       .toList(growable: false);
 }
 
@@ -471,8 +492,10 @@ _Report? _firstAcceptableNativeModuleReport(
     ).isNotEmpty) {
       continue;
     }
-    final _NativeModuleReport? nativeModule =
-        _matchingNativeModule(report, requiredModule);
+    final _NativeModuleReport? nativeModule = _matchingNativeModule(
+      report,
+      requiredModule,
+    );
     if (nativeModule == null) {
       continue;
     }
@@ -523,8 +546,10 @@ List<String> _nativeModuleReportFailures(
     ).isNotEmpty) {
       continue;
     }
-    final _NativeModuleReport? nativeModule =
-        _matchingNativeModule(report, requiredModule);
+    final _NativeModuleReport? nativeModule = _matchingNativeModule(
+      report,
+      requiredModule,
+    );
     if (nativeModule == null) {
       continue;
     }
@@ -574,8 +599,9 @@ List<String> _nativeModuleFailures(
       '${requiredModule.entrypointSymbol}',
     );
   }
-  if (!nativeModule.processorOperations
-      .contains(requiredModule.processorOperation)) {
+  if (!nativeModule.processorOperations.contains(
+    requiredModule.processorOperation,
+  )) {
     failures.add(
       '$platform native module ${requiredModule.moduleId} does not claim '
       '${requiredModule.processorOperation}',
@@ -598,8 +624,9 @@ _Report? _firstAcceptableExampleReport(
   String platform, {
   required String? requiredRunMode,
 }) {
-  for (final _Report report
-      in reports.where((_Report report) => report.platform == platform)) {
+  for (final _Report report in reports.where(
+    (_Report report) => report.platform == platform,
+  )) {
     if (_exampleReportFailuresForOne(
       report,
       platform,

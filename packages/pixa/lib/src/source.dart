@@ -3,8 +3,9 @@ import 'package:flutter/services.dart';
 import 'runtime/runtime_bridge.dart';
 import 'redaction.dart';
 
-final Expando<String> _bytesSourceFingerprints =
-    Expando<String>('PixaBytesSource.fingerprint');
+final Expando<String> _bytesSourceFingerprints = Expando<String>(
+  'PixaBytesSource.fingerprint',
+);
 
 /// Function used by custom sources to provide encoded bytes.
 typedef PixaCustomSourceLoader = Future<Uint8List> Function();
@@ -23,8 +24,11 @@ sealed class PixaSource {
   factory PixaSource.exifThumbnail(String path) = PixaExifThumbnailSource;
 
   /// Creates an asset source.
-  factory PixaSource.asset(String name,
-      {String? package, AssetBundle? bundle}) = PixaAssetSource;
+  factory PixaSource.asset(
+    String name, {
+    String? package,
+    AssetBundle? bundle,
+  }) = PixaAssetSource;
 
   /// Creates an immutable memory source.
   factory PixaSource.memory(String id, Uint8List bytes) = PixaMemorySource;
@@ -59,13 +63,13 @@ final class PixaNetworkSource extends PixaSource {
 
   @override
   Object get cacheMaterial => <String, Object?>{
-        'type': 'network',
-        'scheme': uri.scheme.toLowerCase(),
-        'host': uri.host.toLowerCase(),
-        'port': uri.hasPort ? uri.port : null,
-        'path': uri.pathSegments,
-        'query': PixaRedactor.redactedQueryMaterial(uri),
-      };
+    'type': 'network',
+    'scheme': uri.scheme.toLowerCase(),
+    'host': uri.host.toLowerCase(),
+    'port': uri.hasPort ? uri.port : null,
+    'path': uri.pathSegments,
+    'query': PixaRedactor.redactedQueryMaterial(uri),
+  };
 
   @override
   String get safeLabel => PixaRedactor.redactUri(uri).toString();
@@ -81,9 +85,9 @@ final class PixaFileSource extends PixaSource {
 
   @override
   Object get cacheMaterial => <String, Object?>{
-        'type': 'file',
-        'path': PixaRedactor.filePathKeyMaterial(path),
-      };
+    'type': 'file',
+    'path': PixaRedactor.filePathKeyMaterial(path),
+  };
 
   @override
   String get safeLabel => 'file:${PixaRedactor.fileBasename(path)}';
@@ -99,9 +103,9 @@ final class PixaExifThumbnailSource extends PixaSource {
 
   @override
   Object get cacheMaterial => <String, Object?>{
-        'type': 'exifThumbnail',
-        'path': PixaRedactor.filePathKeyMaterial(path),
-      };
+    'type': 'exifThumbnail',
+    'path': PixaRedactor.filePathKeyMaterial(path),
+  };
 
   @override
   String get safeLabel => 'exif-thumbnail:${PixaRedactor.fileBasename(path)}';
@@ -122,8 +126,11 @@ final class PixaAssetSource extends PixaSource {
   final AssetBundle? bundle;
 
   @override
-  Object get cacheMaterial =>
-      <String, Object?>{'type': 'asset', 'name': name, 'package': package};
+  Object get cacheMaterial => <String, Object?>{
+    'type': 'asset',
+    'name': name,
+    'package': package,
+  };
 
   @override
   String get safeLabel =>
@@ -142,8 +149,11 @@ final class PixaMemorySource extends PixaSource {
   final Uint8List bytes;
 
   @override
-  Object get cacheMaterial =>
-      <String, Object?>{'type': 'memory', 'id': id, 'length': bytes.length};
+  Object get cacheMaterial => <String, Object?>{
+    'type': 'memory',
+    'id': id,
+    'length': bytes.length,
+  };
 
   @override
   String get safeLabel => 'memory:$id';
@@ -162,11 +172,11 @@ final class PixaBytesSource extends PixaSource {
 
   @override
   Object get cacheMaterial => <String, Object?>{
-        'type': 'bytes',
-        'id': id,
-        'length': bytes.length,
-        'fingerprint': _bytesSourceFingerprint(bytes),
-      };
+    'type': 'bytes',
+    'id': id,
+    'length': bytes.length,
+    'fingerprint': _bytesSourceFingerprint(bytes),
+  };
 
   @override
   String get safeLabel => id == null ? 'bytes:${bytes.length}' : 'bytes:$id';
@@ -210,10 +220,10 @@ final class PixaRuntimePluginSource extends PixaSource {
 
   @override
   Object get cacheMaterial => <String, Object?>{
-        'type': 'runtimePlugin',
-        'sourceKind': sourceKind.trim().toLowerCase(),
-        'locator': _runtimeLocatorKeyMaterial(locator),
-      };
+    'type': 'runtimePlugin',
+    'sourceKind': sourceKind.trim().toLowerCase(),
+    'locator': _runtimeLocatorKeyMaterial(locator),
+  };
 
   @override
   String get safeLabel => 'runtime-plugin:${sourceKind.trim()}';

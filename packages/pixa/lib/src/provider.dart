@@ -92,20 +92,22 @@ final class PixaProvider extends ImageProvider<PixaProvider> {
   }
 
   /// Creates an asset provider.
-  factory PixaProvider.asset(String name,
-      {String? package,
-      AssetBundle? bundle,
-      int? targetWidth,
-      int? targetHeight,
-      double scale = 1.0,
-      PixaCachePolicy cachePolicy = const PixaCachePolicy(),
-      PixaPriority priority = PixaPriority.normal,
-      PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
-      PixaPluginExecutionPolicy pluginExecutionPolicy =
-          const PixaPluginExecutionPolicy.runtimeOnly(),
-      PixaAnimationController? animationController,
-      PixaAnimationOptions animationOptions = const PixaAnimationOptions(),
-      ValueChanged<PixaProgress>? onProgress}) {
+  factory PixaProvider.asset(
+    String name, {
+    String? package,
+    AssetBundle? bundle,
+    int? targetWidth,
+    int? targetHeight,
+    double scale = 1.0,
+    PixaCachePolicy cachePolicy = const PixaCachePolicy(),
+    PixaPriority priority = PixaPriority.normal,
+    PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
+    PixaPluginExecutionPolicy pluginExecutionPolicy =
+        const PixaPluginExecutionPolicy.runtimeOnly(),
+    PixaAnimationController? animationController,
+    PixaAnimationOptions animationOptions = const PixaAnimationOptions(),
+    ValueChanged<PixaProgress>? onProgress,
+  }) {
     return PixaProvider(
       request: PixaRequest(
         source: PixaSource.asset(name, package: package, bundle: bundle),
@@ -123,18 +125,21 @@ final class PixaProvider extends ImageProvider<PixaProvider> {
   }
 
   /// Creates a memory provider.
-  factory PixaProvider.memory(String id, Uint8List bytes,
-      {int? targetWidth,
-      int? targetHeight,
-      double scale = 1.0,
-      PixaCachePolicy cachePolicy = const PixaCachePolicy(),
-      PixaPriority priority = PixaPriority.normal,
-      PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
-      PixaPluginExecutionPolicy pluginExecutionPolicy =
-          const PixaPluginExecutionPolicy.runtimeOnly(),
-      PixaAnimationController? animationController,
-      PixaAnimationOptions animationOptions = const PixaAnimationOptions(),
-      ValueChanged<PixaProgress>? onProgress}) {
+  factory PixaProvider.memory(
+    String id,
+    Uint8List bytes, {
+    int? targetWidth,
+    int? targetHeight,
+    double scale = 1.0,
+    PixaCachePolicy cachePolicy = const PixaCachePolicy(),
+    PixaPriority priority = PixaPriority.normal,
+    PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
+    PixaPluginExecutionPolicy pluginExecutionPolicy =
+        const PixaPluginExecutionPolicy.runtimeOnly(),
+    PixaAnimationController? animationController,
+    PixaAnimationOptions animationOptions = const PixaAnimationOptions(),
+    ValueChanged<PixaProgress>? onProgress,
+  }) {
     return PixaProvider(
       request: PixaRequest(
         source: PixaSource.memory(id, bytes),
@@ -152,19 +157,21 @@ final class PixaProvider extends ImageProvider<PixaProvider> {
   }
 
   /// Creates a bytes provider.
-  factory PixaProvider.bytes(Uint8List bytes,
-      {String? id,
-      int? targetWidth,
-      int? targetHeight,
-      double scale = 1.0,
-      PixaCachePolicy cachePolicy = const PixaCachePolicy(),
-      PixaPriority priority = PixaPriority.normal,
-      PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
-      PixaPluginExecutionPolicy pluginExecutionPolicy =
-          const PixaPluginExecutionPolicy.runtimeOnly(),
-      PixaAnimationController? animationController,
-      PixaAnimationOptions animationOptions = const PixaAnimationOptions(),
-      ValueChanged<PixaProgress>? onProgress}) {
+  factory PixaProvider.bytes(
+    Uint8List bytes, {
+    String? id,
+    int? targetWidth,
+    int? targetHeight,
+    double scale = 1.0,
+    PixaCachePolicy cachePolicy = const PixaCachePolicy(),
+    PixaPriority priority = PixaPriority.normal,
+    PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
+    PixaPluginExecutionPolicy pluginExecutionPolicy =
+        const PixaPluginExecutionPolicy.runtimeOnly(),
+    PixaAnimationController? animationController,
+    PixaAnimationOptions animationOptions = const PixaAnimationOptions(),
+    ValueChanged<PixaProgress>? onProgress,
+  }) {
     return PixaProvider(
       request: PixaRequest(
         source: PixaSource.bytes(bytes, id: id),
@@ -208,7 +215,9 @@ final class PixaProvider extends ImageProvider<PixaProvider> {
 
   @override
   ImageStreamCompleter loadImage(
-      PixaProvider key, ImageDecoderCallback decode) {
+    PixaProvider key,
+    ImageDecoderCallback decode,
+  ) {
     final _ProviderLoadTicket ticket = _ProviderLoadTicket();
     final ImageStreamCompleter completer = pixaDisplayDecoder.loadImage(
       request: key.request,
@@ -232,7 +241,9 @@ final class PixaProvider extends ImageProvider<PixaProvider> {
   }
 
   Future<PixaDisplayPipelineLoad> _startPipelineLoad(
-      PixaProvider key, _ProviderLoadTicket ticket) async {
+    PixaProvider key,
+    _ProviderLoadTicket ticket,
+  ) async {
     assert(key == this);
     await Pixa.ensureConfigured();
     final PixaPipeline pipeline = Pixa.pipeline;
@@ -242,10 +253,7 @@ final class PixaProvider extends ImageProvider<PixaProvider> {
     );
     ticket.attach(handle);
     final PixaPipelineLoad load = await handle.future;
-    return PixaDisplayPipelineLoad(
-      pipeline: pipeline,
-      load: load,
-    );
+    return PixaDisplayPipelineLoad(pipeline: pipeline, load: load);
   }
 
   @override

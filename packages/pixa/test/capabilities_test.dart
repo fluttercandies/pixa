@@ -30,25 +30,27 @@ void main() {
     expect(status.message, contains('not supported on fuchsia'));
   });
 
-  test('runtime capabilities fail closed when required runtime core is missing',
-      () {
-    const PixaRuntimeCapabilities capabilities = PixaRuntimeCapabilities(
-      diskCache: false,
-      httpTransport: false,
-      exifParser: false,
-      pixelProcessors: false,
-      platformStatus: PixaRuntimePlatformStatus(
-        platform: 'linux',
-        isWeb: false,
-        isSupportedPlatform: true,
-        runtimeAvailable: false,
-        message: 'Pixa runtime symbols are unavailable on linux.',
-      ),
-    );
+  test(
+    'runtime capabilities fail closed when required runtime core is missing',
+    () {
+      const PixaRuntimeCapabilities capabilities = PixaRuntimeCapabilities(
+        diskCache: false,
+        httpTransport: false,
+        exifParser: false,
+        pixelProcessors: false,
+        platformStatus: PixaRuntimePlatformStatus(
+          platform: 'linux',
+          isWeb: false,
+          isSupportedPlatform: true,
+          runtimeAvailable: false,
+          message: 'Pixa runtime symbols are unavailable on linux.',
+        ),
+      );
 
-    expect(capabilities.hasRequiredCore, isFalse);
-    expect(capabilities.runtimePluginAbiVersion, isNull);
-  });
+      expect(capabilities.hasRequiredCore, isFalse);
+      expect(capabilities.runtimePluginAbiVersion, isNull);
+    },
+  );
 
   test('supported platforms expose validation contracts', () {
     final PixaRuntimePlatformStatus status = pixaPlatformStatusForProbe(
@@ -70,8 +72,9 @@ void main() {
 
   test('platform contract matrix covers exactly the supported targets', () {
     expect(
-      PixaRuntimePlatformContract.supported
-          .map((PixaRuntimePlatformContract contract) => contract.platform),
+      PixaRuntimePlatformContract.supported.map(
+        (PixaRuntimePlatformContract contract) => contract.platform,
+      ),
       <String>['android', 'iOS', 'macOS', 'windows', 'linux'],
     );
 
@@ -82,51 +85,55 @@ void main() {
   });
 
   test(
-      'platform self-check passes only when all required runtime contracts pass',
-      () {
-    final PixaRuntimePlatformSelfCheck check =
-        PixaRuntimePlatformSelfCheck.evaluate(
-      capabilities: PixaRuntimeCapabilities(
-        diskCache: true,
-        httpTransport: true,
-        exifParser: true,
-        pixelProcessors: true,
-        runtimePluginAbiVersion: 1,
-        platformStatus: pixaPlatformStatusForProbe(
-          isWeb: false,
-          targetPlatform: TargetPlatform.macOS,
-          runtimeAvailable: true,
-        ),
-      ),
-      cacheRootPath: '/tmp/pixa-cache',
-    );
+    'platform self-check passes only when all required runtime contracts pass',
+    () {
+      final PixaRuntimePlatformSelfCheck check =
+          PixaRuntimePlatformSelfCheck.evaluate(
+            capabilities: PixaRuntimeCapabilities(
+              diskCache: true,
+              httpTransport: true,
+              exifParser: true,
+              pixelProcessors: true,
+              runtimePluginAbiVersion: 1,
+              platformStatus: pixaPlatformStatusForProbe(
+                isWeb: false,
+                targetPlatform: TargetPlatform.macOS,
+                runtimeAvailable: true,
+              ),
+            ),
+            cacheRootPath: '/tmp/pixa-cache',
+          );
 
-    expect(check.platform, 'macOS');
-    expect(check.passed, isTrue);
-    expect(check.failedChecks, isEmpty);
-    expect(
-      check.toJson()['checks'],
-      isA<List<Object?>>()
-          .having((List<Object?> checks) => checks.length, 'length', 5),
-    );
-  });
+      expect(check.platform, 'macOS');
+      expect(check.passed, isTrue);
+      expect(check.failedChecks, isEmpty);
+      expect(
+        check.toJson()['checks'],
+        isA<List<Object?>>().having(
+          (List<Object?> checks) => checks.length,
+          'length',
+          5,
+        ),
+      );
+    },
+  );
 
   test('platform self-check reports missing runtime and cache directory', () {
     final PixaRuntimePlatformSelfCheck check =
         PixaRuntimePlatformSelfCheck.evaluate(
-      capabilities: PixaRuntimeCapabilities(
-        diskCache: false,
-        httpTransport: false,
-        exifParser: false,
-        pixelProcessors: false,
-        platformStatus: pixaPlatformStatusForProbe(
-          isWeb: false,
-          targetPlatform: TargetPlatform.linux,
-          runtimeAvailable: false,
-        ),
-      ),
-      cacheRootPath: null,
-    );
+          capabilities: PixaRuntimeCapabilities(
+            diskCache: false,
+            httpTransport: false,
+            exifParser: false,
+            pixelProcessors: false,
+            platformStatus: pixaPlatformStatusForProbe(
+              isWeb: false,
+              targetPlatform: TargetPlatform.linux,
+              runtimeAvailable: false,
+            ),
+          ),
+          cacheRootPath: null,
+        );
 
     expect(check.passed, isFalse);
     expect(

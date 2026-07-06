@@ -23,8 +23,8 @@ final class PixaImageFormatRoute {
     this.pluginDecoder,
     String? mimeType,
     String? formatId,
-  })  : _mimeType = mimeType,
-        _formatId = formatId;
+  }) : _mimeType = mimeType,
+       _formatId = formatId;
 
   /// Creates a route for a built-in image format descriptor.
   factory PixaImageFormatRoute.builtIn(PixaImageFormatDescriptor descriptor) {
@@ -48,10 +48,12 @@ final class PixaImageFormatRoute {
       source: PixaImageFormatRouteSource.plugin,
       capabilities: PixaImageFormatRouteCapabilities.plugin(decoder),
       pluginDecoder: decoder,
-      mimeType: _normalizeMimeType(mimeType) ??
+      mimeType:
+          _normalizeMimeType(mimeType) ??
           _firstNormalized(decoder.mimeTypes, _normalizeMimeType) ??
           _normalizeMimeType(signature?.mimeType),
-      formatId: _normalizeFormatId(formatId) ??
+      formatId:
+          _normalizeFormatId(formatId) ??
           _firstNormalized(decoder.formatIds, _normalizeFormatId) ??
           _normalizeFormatId(signature?.formatId),
     );
@@ -138,7 +140,8 @@ final class PixaImageFormatRouteCapabilities {
       zeroCopyInput: capability.runtimeDisplay || capability.processorDecode,
       ownedOutputBuffers:
           capability.runtimeDisplay || capability.processorDecode,
-      stable: capability.metadata &&
+      stable:
+          capability.metadata &&
           (capability.engineDisplay ||
               capability.runtimeDisplay ||
               capability.processorDecode),
@@ -161,7 +164,7 @@ final class PixaImageFormatRouteCapabilities {
       engineDisplay: false,
       runtimeDisplay:
           decoder.executionKind == PixaPluginExecutionKind.runtime &&
-              capabilities.staticDecode,
+          capabilities.staticDecode,
       defaultRuntimeDisplay: capabilities.defaultRuntimeDisplay,
       zeroCopyInput: capabilities.zeroCopyInput,
       ownedOutputBuffers: capabilities.ownedOutputBuffers,
@@ -225,8 +228,9 @@ final class PixaImageFormatCatalog {
       return PixaImageFormatRoute.builtIn(builtIn);
     }
     final String? normalized = _normalizeMimeType(mimeType);
-    final PixaDecoderDescriptor? decoder =
-        normalized == null ? null : registry?.decoderForMimeType(normalized);
+    final PixaDecoderDescriptor? decoder = normalized == null
+        ? null
+        : registry?.decoderForMimeType(normalized);
     return decoder == null
         ? null
         : PixaImageFormatRoute.plugin(decoder, mimeType: normalized);
@@ -240,8 +244,9 @@ final class PixaImageFormatCatalog {
       return PixaImageFormatRoute.builtIn(builtIn);
     }
     final String? normalized = _normalizeFormatId(formatId);
-    final PixaDecoderDescriptor? decoder =
-        normalized == null ? null : registry?.decoderForFormatId(normalized);
+    final PixaDecoderDescriptor? decoder = normalized == null
+        ? null
+        : registry?.decoderForFormatId(normalized);
     return decoder == null
         ? null
         : PixaImageFormatRoute.plugin(decoder, formatId: normalized);
@@ -261,8 +266,9 @@ final class PixaImageFormatCatalog {
 
   PixaImageFormatRoute? _builtInRouteForBytes(Uint8List bytes) {
     final PixaImageMetadataFormat? format = pixaSniffImageFormat(bytes);
-    final PixaImageFormatDescriptor? descriptor =
-        format == null ? null : pixaImageFormatDescriptorForFormat(format);
+    final PixaImageFormatDescriptor? descriptor = format == null
+        ? null
+        : pixaImageFormatDescriptorForFormat(format);
     return descriptor == null ? null : PixaImageFormatRoute.builtIn(descriptor);
   }
 

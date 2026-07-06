@@ -47,14 +47,16 @@ final class Pixa {
     final PixaPipeline? pipeline = _pipeline;
     if (pipeline == null) {
       throw StateError(
-          'Pixa.configure must complete before using Pixa.pipeline.');
+        'Pixa.configure must complete before using Pixa.pipeline.',
+      );
     }
     return pipeline;
   }
 
   /// Configures the runtime-backed image pipeline.
-  static Future<void> configure(
-      [PixaConfig config = const PixaConfig()]) async {
+  static Future<void> configure([
+    PixaConfig config = const PixaConfig(),
+  ]) async {
     _validateConfig(config);
     final PixaRegistry registry = _buildPluginRegistry(config.plugins);
     final String rootPath = config.cacheRootPath ?? await _defaultCacheRoot();
@@ -104,18 +106,14 @@ final class Pixa {
     ImageErrorListener? onError,
   }) async {
     if (target == PixaPrefetchTarget.decodedPrewarm) {
-      final BuildContext resolvedContext = context ??
+      final BuildContext resolvedContext =
+          context ??
           (throw ArgumentError.value(
             context,
             'context',
             'decoded prewarm prefetch requires a BuildContext',
           ));
-      await precache(
-        resolvedContext,
-        request,
-        size: size,
-        onError: onError,
-      );
+      await precache(resolvedContext, request, size: size, onError: onError);
       return;
     }
     await ensureConfigured();
@@ -240,7 +238,8 @@ final class Pixa {
     for (final PixaPlugin plugin in plugins) {
       if (!plugin.compatiblePixaVersions.allows(version)) {
         throw StateError(
-            'Pixa plugin "${plugin.id}" is not compatible with Pixa $version.');
+          'Pixa plugin "${plugin.id}" is not compatible with Pixa $version.',
+        );
       }
       if (!pluginIds.add(plugin.id)) {
         throw StateError('Duplicate Pixa plugin id "${plugin.id}".');
@@ -260,12 +259,7 @@ final class Pixa {
       );
     }
     if (config.diskCacheBytes < 0) {
-      throw RangeError.range(
-        config.diskCacheBytes,
-        0,
-        null,
-        'diskCacheBytes',
-      );
+      throw RangeError.range(config.diskCacheBytes, 0, null, 'diskCacheBytes');
     }
     if (config.networkConcurrency <= 0) {
       throw RangeError.range(
@@ -341,8 +335,9 @@ final class Pixa {
     PixaRequest request,
     ImageConfiguration configuration,
   ) async {
-    final List<Object> trackedKeys =
-        pixaDecodedCacheRegistry.takeCacheKey(request.cacheKey.value);
+    final List<Object> trackedKeys = pixaDecodedCacheRegistry.takeCacheKey(
+      request.cacheKey.value,
+    );
     if (trackedKeys.isEmpty) {
       await PixaProvider(request: request).evict(configuration: configuration);
       pixaDecodedCacheRegistry.takeCacheKey(request.cacheKey.value);
@@ -414,8 +409,10 @@ final class _PixaWidgetsBindingObserver with WidgetsBindingObserver {
       return;
     }
     _isTrimming = true;
-    unawaited(Pixa.trimMemory(level: level).whenComplete(() {
-      _isTrimming = false;
-    }));
+    unawaited(
+      Pixa.trimMemory(level: level).whenComplete(() {
+        _isTrimming = false;
+      }),
+    );
   }
 }

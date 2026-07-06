@@ -11,12 +11,16 @@ import '../request.dart';
 import '../source.dart';
 
 /// Builds an error UI with a retry callback.
-typedef PixaErrorBuilder = Widget Function(
-    BuildContext context, PixaFailure failure, VoidCallback retry);
+typedef PixaErrorBuilder =
+    Widget Function(
+      BuildContext context,
+      PixaFailure failure,
+      VoidCallback retry,
+    );
 
 /// Builds a loading UI with the latest progress event.
-typedef PixaProgressBuilder = Widget Function(
-    BuildContext context, PixaProgress? progress);
+typedef PixaProgressBuilder =
+    Widget Function(BuildContext context, PixaProgress? progress);
 
 /// Placeholder descriptor.
 @immutable
@@ -184,8 +188,10 @@ final class PixaImage extends StatefulWidget {
       key: key,
       request: PixaRequest.file(
         path,
-        targetSize:
-            PixaTargetSize(width: width?.round(), height: height?.round()),
+        targetSize: PixaTargetSize(
+          width: width?.round(),
+          height: height?.round(),
+        ),
         fit: fit,
         cachePolicy: cachePolicy,
         priority: priority,
@@ -255,8 +261,10 @@ final class PixaImage extends StatefulWidget {
       key: key,
       request: PixaRequest(
         source: PixaSource.asset(name, package: package),
-        targetSize:
-            PixaTargetSize(width: width?.round(), height: height?.round()),
+        targetSize: PixaTargetSize(
+          width: width?.round(),
+          height: height?.round(),
+        ),
         fit: fit,
         cachePolicy: cachePolicy,
         priority: priority,
@@ -325,8 +333,10 @@ final class PixaImage extends StatefulWidget {
       key: key,
       request: PixaRequest(
         source: PixaSource.memory(id, bytes),
-        targetSize:
-            PixaTargetSize(width: width?.round(), height: height?.round()),
+        targetSize: PixaTargetSize(
+          width: width?.round(),
+          height: height?.round(),
+        ),
         fit: fit,
         cachePolicy: cachePolicy,
         priority: priority,
@@ -395,8 +405,10 @@ final class PixaImage extends StatefulWidget {
       key: key,
       request: PixaRequest(
         source: PixaSource.bytes(bytes, id: id),
-        targetSize:
-            PixaTargetSize(width: width?.round(), height: height?.round()),
+        targetSize: PixaTargetSize(
+          width: width?.round(),
+          height: height?.round(),
+        ),
         fit: fit,
         cachePolicy: cachePolicy,
         priority: priority,
@@ -587,16 +599,21 @@ final class _PixaImageState extends State<PixaImage> {
       semanticLabel: widget.semanticLabel,
       gaplessPlayback: widget.gaplessPlayback,
       filterQuality: widget.filterQuality,
-      frameBuilder: (BuildContext context, Widget child, int? frame,
-          bool wasSynchronouslyLoaded) {
-        return _frameBuilder(
-          context,
-          child,
-          frame,
-          wasSynchronouslyLoaded,
-          request,
-        );
-      },
+      frameBuilder:
+          (
+            BuildContext context,
+            Widget child,
+            int? frame,
+            bool wasSynchronouslyLoaded,
+          ) {
+            return _frameBuilder(
+              context,
+              child,
+              frame,
+              wasSynchronouslyLoaded,
+              request,
+            );
+          },
       errorBuilder: _errorBuilder,
     );
 
@@ -693,7 +710,8 @@ final class _PixaImageState extends State<PixaImage> {
       return SizedBox(
         width: widget.width,
         height: widget.height,
-        child: widget.progressBuilder?.call(context, progress) ??
+        child:
+            widget.progressBuilder?.call(context, progress) ??
             _progressivePreviewImage(progress) ??
             _lowResImage(context, request) ??
             widget.placeholder?.build(context) ??
@@ -714,7 +732,10 @@ final class _PixaImageState extends State<PixaImage> {
   }
 
   Widget _errorBuilder(
-      BuildContext context, Object error, StackTrace? stackTrace) {
+    BuildContext context,
+    Object error,
+    StackTrace? stackTrace,
+  ) {
     final PixaFailure failure = error is PixaFailure
         ? error
         : PixaFailure(
@@ -767,8 +788,9 @@ final class _PixaImageState extends State<PixaImage> {
 
   PixaRequest _withAutomaticTarget(PixaRequest request, PixaTargetSize target) {
     final PixaRequest? lowRes = request.lowRes;
-    final PixaRequest? resolvedLowRes =
-        lowRes == null ? null : _withAutomaticTarget(lowRes, target);
+    final PixaRequest? resolvedLowRes = lowRes == null
+        ? null
+        : _withAutomaticTarget(lowRes, target);
     if (!_shouldUseAutomaticTarget(request.targetSize, target) &&
         identical(resolvedLowRes, lowRes)) {
       return request;
@@ -830,9 +852,9 @@ final class _PixaImageState extends State<PixaImage> {
       height: logicalHeight == null
           ? null
           : (logicalHeight * devicePixelRatio)
-              .round()
-              .clamp(1, 1 << 30)
-              .toInt(),
+                .round()
+                .clamp(1, 1 << 30)
+                .toInt(),
     );
   }
 
@@ -869,10 +891,7 @@ final class _PixaImageState extends State<PixaImage> {
       return null;
     }
     return Image(
-      image: PixaProvider(
-        request: lowRes,
-        generation: _controller.generation,
-      ),
+      image: PixaProvider(request: lowRes, generation: _controller.generation),
       width: widget.width,
       height: widget.height,
       fit: widget.fit,
@@ -926,7 +945,8 @@ final class _PixaImageState extends State<PixaImage> {
   void _onControllerChanged() {
     final PixaLoadState nextState = _controller.state;
     final int nextGeneration = _controller.generation;
-    final bool affectsBuild = nextGeneration != _lastObservedGeneration ||
+    final bool affectsBuild =
+        nextGeneration != _lastObservedGeneration ||
         !_isSameLoadState(_lastObservedState, nextState);
     _lastObservedState = nextState;
     _lastObservedGeneration = nextGeneration;

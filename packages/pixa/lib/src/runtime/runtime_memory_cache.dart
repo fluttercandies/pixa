@@ -62,8 +62,10 @@ final class PixaRuntimeMemoryCache {
     required Uint8List bytes,
     Duration? ttl,
   }) {
-    return _withUtf8(namespace,
-        (Pointer<Uint8> namespacePtr, int namespaceLen) {
+    return _withUtf8(namespace, (
+      Pointer<Uint8> namespacePtr,
+      int namespaceLen,
+    ) {
       return _withUtf8(key.value, (Pointer<Uint8> keyPtr, int keyLen) {
         return _withBytes(bytes, (Pointer<Uint8> bytesPtr, int bytesLen) {
           return _memoryWriteProcessed(
@@ -100,8 +102,10 @@ final class PixaRuntimeMemoryCache {
 
   /// Clears encoded memory entries for one namespace.
   static bool clearNamespace(String namespace) {
-    return _withUtf8(namespace,
-        (Pointer<Uint8> namespacePtr, int namespaceLen) {
+    return _withUtf8(namespace, (
+      Pointer<Uint8> namespacePtr,
+      int namespaceLen,
+    ) {
       return _memoryClearNamespace(namespacePtr, namespaceLen) == 0;
     });
   }
@@ -110,7 +114,10 @@ final class PixaRuntimeMemoryCache {
   static bool trimToBytes(int targetBytes) {
     if (targetBytes < 0) {
       throw ArgumentError.value(
-          targetBytes, 'targetBytes', 'must not be negative');
+        targetBytes,
+        'targetBytes',
+        'must not be negative',
+      );
     }
     return _memoryTrimToBytes(targetBytes) == 0;
   }
@@ -180,7 +187,8 @@ PixaCacheStats decodeRuntimeCacheStatsForTest(Uint8List bytes) {
     return stats;
   } on FormatException catch (error) {
     throw StateError(
-        'runtime cache stats payload is invalid: ${error.message}');
+      'runtime cache stats payload is invalid: ${error.message}',
+    );
   }
 }
 
@@ -228,15 +236,16 @@ external Pointer<Void> _memoryReadProcessed(
 );
 
 @Native<
-    Int32 Function(
-      Pointer<Uint8>,
-      UintPtr,
-      Pointer<Uint8>,
-      UintPtr,
-      Pointer<Uint8>,
-      UintPtr,
-      Int64,
-    )>(
+  Int32 Function(
+    Pointer<Uint8>,
+    UintPtr,
+    Pointer<Uint8>,
+    UintPtr,
+    Pointer<Uint8>,
+    UintPtr,
+    Int64,
+  )
+>(
   assetId: 'package:pixa/pixa_runtime',
   symbol: 'pixa_memory_write_processed',
   isLeaf: false,

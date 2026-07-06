@@ -52,8 +52,9 @@ final class PixaRedactor {
     final Map<String, Object?> material = <String, Object?>{};
     for (final MapEntry<String, List<String>> entry
         in uri.queryParametersAll.entries) {
-      material[entry.key] =
-          isSensitiveQuery(entry.key) ? '<sensitive>' : entry.value;
+      material[entry.key] = isSensitiveQuery(entry.key)
+          ? '<sensitive>'
+          : entry.value;
     }
     return material;
   }
@@ -64,13 +65,15 @@ final class PixaRedactor {
     Map<String, String> headers,
   ) {
     final Map<String, Object?> material = <String, Object?>{};
-    final Map<String, Object?> headerMaterial =
-        privateHeaderPartitionMaterial(headers);
+    final Map<String, Object?> headerMaterial = privateHeaderPartitionMaterial(
+      headers,
+    );
     if (headerMaterial.isNotEmpty) {
       material['headers'] = headerMaterial;
     }
-    final Map<String, Object?> queryMaterial =
-        privateUriQueryPartitionMaterial(uri);
+    final Map<String, Object?> queryMaterial = privateUriQueryPartitionMaterial(
+      uri,
+    );
     if (queryMaterial.isNotEmpty) {
       material['query'] = queryMaterial;
     }
@@ -86,8 +89,9 @@ final class PixaRedactor {
     for (final MapEntry<String, List<String>> entry
         in uri.queryParametersAll.entries) {
       if (isSensitiveQuery(entry.key)) {
-        material[entry.key] =
-            entry.value.map(_secretFingerprint).toList(growable: false);
+        material[entry.key] = entry.value
+            .map(_secretFingerprint)
+            .toList(growable: false);
       }
     }
     return material;
@@ -95,7 +99,8 @@ final class PixaRedactor {
 
   /// Returns hashed sensitive headers used only to partition private cache keys.
   static Map<String, Object?> privateHeaderPartitionMaterial(
-      Map<String, String> headers) {
+    Map<String, String> headers,
+  ) {
     final Map<String, Object?> material = <String, Object?>{};
     for (final MapEntry<String, String> entry in headers.entries) {
       if (isSensitiveHeader(entry.key)) {
@@ -133,8 +138,9 @@ final class PixaRedactor {
   static Map<String, String> redactHeaders(Map<String, String> headers) {
     final Map<String, String> redacted = <String, String>{};
     for (final MapEntry<String, String> entry in headers.entries) {
-      redacted[entry.key] =
-          isSensitiveHeader(entry.key) ? '<redacted>' : entry.value;
+      redacted[entry.key] = isSensitiveHeader(entry.key)
+          ? '<redacted>'
+          : entry.value;
     }
     return redacted;
   }
@@ -148,14 +154,16 @@ final class PixaRedactor {
     final Map<String, List<String>> query = <String, List<String>>{};
     for (final MapEntry<String, List<String>> entry
         in uri.queryParametersAll.entries) {
-      query[entry.key] =
-          isSensitiveQuery(entry.key) ? <String>['<redacted>'] : entry.value;
+      query[entry.key] = isSensitiveQuery(entry.key)
+          ? <String>['<redacted>']
+          : entry.value;
     }
 
     return uri.replace(
-        queryParameters: query.map((String key, List<String> values) {
-      return MapEntry<String, String>(key, values.join(','));
-    }));
+      queryParameters: query.map((String key, List<String> values) {
+        return MapEntry<String, String>(key, values.join(','));
+      }),
+    );
   }
 
   /// Removes common secret material from arbitrary text.

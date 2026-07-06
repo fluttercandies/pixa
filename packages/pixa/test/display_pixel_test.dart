@@ -9,28 +9,30 @@ import 'package:pixa/src/runtime/runtime_loader.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('runtime RGBA decode matches Flutter engine pixels for static PNG',
-      () async {
-    final Uint8List bytes = _rgbaPng();
-    final PixaPipelineLoad load = await PixaPipeline(cacheRootPath: '').load(
-      PixaRequest(
-        source: PixaSource.bytes(bytes, id: 'pixel-parity-png'),
-        cachePolicy: const PixaCachePolicy.noStore(),
-      ),
-    );
-    addTearDown(load.dispose);
+  test(
+    'runtime RGBA decode matches Flutter engine pixels for static PNG',
+    () async {
+      final Uint8List bytes = _rgbaPng();
+      final PixaPipelineLoad load = await PixaPipeline(cacheRootPath: '').load(
+        PixaRequest(
+          source: PixaSource.bytes(bytes, id: 'pixel-parity-png'),
+          cachePolicy: const PixaCachePolicy.noStore(),
+        ),
+      );
+      addTearDown(load.dispose);
 
-    final PixaRuntimeRgbaImage runtime = load.decodeRuntimeRgba(
-      maxDecodedPixels: 4,
-      maxOutputBytes: 16,
-    );
-    addTearDown(runtime.dispose);
-    final Uint8List engine = await _engineRgba(bytes);
+      final PixaRuntimeRgbaImage runtime = load.decodeRuntimeRgba(
+        maxDecodedPixels: 4,
+        maxOutputBytes: 16,
+      );
+      addTearDown(runtime.dispose);
+      final Uint8List engine = await _engineRgba(bytes);
 
-    expect(runtime.width, 2);
-    expect(runtime.height, 2);
-    expect(runtime.bytes, engine);
-  });
+      expect(runtime.width, 2);
+      expect(runtime.height, 2);
+      expect(runtime.bytes, engine);
+    },
+  );
 
   test('runtime processor variants produce isolated output pixels', () async {
     final Uint8List bytes = _rgbaPng();
@@ -93,9 +95,8 @@ void main() {
 
     final ui.FrameInfo frame = await codec.getNextFrame();
     addTearDown(frame.image.dispose);
-    final ByteData data = await frame.image.toByteData(
-          format: ui.ImageByteFormat.rawRgba,
-        ) ??
+    final ByteData data =
+        await frame.image.toByteData(format: ui.ImageByteFormat.rawRgba) ??
         (throw StateError('Failed to read first frame pixels.'));
 
     expect(codec.frameCount, 2);
@@ -108,9 +109,8 @@ Future<Uint8List> _engineRgba(Uint8List bytes) async {
   try {
     final ui.FrameInfo frame = await codec.getNextFrame();
     try {
-      final ByteData data = await frame.image.toByteData(
-            format: ui.ImageByteFormat.rawRgba,
-          ) ??
+      final ByteData data =
+          await frame.image.toByteData(format: ui.ImageByteFormat.rawRgba) ??
           (throw StateError('Failed to read engine pixels.'));
       return data.buffer.asUint8List();
     } finally {

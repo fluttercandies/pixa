@@ -38,161 +38,152 @@ final class PixaImageFormatDescriptor {
 
 /// Built-in format catalog for Dart routing and tests.
 final List<PixaImageFormatDescriptor> pixaBuiltinImageFormatDescriptors =
-    List<PixaImageFormatDescriptor>.unmodifiable(
-  <PixaImageFormatDescriptor>[
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.jpeg,
-      runtimeCode: 1,
-      primaryMimeType: 'image/jpeg',
-      mimeTypes: const <String>{'image/jpeg', 'image/jpg', 'image/pjpeg'},
-      sniff: _isJpeg,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.png,
-      runtimeCode: 2,
-      primaryMimeType: 'image/png',
-      mimeTypes: const <String>{'image/png'},
-      sniff: _isPng,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.gif,
-      runtimeCode: 3,
-      primaryMimeType: 'image/gif',
-      mimeTypes: const <String>{'image/gif'},
-      sniff: _isGif,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.webp,
-      runtimeCode: 4,
-      primaryMimeType: 'image/webp',
-      mimeTypes: const <String>{'image/webp'},
-      sniff: _isWebp,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.bmp,
-      runtimeCode: 5,
-      primaryMimeType: 'image/bmp',
-      mimeTypes: const <String>{
-        'image/bmp',
-        'image/x-bmp',
-        'image/x-ms-bmp',
-      },
-      sniff: _isBmp,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.wbmp,
-      runtimeCode: 6,
-      primaryMimeType: 'image/vnd.wap.wbmp',
-      mimeTypes: const <String>{'image/vnd.wap.wbmp'},
-      sniff: _isWbmp,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.ico,
-      runtimeCode: 7,
-      primaryMimeType: 'image/x-icon',
-      mimeTypes: const <String>{
-        'image/x-icon',
-        'image/vnd.microsoft.icon',
-      },
-      sniff: _isIco,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.tiff,
-      runtimeCode: 8,
-      primaryMimeType: 'image/tiff',
-      mimeTypes: const <String>{'image/tiff', 'image/tiff-fx'},
-      sniff: _isTiff,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.pnm,
-      runtimeCode: 9,
-      primaryMimeType: 'image/x-portable-anymap',
-      mimeTypes: const <String>{
-        'image/x-portable-anymap',
-        'image/x-portable-arbitrarymap',
-        'image/x-portable-bitmap',
-        'image/x-portable-graymap',
-        'image/x-portable-pixmap',
-      },
-      sniff: _isPnm,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.qoi,
-      runtimeCode: 10,
-      primaryMimeType: 'image/qoi',
-      mimeTypes: const <String>{'image/qoi', 'image/x-qoi'},
-      sniff: _isQoi,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.tga,
-      runtimeCode: 11,
-      primaryMimeType: 'image/x-tga',
-      mimeTypes: const <String>{
-        'image/tga',
-        'image/x-tga',
-        'application/x-tga',
-      },
-      sniff: _isTga,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.dds,
-      runtimeCode: 12,
-      primaryMimeType: 'image/vnd.ms-dds',
-      mimeTypes: const <String>{
-        'image/vnd.ms-dds',
-        'image/vnd-ms.dds',
-        'image/x-dds',
-      },
-      sniff: _isDds,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.hdr,
-      runtimeCode: 13,
-      primaryMimeType: 'image/vnd.radiance',
-      mimeTypes: const <String>{
-        'image/vnd.radiance',
-        'image/x-hdr',
-        'image/hdr',
-      },
-      sniff: _isHdr,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.farbfeld,
-      runtimeCode: 14,
-      primaryMimeType: 'image/x-farbfeld',
-      mimeTypes: const <String>{'image/x-farbfeld'},
-      sniff: _isFarbfeld,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.pcx,
-      runtimeCode: 15,
-      primaryMimeType: 'image/x-pcx',
-      mimeTypes: const <String>{'image/x-pcx', 'image/vnd.zbrush.pcx'},
-      sniff: _isPcx,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.sgi,
-      runtimeCode: 16,
-      primaryMimeType: 'image/sgi',
-      mimeTypes: const <String>{'image/sgi', 'image/x-sgi', 'image/x-rgb'},
-      sniff: _isSgi,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.xbm,
-      runtimeCode: 17,
-      primaryMimeType: 'image/x-xbitmap',
-      mimeTypes: const <String>{'image/x-xbitmap', 'image/x-xbm'},
-      sniff: _isXbm,
-    ),
-    PixaImageFormatDescriptor(
-      format: PixaImageMetadataFormat.xpm,
-      runtimeCode: 18,
-      primaryMimeType: 'image/x-xpixmap',
-      mimeTypes: const <String>{'image/x-xpixmap', 'image/x-xpm'},
-      sniff: _isXpm,
-    ),
-  ],
-);
+    List<PixaImageFormatDescriptor>.unmodifiable(<PixaImageFormatDescriptor>[
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.jpeg,
+        runtimeCode: 1,
+        primaryMimeType: 'image/jpeg',
+        mimeTypes: const <String>{'image/jpeg', 'image/jpg', 'image/pjpeg'},
+        sniff: _isJpeg,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.png,
+        runtimeCode: 2,
+        primaryMimeType: 'image/png',
+        mimeTypes: const <String>{'image/png'},
+        sniff: _isPng,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.gif,
+        runtimeCode: 3,
+        primaryMimeType: 'image/gif',
+        mimeTypes: const <String>{'image/gif'},
+        sniff: _isGif,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.webp,
+        runtimeCode: 4,
+        primaryMimeType: 'image/webp',
+        mimeTypes: const <String>{'image/webp'},
+        sniff: _isWebp,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.bmp,
+        runtimeCode: 5,
+        primaryMimeType: 'image/bmp',
+        mimeTypes: const <String>{'image/bmp', 'image/x-bmp', 'image/x-ms-bmp'},
+        sniff: _isBmp,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.wbmp,
+        runtimeCode: 6,
+        primaryMimeType: 'image/vnd.wap.wbmp',
+        mimeTypes: const <String>{'image/vnd.wap.wbmp'},
+        sniff: _isWbmp,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.ico,
+        runtimeCode: 7,
+        primaryMimeType: 'image/x-icon',
+        mimeTypes: const <String>{'image/x-icon', 'image/vnd.microsoft.icon'},
+        sniff: _isIco,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.tiff,
+        runtimeCode: 8,
+        primaryMimeType: 'image/tiff',
+        mimeTypes: const <String>{'image/tiff', 'image/tiff-fx'},
+        sniff: _isTiff,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.pnm,
+        runtimeCode: 9,
+        primaryMimeType: 'image/x-portable-anymap',
+        mimeTypes: const <String>{
+          'image/x-portable-anymap',
+          'image/x-portable-arbitrarymap',
+          'image/x-portable-bitmap',
+          'image/x-portable-graymap',
+          'image/x-portable-pixmap',
+        },
+        sniff: _isPnm,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.qoi,
+        runtimeCode: 10,
+        primaryMimeType: 'image/qoi',
+        mimeTypes: const <String>{'image/qoi', 'image/x-qoi'},
+        sniff: _isQoi,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.tga,
+        runtimeCode: 11,
+        primaryMimeType: 'image/x-tga',
+        mimeTypes: const <String>{
+          'image/tga',
+          'image/x-tga',
+          'application/x-tga',
+        },
+        sniff: _isTga,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.dds,
+        runtimeCode: 12,
+        primaryMimeType: 'image/vnd.ms-dds',
+        mimeTypes: const <String>{
+          'image/vnd.ms-dds',
+          'image/vnd-ms.dds',
+          'image/x-dds',
+        },
+        sniff: _isDds,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.hdr,
+        runtimeCode: 13,
+        primaryMimeType: 'image/vnd.radiance',
+        mimeTypes: const <String>{
+          'image/vnd.radiance',
+          'image/x-hdr',
+          'image/hdr',
+        },
+        sniff: _isHdr,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.farbfeld,
+        runtimeCode: 14,
+        primaryMimeType: 'image/x-farbfeld',
+        mimeTypes: const <String>{'image/x-farbfeld'},
+        sniff: _isFarbfeld,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.pcx,
+        runtimeCode: 15,
+        primaryMimeType: 'image/x-pcx',
+        mimeTypes: const <String>{'image/x-pcx', 'image/vnd.zbrush.pcx'},
+        sniff: _isPcx,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.sgi,
+        runtimeCode: 16,
+        primaryMimeType: 'image/sgi',
+        mimeTypes: const <String>{'image/sgi', 'image/x-sgi', 'image/x-rgb'},
+        sniff: _isSgi,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.xbm,
+        runtimeCode: 17,
+        primaryMimeType: 'image/x-xbitmap',
+        mimeTypes: const <String>{'image/x-xbitmap', 'image/x-xbm'},
+        sniff: _isXbm,
+      ),
+      PixaImageFormatDescriptor(
+        format: PixaImageMetadataFormat.xpm,
+        runtimeCode: 18,
+        primaryMimeType: 'image/x-xpixmap',
+        mimeTypes: const <String>{'image/x-xpixmap', 'image/x-xpm'},
+        sniff: _isXpm,
+      ),
+    ]);
 
 /// Sniffs image MIME type from encoded bytes using signatures that Pixa
 /// supports in its Flutter engine or runtime display backends.
@@ -301,7 +292,7 @@ bool pixaUsesDefaultRuntimeDisplay(PixaImageMetadataFormat format) {
 Set<PixaImageMetadataFormat>? _defaultRuntimeDisplayFormats;
 
 final Map<PixaImageMetadataFormat, PixaImageFormatDescriptor>
-    _descriptorByFormat = <PixaImageMetadataFormat, PixaImageFormatDescriptor>{
+_descriptorByFormat = <PixaImageMetadataFormat, PixaImageFormatDescriptor>{
   for (final PixaImageFormatDescriptor descriptor
       in pixaBuiltinImageFormatDescriptors)
     descriptor.format: descriptor,
@@ -312,10 +303,10 @@ final Map<String, PixaImageFormatDescriptor> _descriptorByMimeType =
 
 final Map<String, PixaImageFormatDescriptor> _descriptorByFormatId =
     <String, PixaImageFormatDescriptor>{
-  for (final PixaImageFormatDescriptor descriptor
-      in pixaBuiltinImageFormatDescriptors)
-    descriptor.formatId: descriptor,
-};
+      for (final PixaImageFormatDescriptor descriptor
+          in pixaBuiltinImageFormatDescriptors)
+        descriptor.formatId: descriptor,
+    };
 
 Map<String, PixaImageFormatDescriptor> _buildMimeTypeDescriptorMap() {
   final Map<String, PixaImageFormatDescriptor> descriptors =
@@ -331,13 +322,17 @@ Map<String, PixaImageFormatDescriptor> _buildMimeTypeDescriptorMap() {
 
 Set<PixaImageMetadataFormat>? _readDefaultRuntimeDisplayFormats() {
   try {
-    final Set<PixaImageMetadataFormat> formats = PixaRuntimeCapabilities
-            .current()
-        .imageFormats
-        .where((PixaRuntimeImageFormatCapability capability) =>
-            capability.defaultRuntimeDisplay)
-        .map((PixaRuntimeImageFormatCapability capability) => capability.format)
-        .toSet();
+    final Set<PixaImageMetadataFormat> formats =
+        PixaRuntimeCapabilities.current().imageFormats
+            .where(
+              (PixaRuntimeImageFormatCapability capability) =>
+                  capability.defaultRuntimeDisplay,
+            )
+            .map(
+              (PixaRuntimeImageFormatCapability capability) =>
+                  capability.format,
+            )
+            .toSet();
     return formats.isEmpty ? null : formats;
   } on Object {
     return null;
@@ -349,8 +344,16 @@ bool _isJpeg(Uint8List bytes) {
 }
 
 bool _isPng(Uint8List bytes) {
-  return _startsWith(
-      bytes, const <int>[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  return _startsWith(bytes, const <int>[
+    0x89,
+    0x50,
+    0x4e,
+    0x47,
+    0x0d,
+    0x0a,
+    0x1a,
+    0x0a,
+  ]);
 }
 
 bool _isGif(Uint8List bytes) {
@@ -405,8 +408,10 @@ bool _isWbmp(Uint8List bytes) {
   if (width == null || width.$1 == 0 || width.$2 >= bytes.length) {
     return false;
   }
-  final (int height, int dataOffset)? height =
-      _readWbmpInteger(bytes, width.$2);
+  final (int height, int dataOffset)? height = _readWbmpInteger(
+    bytes,
+    width.$2,
+  );
   if (height == null || height.$1 == 0 || height.$2 > bytes.length) {
     return false;
   }
@@ -432,13 +437,15 @@ bool _isTga(Uint8List bytes) {
   final int width = bytes[12] | (bytes[13] << 8);
   final int height = bytes[14] | (bytes[15] << 8);
   final int pixelDepth = bytes[16];
-  final bool validImageType = imageType == 1 ||
+  final bool validImageType =
+      imageType == 1 ||
       imageType == 2 ||
       imageType == 3 ||
       imageType == 9 ||
       imageType == 10 ||
       imageType == 11;
-  final bool validDepth = pixelDepth == 8 ||
+  final bool validDepth =
+      pixelDepth == 8 ||
       pixelDepth == 15 ||
       pixelDepth == 16 ||
       pixelDepth == 24 ||

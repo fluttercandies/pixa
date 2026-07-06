@@ -23,6 +23,7 @@ Future<void> main(List<String> args) async {
     'dev.pixa',
     probe.path,
   ]);
+  _configureProbePlatformPermissions(platform, probe);
   _writeProbeApp(root, probe, options);
   await _run(probe, flutter, <String>['pub', 'get']);
   await _run(probe, flutter, _buildCommand(platform));
@@ -131,14 +132,14 @@ final class _Options {
     final String outputPath = reportOutput == null
         ? '${root.path}/build/reports/pixa_platform_self_check_${platform}_probe.json'
         : (File(reportOutput!).isAbsolute
-            ? reportOutput!
-            : '${root.path}/$reportOutput');
+              ? reportOutput!
+              : '${root.path}/$reportOutput');
     return <String, String>{
       ...Platform.environment,
       'PIXA_PLATFORM_SELF_CHECK_REPORT': outputPath,
       'PIXA_PLATFORM_EVIDENCE_PLATFORM': platform,
       'PIXA_PLATFORM_EVIDENCE_RUN_MODE': 'integration-test',
-      if (deviceId != null) 'PIXA_PLATFORM_EVIDENCE_DEVICE_ID': deviceId!,
+      'PIXA_PLATFORM_EVIDENCE_DEVICE_ID': ?deviceId,
       'PIXA_PLATFORM_EVIDENCE_DEVICE_KIND':
           deviceKind ?? _defaultDeviceKind(platform),
       'PIXA_PLATFORM_EVIDENCE_CONNECTION':
@@ -170,6 +171,32 @@ const Set<String> _supportedPlatforms = <String>{
   'windows',
 };
 
+void _configureProbePlatformPermissions(String platform, Directory probe) {
+  if (platform == 'macos') {
+    for (final String name in <String>[
+      'DebugProfile.entitlements',
+      'Release.entitlements',
+    ]) {
+      final File file = File('${probe.path}/macos/Runner/$name');
+      _ensureEntitlement(file, 'com.apple.security.network.client');
+      _ensureEntitlement(file, 'com.apple.security.network.server');
+    }
+  }
+}
+
+void _ensureEntitlement(File file, String key) {
+  if (!file.existsSync()) {
+    return;
+  }
+  final String source = file.readAsStringSync();
+  if (source.contains('<key>$key</key>')) {
+    return;
+  }
+  file.writeAsStringSync(
+    source.replaceFirst('</dict>', '\t<key>$key</key>\n\t<true/>\n</dict>'),
+  );
+}
+
 void _writeProbeApp(Directory root, Directory probe, _Options options) {
   final String hookUserDefines = _hookUserDefines(options);
   File('${probe.path}/pubspec.yaml').writeAsStringSync('''
@@ -178,7 +205,7 @@ description: Platform build probe for Pixa runtime assets.
 publish_to: none
 
 environment:
-  sdk: ">=3.6.0 <4.0.0"
+  sdk: ">=3.11.0 <4.0.0"
 
 dependencies:
   flutter:
@@ -247,8 +274,9 @@ final class _ProbeApp extends StatelessWidget {
 }
 ''');
   Directory('${probe.path}/integration_test').createSync(recursive: true);
-  File('${probe.path}/integration_test/pixa_self_check_test.dart')
-      .writeAsStringSync('''
+  File(
+    '${probe.path}/integration_test/pixa_self_check_test.dart',
+  ).writeAsStringSync('''
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
@@ -399,6 +427,8 @@ Future<PixaRuntimePlatformCheck> _networkLoopbackFetchCheck() async {
   try {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final Uint8List bytes = _minimalGif();
+    final String endpoint =
+        'http://\${InternetAddress.loopbackIPv4.address}:\${server.port}/probe.gif';
     unawaited(server.forEach((HttpRequest request) async {
       request.response
         ..statusCode = HttpStatus.ok
@@ -407,27 +437,72 @@ Future<PixaRuntimePlatformCheck> _networkLoopbackFetchCheck() async {
         ..add(bytes);
       await request.response.close();
     }));
-    final PixaPipelineLoad load = await Pixa.pipeline.load(PixaRequest.network(
-      'http://\${InternetAddress.loopbackIPv4.address}:\${server.port}/probe.gif',
-      cachePolicy: const PixaCachePolicy.noStore(),
-    ));
-    try {
-      final bool valid = load.bytes.length == bytes.length;
-      return _check(
-        'networkLoopbackFetch',
-        valid,
-        valid
-            ? 'runtime HTTP transport fetched loopback image bytes'
-            : 'runtime HTTP transport returned unexpected byte length',
-      );
-    } finally {
-      load.dispose();
+    await _waitForDartLoopback(endpoint, bytes.length);
+    Object? lastError;
+    for (var attempt = 0; attempt < 8; attempt++) {
+      try {
+        final PixaPipelineLoad load =
+            await Pixa.pipeline.load(PixaRequest.network(
+          endpoint,
+          cachePolicy: const PixaCachePolicy.noStore(),
+        ));
+        try {
+          final bool valid = load.bytes.length == bytes.length;
+          return _check(
+            'networkLoopbackFetch',
+            valid,
+            valid
+                ? 'runtime HTTP transport fetched loopback image bytes from \$endpoint'
+                : 'runtime HTTP transport returned \${load.bytes.length} bytes from \$endpoint',
+          );
+        } finally {
+          load.dispose();
+        }
+      } on Object catch (error) {
+        lastError = error;
+        await Future<void>.delayed(Duration(milliseconds: 40 * (attempt + 1)));
+      }
     }
+    return _check(
+      'networkLoopbackFetch',
+      false,
+      'runtime HTTP transport could not fetch \$endpoint after retries: \$lastError',
+    );
   } on Object catch (error) {
     return _check('networkLoopbackFetch', false, error.toString());
   } finally {
     await server?.close(force: true);
   }
+}
+
+Future<void> _waitForDartLoopback(String endpoint, int expectedBytes) async {
+  Object? lastError;
+  for (var attempt = 0; attempt < 8; attempt++) {
+    final HttpClient client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 1);
+    try {
+      final HttpClientRequest request =
+          await client.getUrl(Uri.parse(endpoint));
+      final HttpClientResponse response =
+          await request.close().timeout(const Duration(seconds: 2));
+      final List<int> body =
+          await response.fold<List<int>>(<int>[], (List<int> value, List<int> chunk) {
+        value.addAll(chunk);
+        return value;
+      }).timeout(const Duration(seconds: 2));
+      if (response.statusCode == HttpStatus.ok && body.length == expectedBytes) {
+        return;
+      }
+      lastError =
+          'status=\${response.statusCode}, bytes=\${body.length}, expected=\$expectedBytes';
+    } on Object catch (error) {
+      lastError = error;
+    } finally {
+      client.close(force: true);
+    }
+    await Future<void>.delayed(Duration(milliseconds: 30 * (attempt + 1)));
+  }
+  throw StateError('Dart loopback readiness failed for \$endpoint: \$lastError');
 }
 
 PixaRuntimePlatformCheck _abiArchitectureCheck(String platform) {
@@ -639,8 +714,9 @@ String _relativePath(Uri fromDir, Uri toDir) {
   final List<String> from = fromDir.pathSegments
       .where((String segment) => segment.isNotEmpty)
       .toList();
-  final List<String> to =
-      toDir.pathSegments.where((String segment) => segment.isNotEmpty).toList();
+  final List<String> to = toDir.pathSegments
+      .where((String segment) => segment.isNotEmpty)
+      .toList();
   var shared = 0;
   while (shared < from.length &&
       shared < to.length &&
@@ -658,12 +734,12 @@ List<String> _buildCommand(String platform) {
   return switch (platform) {
     'android' => <String>['build', 'apk', '--debug'],
     'ios' => <String>[
-        'build',
-        'ios',
-        '--debug',
-        '--simulator',
-        '--no-codesign',
-      ],
+      'build',
+      'ios',
+      '--debug',
+      '--simulator',
+      '--no-codesign',
+    ],
     'linux' => <String>['build', 'linux', '--debug'],
     'macos' => <String>['build', 'macos', '--debug'],
     'windows' => <String>['build', 'windows', '--debug'],
@@ -746,16 +822,18 @@ Future<void> _runSelfCheck(
     environment: environment,
   );
   final StringBuffer output = StringBuffer();
-  final Future<void> stdoutDone =
-      process.stdout.transform(utf8.decoder).forEach((String chunk) {
-    stdout.write(chunk);
-    output.write(chunk);
-  });
-  final Future<void> stderrDone =
-      process.stderr.transform(utf8.decoder).forEach((String chunk) {
-    stderr.write(chunk);
-    output.write(chunk);
-  });
+  final Future<void> stdoutDone = process.stdout
+      .transform(utf8.decoder)
+      .forEach((String chunk) {
+        stdout.write(chunk);
+        output.write(chunk);
+      });
+  final Future<void> stderrDone = process.stderr
+      .transform(utf8.decoder)
+      .forEach((String chunk) {
+        stderr.write(chunk);
+        output.write(chunk);
+      });
   final int exitCode = await process.exitCode;
   await stdoutDone;
   await stderrDone;

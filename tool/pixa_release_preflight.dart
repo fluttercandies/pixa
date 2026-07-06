@@ -36,57 +36,48 @@ List<_Step> _releaseSteps() {
     _Step('Format Dart sources', 'dart', <String>['format', '.']),
     _Step('Analyze Dart workspace', 'dart', <String>['analyze']),
     _Step('Run Flutter tests', 'melos', <String>['run', 'test']),
-    _Step(
-      'Check Rust formatting',
-      'cargo',
-      <String>['fmt', '--manifest-path', 'rust/Cargo.toml', '--all', '--check'],
-    ),
-    _Step(
-      'Run Rust clippy',
-      'cargo',
-      <String>[
-        'clippy',
-        '--manifest-path',
-        'rust/Cargo.toml',
-        '--all-targets',
-        '--all-features',
-        '--',
-        '-D',
-        'warnings',
-      ],
-    ),
-    _Step(
-      'Run Rust tests',
-      'cargo',
-      <String>[
-        'test',
-        '--manifest-path',
-        'rust/Cargo.toml',
-        '--all',
-        '--no-fail-fast',
-      ],
-    ),
-    _Step(
-      'Run architecture guard',
-      'dart',
-      <String>['run', 'tool/pixa_guard.dart'],
-    ),
-    _Step(
-      'Run platform self-check',
-      'dart',
-      <String>['run', 'tool/pixa_platform_self_check.dart'],
-    ),
-    _Step(
-      'Run platform evidence verifier self-test',
-      'dart',
-      <String>['run', 'tool/pixa_platform_evidence_self_test.dart'],
-    ),
+    _Step('Check Rust formatting', 'cargo', <String>[
+      'fmt',
+      '--manifest-path',
+      'rust/Cargo.toml',
+      '--all',
+      '--check',
+    ]),
+    _Step('Run Rust clippy', 'cargo', <String>[
+      'clippy',
+      '--manifest-path',
+      'rust/Cargo.toml',
+      '--all-targets',
+      '--all-features',
+      '--',
+      '-D',
+      'warnings',
+    ]),
+    _Step('Run Rust tests', 'cargo', <String>[
+      'test',
+      '--manifest-path',
+      'rust/Cargo.toml',
+      '--all',
+      '--no-fail-fast',
+    ]),
+    _Step('Run architecture guard', 'dart', <String>[
+      'run',
+      'tool/pixa_guard.dart',
+    ]),
+    _Step('Run platform self-check', 'dart', <String>[
+      'run',
+      'tool/pixa_platform_self_check.dart',
+    ]),
+    _Step('Run platform evidence verifier self-test', 'dart', <String>[
+      'run',
+      'tool/pixa_platform_evidence_self_test.dart',
+    ]),
     _Step('Run example smoke check', 'melos', <String>['run', 'example']),
-    _Step(
-      'Generate smoke benchmark report',
-      'dart',
-      <String>['run', 'tool/pixa_benchmark_report.dart', '--smoke'],
-    ),
+    _Step('Generate smoke benchmark report', 'dart', <String>[
+      'run',
+      'tool/pixa_benchmark_report.dart',
+      '--smoke',
+    ]),
   ];
 }
 

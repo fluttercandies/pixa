@@ -15,85 +15,102 @@ void main() {
     expect(signal.whenCancelled, completes);
     expect(
       signal.throwIfCancellationRequested,
-      throwsA(isA<PixaFailure>()
-          .having(
-              (PixaFailure failure) => failure.stage, 'stage', PixaStage.cancel)
-          .having((PixaFailure failure) => failure.retryability, 'retryability',
-              PixaRetryability.notRetryable)),
-    );
-  });
-
-  test('PixaBytePayload preserves caller-owned bytes without implicit copy',
-      () {
-    final Uint8List bytes = Uint8List.fromList(<int>[1, 2, 3]);
-    final PixaBytePayload payload = PixaBytePayload(
-      bytes: bytes,
-      mimeType: 'image/png',
-      metadata: const <String, Object?>{'source': 'test'},
-    );
-
-    expect(identical(payload.bytes, bytes), isTrue);
-    expect(payload.mimeType, 'image/png');
-    expect(payload.metadata, <String, Object?>{'source': 'test'});
-  });
-
-  test('fetcher, processor, cache store, and scheduler contracts compose',
-      () async {
-    final PixaRequest request =
-        PixaRequest.network('https://example.com/a.png');
-    final PixaManualCancellationSignal signal = PixaManualCancellationSignal();
-    final List<PixaProgress> progress = <PixaProgress>[];
-    final PixaExecutionContext context = PixaExecutionContext(
-      requestId: 7,
-      request: request,
-      cancellationSignal: signal,
-      onProgress: progress.add,
-    );
-    final PixaCacheStore cacheStore = _MemoryCacheStore();
-    final PixaScheduler scheduler = _PassthroughScheduler();
-    final PixaFetcher fetcher = _StaticFetcher();
-    final PixaProcessor processor = _TagProcessor();
-
-    final PixaBytePayload fetched = await scheduler.schedule<PixaBytePayload>(
-      request,
-      (PixaExecutionContext scheduledContext) {
-        expect(identical(scheduledContext, context), isTrue);
-        return Future<PixaBytePayload>.value(
-          fetcher.fetch(request.source, scheduledContext),
-        );
-      },
-      context,
-    );
-    final PixaBytePayload processed = await processor.process(
-      fetched,
-      PixaProcessorContext(
-        execution: context,
-        operation: 'tag',
-        arguments: const <String, Object?>{'tag': 'thumb'},
+      throwsA(
+        isA<PixaFailure>()
+            .having(
+              (PixaFailure failure) => failure.stage,
+              'stage',
+              PixaStage.cancel,
+            )
+            .having(
+              (PixaFailure failure) => failure.retryability,
+              'retryability',
+              PixaRetryability.notRetryable,
+            ),
       ),
     );
-    await cacheStore.write(
-      request.cacheNamespace,
-      'abcdef0123456789',
-      processed,
-      PixaCacheWriteContext(
-          execution: context, ttl: const Duration(minutes: 1)),
-    );
-    final PixaCacheLookup lookup = await cacheStore.read(
-      request.cacheNamespace,
-      'abcdef0123456789',
-      context,
-    );
-
-    expect(progress.single.stage, PixaStage.fetch);
-    expect(lookup, isA<PixaCacheHit>());
-    expect((lookup as PixaCacheHit).payload.metadata['tag'], 'thumb');
-    expect(lookup.isStale, isFalse);
   });
 
+  test(
+    'PixaBytePayload preserves caller-owned bytes without implicit copy',
+    () {
+      final Uint8List bytes = Uint8List.fromList(<int>[1, 2, 3]);
+      final PixaBytePayload payload = PixaBytePayload(
+        bytes: bytes,
+        mimeType: 'image/png',
+        metadata: const <String, Object?>{'source': 'test'},
+      );
+
+      expect(identical(payload.bytes, bytes), isTrue);
+      expect(payload.mimeType, 'image/png');
+      expect(payload.metadata, <String, Object?>{'source': 'test'});
+    },
+  );
+
+  test(
+    'fetcher, processor, cache store, and scheduler contracts compose',
+    () async {
+      final PixaRequest request = PixaRequest.network(
+        'https://example.com/a.png',
+      );
+      final PixaManualCancellationSignal signal =
+          PixaManualCancellationSignal();
+      final List<PixaProgress> progress = <PixaProgress>[];
+      final PixaExecutionContext context = PixaExecutionContext(
+        requestId: 7,
+        request: request,
+        cancellationSignal: signal,
+        onProgress: progress.add,
+      );
+      final PixaCacheStore cacheStore = _MemoryCacheStore();
+      final PixaScheduler scheduler = _PassthroughScheduler();
+      final PixaFetcher fetcher = _StaticFetcher();
+      final PixaProcessor processor = _TagProcessor();
+
+      final PixaBytePayload fetched = await scheduler.schedule<PixaBytePayload>(
+        request,
+        (PixaExecutionContext scheduledContext) {
+          expect(identical(scheduledContext, context), isTrue);
+          return Future<PixaBytePayload>.value(
+            fetcher.fetch(request.source, scheduledContext),
+          );
+        },
+        context,
+      );
+      final PixaBytePayload processed = await processor.process(
+        fetched,
+        PixaProcessorContext(
+          execution: context,
+          operation: 'tag',
+          arguments: const <String, Object?>{'tag': 'thumb'},
+        ),
+      );
+      await cacheStore.write(
+        request.cacheNamespace,
+        'abcdef0123456789',
+        processed,
+        PixaCacheWriteContext(
+          execution: context,
+          ttl: const Duration(minutes: 1),
+        ),
+      );
+      final PixaCacheLookup lookup = await cacheStore.read(
+        request.cacheNamespace,
+        'abcdef0123456789',
+        context,
+      );
+
+      expect(progress.single.stage, PixaStage.fetch);
+      expect(lookup, isA<PixaCacheHit>());
+      expect((lookup as PixaCacheHit).payload.metadata['tag'], 'thumb');
+      expect(lookup.isStale, isFalse);
+    },
+  );
+
   test('controller hook provides no-op defaults with selective override', () {
-    final PixaRequest request =
-        PixaRequest.network('https://example.com/a.png');
+    final PixaRequest request = PixaRequest.network(
+      'https://example.com/a.png',
+    );
     final _AttachCountingHook hook = _AttachCountingHook();
 
     hook
@@ -109,12 +126,14 @@ void main() {
 final class _StaticFetcher implements PixaFetcher {
   @override
   PixaBytePayload fetch(PixaSource source, PixaExecutionContext context) {
-    context.emit(PixaProgress(
-      requestId: context.requestId,
-      stage: PixaStage.fetch,
-      receivedBytes: 3,
-      expectedBytes: 3,
-    ));
+    context.emit(
+      PixaProgress(
+        requestId: context.requestId,
+        stage: PixaStage.fetch,
+        receivedBytes: 3,
+        expectedBytes: 3,
+      ),
+    );
     return PixaBytePayload(
       bytes: Uint8List.fromList(<int>[1, 2, 3]),
       mimeType: 'image/png',
@@ -124,10 +143,7 @@ final class _StaticFetcher implements PixaFetcher {
 
 final class _TagProcessor implements PixaProcessor {
   @override
-  PixaBytePayload process(
-    PixaBytePayload input,
-    PixaProcessorContext context,
-  ) {
+  PixaBytePayload process(PixaBytePayload input, PixaProcessorContext context) {
     return PixaBytePayload(
       bytes: input.bytes,
       mimeType: input.mimeType,

@@ -53,10 +53,7 @@ final class PixaAnimationOptions {
   }
 
   @override
-  int get hashCode => Object.hash(
-        frameCachePolicy,
-        disposalPolicy,
-      );
+  int get hashCode => Object.hash(frameCachePolicy, disposalPolicy);
 }
 
 /// Controls frame scheduling for one or more controlled animated image streams.

@@ -80,8 +80,9 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
           color: widget.backgroundColor,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onDoubleTapDown:
-                widget.doubleTapZoomEnabled ? _handleDoubleTapDown : null,
+            onDoubleTapDown: widget.doubleTapZoomEnabled
+                ? _handleDoubleTapDown
+                : null,
             onDoubleTap: widget.doubleTapZoomEnabled ? _handleDoubleTap : null,
             child: InteractiveViewer(
               transformationController: _controller._transform,
@@ -124,10 +125,10 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
   }
 
   Object get _imageIdentity => Object.hash(
-        widget.request.cacheKey,
-        widget.imageWidth,
-        widget.imageHeight,
-      );
+    widget.request.cacheKey,
+    widget.imageWidth,
+    widget.imageHeight,
+  );
 
   Widget _buildOverview() {
     final int width;
@@ -176,8 +177,10 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
           return;
         }
         final Iterable<PixaRequest> exited = _visibleTileRequests.entries
-            .where((MapEntry<String, PixaRequest> entry) =>
-                !visible.containsKey(entry.key))
+            .where(
+              (MapEntry<String, PixaRequest> entry) =>
+                  !visible.containsKey(entry.key),
+            )
             .map((MapEntry<String, PixaRequest> entry) => entry.value)
             .toList(growable: false);
         _visibleTileRequests
@@ -198,11 +201,13 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
       return;
     }
     final List<PixaRequest> requests = <PixaRequest>[
-      for (final PixaLargeImageTile tile
-          in plan.prefetchTiles.take(widget.maxPrefetchTiles))
+      for (final PixaLargeImageTile tile in plan.prefetchTiles.take(
+        widget.maxPrefetchTiles,
+      ))
         tile.requestFor(widget.request),
     ];
-    final String signature = '${widget.prefetchTarget.name}:'
+    final String signature =
+        '${widget.prefetchTarget.name}:'
         '${_signatureFor(requests.map((PixaRequest request) => request.cacheKey.value))}';
     if (signature == _lastPrefetchSignature) {
       return;
@@ -218,8 +223,10 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
       }
       for (final PixaRequest request in requests) {
         unawaited(
-          Pixa.prefetch(request, target: widget.prefetchTarget)
-              .catchError((Object _) {}),
+          Pixa.prefetch(
+            request,
+            target: widget.prefetchTarget,
+          ).catchError((Object _) {}),
         );
       }
     });
@@ -231,8 +238,11 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
     }
     for (final PixaRequest request in requests) {
       unawaited(
-        Pixa.evict(request, encoded: false, decoded: true)
-            .catchError((Object _) {}),
+        Pixa.evict(
+          request,
+          encoded: false,
+          decoded: true,
+        ).catchError((Object _) {}),
       );
     }
   }
@@ -285,12 +295,14 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
     }
     final double minScale = _minScaleFor(viewportSize);
     final double maxScale = _maxScaleFor(viewportSize);
-    final double zoomScale =
-        widget.doubleTapZoomScale.clamp(minScale, maxScale).toDouble();
+    final double zoomScale = widget.doubleTapZoomScale
+        .clamp(minScale, maxScale)
+        .toDouble();
     final double currentScale = _controller.scale;
     final bool zoomIn =
         currentScale <= zoomScale * 0.9 || _nearlyEqual(currentScale, minScale);
-    final Offset focus = _lastDoubleTapPosition ??
+    final Offset focus =
+        _lastDoubleTapPosition ??
         Offset(viewportSize.width / 2, viewportSize.height / 2);
     final Matrix4 target = _targetMatrixForScale(
       zoomIn ? zoomScale : minScale,
@@ -331,15 +343,16 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
       return;
     }
     _transformAnimationController.duration = duration;
-    _transformAnimation = Matrix4Tween(
-      begin: Matrix4.copy(_controller._transform.value),
-      end: target,
-    ).animate(
-      CurvedAnimation(
-        parent: _transformAnimationController,
-        curve: Curves.easeOutCubic,
-      ),
-    );
+    _transformAnimation =
+        Matrix4Tween(
+          begin: Matrix4.copy(_controller._transform.value),
+          end: target,
+        ).animate(
+          CurvedAnimation(
+            parent: _transformAnimationController,
+            curve: Curves.easeOutCubic,
+          ),
+        );
     unawaited(_transformAnimationController.forward(from: 0));
   }
 
@@ -362,8 +375,10 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
     }
     _stopTransformAnimation();
     final double fitScale = _scaleFor(viewportSize, widget.fit);
-    final double scale =
-        _clampScale(widget.initialScale ?? fitScale, viewportSize);
+    final double scale = _clampScale(
+      widget.initialScale ?? fitScale,
+      viewportSize,
+    );
     final Offset offset = Offset(
       (viewportSize.width - widget.imageWidth * scale) / 2,
       (viewportSize.height - widget.imageHeight * scale) / 2,
@@ -382,8 +397,11 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
     _stopTransformAnimation();
     final Offset focus =
         focalPoint ?? Offset(viewportSize.width / 2, viewportSize.height / 2);
-    _controller._transform.value =
-        _targetMatrixForScale(requestedScale, focus, viewportSize);
+    _controller._transform.value = _targetMatrixForScale(
+      requestedScale,
+      focus,
+      viewportSize,
+    );
     _scheduleSettle();
   }
 
@@ -437,16 +455,8 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
 
   Offset _clampOffset(double scale, Offset offset, Size viewportSize) {
     return Offset(
-      _clampAxis(
-        offset.dx,
-        viewportSize.width,
-        widget.imageWidth * scale,
-      ),
-      _clampAxis(
-        offset.dy,
-        viewportSize.height,
-        widget.imageHeight * scale,
-      ),
+      _clampAxis(offset.dx, viewportSize.width, widget.imageWidth * scale),
+      _clampAxis(offset.dy, viewportSize.height, widget.imageHeight * scale),
     );
   }
 
@@ -459,10 +469,7 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
 
   double _clampScale(double scale, Size viewportSize) {
     return scale
-        .clamp(
-          _minScaleFor(viewportSize),
-          _maxScaleFor(viewportSize),
-        )
+        .clamp(_minScaleFor(viewportSize), _maxScaleFor(viewportSize))
         .toDouble();
   }
 

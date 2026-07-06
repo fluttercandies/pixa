@@ -4,7 +4,8 @@ _PixaRuntimePluginManifestInput _readManifestInput(Uri uri) {
   final File file = File.fromUri(uri);
   if (!file.existsSync()) {
     throw StateError(
-        'Pixa runtime plugin manifest does not exist: ${file.path}');
+      'Pixa runtime plugin manifest does not exist: ${file.path}',
+    );
   }
   final Object? decoded = json.decode(file.readAsStringSync());
   if (decoded is! Map<Object?, Object?>) {

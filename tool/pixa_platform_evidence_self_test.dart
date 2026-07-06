@@ -3,8 +3,9 @@ import 'dart:io';
 
 Future<void> main() async {
   final Directory root = Directory.current;
-  final Directory temp =
-      await Directory.systemTemp.createTemp('pixa-platform-evidence-test-');
+  final Directory temp = await Directory.systemTemp.createTemp(
+    'pixa-platform-evidence-test-',
+  );
   try {
     await _acceptsDesktopEvidence(root, temp);
     await _requiresRequestedRunMode(root, temp);
@@ -30,36 +31,35 @@ Future<void> _acceptsHostedCiExampleSmokeEvidence(
   final Directory reports = Directory('${temp.path}/hosted-ci-example-smoke')
     ..createSync();
   const Map<String, ({String deviceKind, String connection, String signing})>
-      platformEvidence =
+  platformEvidence =
       <String, ({String deviceKind, String connection, String signing})>{
-    'android': (
-      deviceKind: 'emulator',
-      connection: 'local',
-      signing: 'debug',
-    ),
-    'ios': (
-      deviceKind: 'simulator',
-      connection: 'local',
-      signing: 'debug',
-    ),
-    'linux': (
-      deviceKind: 'desktop',
-      connection: 'local',
-      signing: 'not-applicable',
-    ),
-    'macos': (
-      deviceKind: 'desktop',
-      connection: 'local',
-      signing: 'not-applicable',
-    ),
-    'windows': (
-      deviceKind: 'desktop',
-      connection: 'local',
-      signing: 'not-applicable',
-    ),
-  };
-  for (final MapEntry<String,
-          ({String deviceKind, String connection, String signing})> entry
+        'android': (
+          deviceKind: 'emulator',
+          connection: 'local',
+          signing: 'debug',
+        ),
+        'ios': (deviceKind: 'simulator', connection: 'local', signing: 'debug'),
+        'linux': (
+          deviceKind: 'desktop',
+          connection: 'local',
+          signing: 'not-applicable',
+        ),
+        'macos': (
+          deviceKind: 'desktop',
+          connection: 'local',
+          signing: 'not-applicable',
+        ),
+        'windows': (
+          deviceKind: 'desktop',
+          connection: 'local',
+          signing: 'not-applicable',
+        ),
+      };
+  for (final MapEntry<
+        String,
+        ({String deviceKind, String connection, String signing})
+      >
+      entry
       in platformEvidence.entries) {
     _writeReport(
       reports,
@@ -212,36 +212,35 @@ Future<void> _acceptsHostedCiNativeModuleEvidence(
   final Directory reports = Directory('${temp.path}/hosted-ci-native-modules')
     ..createSync();
   const Map<String, ({String deviceKind, String connection, String signing})>
-      platformEvidence =
+  platformEvidence =
       <String, ({String deviceKind, String connection, String signing})>{
-    'android': (
-      deviceKind: 'emulator',
-      connection: 'local',
-      signing: 'debug',
-    ),
-    'ios': (
-      deviceKind: 'simulator',
-      connection: 'local',
-      signing: 'debug',
-    ),
-    'linux': (
-      deviceKind: 'desktop',
-      connection: 'local',
-      signing: 'not-applicable',
-    ),
-    'macos': (
-      deviceKind: 'desktop',
-      connection: 'local',
-      signing: 'not-applicable',
-    ),
-    'windows': (
-      deviceKind: 'desktop',
-      connection: 'local',
-      signing: 'not-applicable',
-    ),
-  };
-  for (final MapEntry<String,
-          ({String deviceKind, String connection, String signing})> entry
+        'android': (
+          deviceKind: 'emulator',
+          connection: 'local',
+          signing: 'debug',
+        ),
+        'ios': (deviceKind: 'simulator', connection: 'local', signing: 'debug'),
+        'linux': (
+          deviceKind: 'desktop',
+          connection: 'local',
+          signing: 'not-applicable',
+        ),
+        'macos': (
+          deviceKind: 'desktop',
+          connection: 'local',
+          signing: 'not-applicable',
+        ),
+        'windows': (
+          deviceKind: 'desktop',
+          connection: 'local',
+          signing: 'not-applicable',
+        ),
+      };
+  for (final MapEntry<
+        String,
+        ({String deviceKind, String connection, String signing})
+      >
+      entry
       in platformEvidence.entries) {
     _writeReport(
       reports,
@@ -318,8 +317,9 @@ Future<void> _rejectsMissingNativeModuleCheck(
         moduleId: 'pixa.processor.jpeg_turbo',
         entrypointSymbol: 'pixa_jpeg_turbo_processor_plugin_init',
         processorOperation: 'tile:jpeg',
-        checks: _requiredNativeModuleChecks
-            .where((String check) => check != 'nativeLink'),
+        checks: _requiredNativeModuleChecks.where(
+          (String check) => check != 'nativeLink',
+        ),
       ),
     ],
   );
@@ -357,8 +357,9 @@ Future<void> _rejectsMissingExampleSmokeCheck(
     connection: 'local',
     signing: 'not-applicable',
     runMode: 'integration-test',
-    checks: _requiredExampleSmokeChecks
-        .where((String check) => check != 'loopbackImageRequest'),
+    checks: _requiredExampleSmokeChecks.where(
+      (String check) => check != 'loopbackImageRequest',
+    ),
   );
   final ProcessResult result = await _runVerifier(root, reports, <String>[
     '--require-platforms=linux',
@@ -379,16 +380,12 @@ Future<ProcessResult> _runVerifier(
   Directory reports,
   List<String> args,
 ) {
-  return Process.run(
-    Platform.resolvedExecutable,
-    <String>[
-      'run',
-      'tool/pixa_platform_evidence.dart',
-      '--reports=${reports.path}',
-      ...args,
-    ],
-    workingDirectory: root.path,
-  );
+  return Process.run(Platform.resolvedExecutable, <String>[
+    'run',
+    'tool/pixa_platform_evidence.dart',
+    '--reports=${reports.path}',
+    ...args,
+  ], workingDirectory: root.path);
 }
 
 void _writeReport(
@@ -467,7 +464,7 @@ Map<String, Object?> _nativeModule({
   Iterable<String> checks = _requiredNativeModuleChecks,
 }) {
   return <String, Object?>{
-    if (platform != null) 'platform': platform,
+    'platform': ?platform,
     'moduleId': moduleId,
     'entrypointSymbol': entrypointSymbol,
     'processorOperations': <String>[processorOperation],

@@ -29,16 +29,16 @@ final class PixaDisplayDecoder {
   const PixaDisplayDecoder._({
     required String defaultBackend,
     required List<_DisplayDecoderBackend> backends,
-  })  : _defaultBackend = defaultBackend,
-        _backends = backends;
+  }) : _defaultBackend = defaultBackend,
+       _backends = backends;
 
   final String _defaultBackend;
   final List<_DisplayDecoderBackend> _backends;
 
   /// Captures backend selection capabilities for debug tooling.
   PixaDisplayDecoderSnapshot snapshot() {
-    final _ImageCompletionGateSnapshot completionGate =
-        _completionGate.snapshot();
+    final _ImageCompletionGateSnapshot completionGate = _completionGate
+        .snapshot();
     return PixaDisplayDecoderSnapshot(
       selector: 'pixa-display-decoder-v1',
       defaultBackend: _defaultBackend,
@@ -52,13 +52,13 @@ final class PixaDisplayDecoder {
           .map(
             (_DisplayDecoderBackend backend) =>
                 PixaDisplayDecoderBackendSnapshot(
-              id: backend.id,
-              execution: backend.execution,
-              streamKind: backend.streamKind,
-              usesFlutterEngine: backend.usesFlutterEngine,
-              ownsPipeline: backend.ownsPipeline,
-              supportsAnimatedImages: backend.supportsAnimatedImages,
-            ),
+                  id: backend.id,
+                  execution: backend.execution,
+                  streamKind: backend.streamKind,
+                  usesFlutterEngine: backend.usesFlutterEngine,
+                  ownsPipeline: backend.ownsPipeline,
+                  supportsAnimatedImages: backend.supportsAnimatedImages,
+                ),
           )
           .toList(growable: false),
     );
@@ -113,11 +113,15 @@ final class PixaDisplayDecoder {
     final PixaDisplayPipelineLoad pipelineLoad = await startLoad();
     final PixaPipeline pipeline = pipelineLoad.pipeline;
     final PixaPipelineLoad load = pipelineLoad.load;
-    final PixaImageFormatCatalog formatCatalog =
-        PixaImageFormatCatalog(registry: pipeline.registry);
+    final PixaImageFormatCatalog formatCatalog = PixaImageFormatCatalog(
+      registry: pipeline.registry,
+    );
     final _DisplayDecoderBackend decodeBackend = _effectiveBackendForPayload(
-        backend, request, load.bytes,
-        formatCatalog: formatCatalog);
+      backend,
+      request,
+      load.bytes,
+      formatCatalog: formatCatalog,
+    );
     _DecodePermit? permit;
     Stopwatch? decodeClock;
     try {
@@ -208,11 +212,23 @@ final class PixaDisplayDecoder {
         retryability: PixaRetryability.notRetryable,
       );
       _emitFailure(
-          pipeline, request, load, decodeBackend, failure, decodeClock);
+        pipeline,
+        request,
+        load,
+        decodeBackend,
+        failure,
+        decodeClock,
+      );
       throw failure;
     } on PixaFailure catch (failure) {
       _emitFailure(
-          pipeline, request, load, decodeBackend, failure, decodeClock);
+        pipeline,
+        request,
+        load,
+        decodeBackend,
+        failure,
+        decodeClock,
+      );
       rethrow;
     } on Object {
       _emitFailure(pipeline, request, load, decodeBackend, null, decodeClock);
@@ -241,10 +257,7 @@ final class PixaDisplayDecoder {
 /// Pipeline output paired with the pipeline that should receive decode events.
 final class PixaDisplayPipelineLoad {
   /// Creates a display pipeline load wrapper.
-  const PixaDisplayPipelineLoad({
-    required this.pipeline,
-    required this.load,
-  });
+  const PixaDisplayPipelineLoad({required this.pipeline, required this.load});
 
   /// Pipeline that produced [load].
   final PixaPipeline pipeline;
@@ -533,10 +546,10 @@ final class _RetainedRuntimeCodec implements ui.Codec {
     required ui.ImageDescriptor descriptor,
     required ui.ImmutableBuffer buffer,
     required PixaRuntimeRgbaImage rgba,
-  })  : _codec = codec,
-        _descriptor = descriptor,
-        _buffer = buffer,
-        _rgba = rgba;
+  }) : _codec = codec,
+       _descriptor = descriptor,
+       _buffer = buffer,
+       _rgba = rgba;
 
   final ui.Codec _codec;
   final ui.ImageDescriptor _descriptor;
@@ -567,8 +580,12 @@ final class _RetainedRuntimeCodec implements ui.Codec {
 }
 
 bool _isRuntimeDisplayProcessor(String descriptor) {
-  final String operation =
-      descriptor.split('(').first.trim().replaceAll('_', '').toLowerCase();
+  final String operation = descriptor
+      .split('(')
+      .first
+      .trim()
+      .replaceAll('_', '')
+      .toLowerCase();
   return switch (operation) {
     'resize' ||
     'resizeexact' ||
@@ -577,8 +594,7 @@ bool _isRuntimeDisplayProcessor(String descriptor) {
     'tilecropresize' ||
     'rotate' ||
     'blur' ||
-    'watermark' =>
-      true,
+    'watermark' => true,
     _ => false,
   };
 }
@@ -660,8 +676,9 @@ final class _EngineDisplayDecoderBackend implements _DisplayDecoderBackend {
     required PixaPipelineLoad load,
     required ImageDecoderCallback engineDecode,
   }) async {
-    final ui.ImmutableBuffer buffer =
-        await ui.ImmutableBuffer.fromUint8List(load.bytes);
+    final ui.ImmutableBuffer buffer = await ui.ImmutableBuffer.fromUint8List(
+      load.bytes,
+    );
     return engineDecode(
       buffer,
       getTargetSize: (int intrinsicWidth, int intrinsicHeight) {
@@ -692,10 +709,10 @@ final class PixaControlledAnimatedImageStreamCompleter
     required InformationCollector informationCollector,
     required PixaAnimationController controller,
     required PixaAnimationOptions options,
-  })  : _scale = scale,
-        _informationCollector = informationCollector,
-        _controller = controller,
-        _options = options {
+  }) : _scale = scale,
+       _informationCollector = informationCollector,
+       _controller = controller,
+       _options = options {
     this.debugLabel = debugLabel;
     _controller.addListener(_handlePlaybackChanged);
     codec.then<void>(
@@ -865,11 +882,13 @@ final class PixaControlledAnimatedImageStreamCompleter
     if (frame == null) {
       return;
     }
-    setImage(ImageInfo(
-      image: frame.image.clone(),
-      scale: _scale,
-      debugLabel: debugLabel,
-    ));
+    setImage(
+      ImageInfo(
+        image: frame.image.clone(),
+        scale: _scale,
+        debugLabel: debugLabel,
+      ),
+    );
     _shownTimestamp = SchedulerBinding.instance.currentFrameTimeStamp;
     _frameDuration = frame.duration;
     _framesEmitted += 1;
@@ -893,10 +912,12 @@ final class PixaControlledAnimatedImageStreamCompleter
   bool _shouldDisposePendingFrame(PixaAnimationPlaybackState state) {
     return switch (state) {
       PixaAnimationPlaybackState.playing => false,
-      PixaAnimationPlaybackState.paused => _options.frameCachePolicy ==
-          PixaAnimationFrameCachePolicy.disposeNextFrameOnPause,
-      PixaAnimationPlaybackState.stopped => _options.disposalPolicy ==
-          PixaAnimationDisposalPolicy.disposeDecodedFrames,
+      PixaAnimationPlaybackState.paused =>
+        _options.frameCachePolicy ==
+            PixaAnimationFrameCachePolicy.disposeNextFrameOnPause,
+      PixaAnimationPlaybackState.stopped =>
+        _options.disposalPolicy ==
+            PixaAnimationDisposalPolicy.disposeDecodedFrames,
     };
   }
 
@@ -911,8 +932,10 @@ final class PixaControlledAnimatedImageStreamCompleter
   }
 }
 
-Map<String, Object?> _attributes(_DisplayDecoderBackend backend,
-    [Map<String, Object?> extra = const <String, Object?>{}]) {
+Map<String, Object?> _attributes(
+  _DisplayDecoderBackend backend, [
+  Map<String, Object?> extra = const <String, Object?>{},
+]) {
   return <String, Object?>{
     'backend': backend.id,
     'execution': backend.execution,
@@ -1042,10 +1065,12 @@ final class _ImageCompletionGate {
       isCancelled: isCancelled,
     );
     _queue.add(queued);
-    unawaited(cancelled.then((_) {
-      queued.cancel();
-      _scheduleFrameReset();
-    }));
+    unawaited(
+      cancelled.then((_) {
+        queued.cancel();
+        _scheduleFrameReset();
+      }),
+    );
     return queued.future;
   }
 
@@ -1176,12 +1201,14 @@ final class _DecodeLimiter {
 
     final _QueuedDecodePermit queued = _QueuedDecodePermit();
     _queue.add(queued);
-    unawaited(cancelled.then((_) {
-      if (queued.cancel()) {
-        queued.completeError(const _DecodeCancelled());
-        _pump();
-      }
-    }));
+    unawaited(
+      cancelled.then((_) {
+        if (queued.cancel()) {
+          queued.completeError(const _DecodeCancelled());
+          _pump();
+        }
+      }),
+    );
     return queued.future;
   }
 

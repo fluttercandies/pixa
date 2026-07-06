@@ -59,14 +59,16 @@ void main() {
     controller.setState(const PixaLoading());
     controller.setState(const PixaLoading(progress: progress));
     controller.setState(const PixaLoading(progress: progress));
-    controller.setState(const PixaLoading(
-      progress: PixaProgress(
-        requestId: 1,
-        stage: PixaStage.fetch,
-        receivedBytes: 2,
-        expectedBytes: 2,
+    controller.setState(
+      const PixaLoading(
+        progress: PixaProgress(
+          requestId: 1,
+          stage: PixaStage.fetch,
+          receivedBytes: 2,
+          expectedBytes: 2,
+        ),
       ),
-    ));
+    );
 
     expect(notifications, 3);
   });

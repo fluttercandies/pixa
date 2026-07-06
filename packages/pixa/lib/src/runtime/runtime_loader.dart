@@ -17,10 +17,9 @@ final class PixaRuntimeLoadResult {
 
   /// Creates a load result from a sendable isolate message.
   factory PixaRuntimeLoadResult.fromMessage(PixaRuntimeLoadMessage message) {
-    return PixaRuntimeLoadResult(PixaRuntimeOwnedBuffer.fromAddress(
-      message.handleAddress,
-      message.length,
-    ));
+    return PixaRuntimeLoadResult(
+      PixaRuntimeOwnedBuffer.fromAddress(message.handleAddress, message.length),
+    );
   }
 
   /// Owned runtime buffer.
@@ -95,12 +94,7 @@ final class PixaRuntimeOwnedBuffer implements Finalizable {
       _ownedBufferFree(_handle);
       throw StateError('runtime buffer length mismatch.');
     }
-    _finalizer.attach(
-      this,
-      _handle,
-      detach: this,
-      externalSize: length,
-    );
+    _finalizer.attach(this, _handle, detach: this, externalSize: length);
   }
 
   /// Creates a buffer owner from a runtime handle address.
@@ -119,7 +113,9 @@ final class PixaRuntimeOwnedBuffer implements Finalizable {
 
   /// Takes ownership of a runtime byte buffer returned by the runtime ABI.
   factory PixaRuntimeOwnedBuffer.takePointer(
-      Pointer<Uint8> pointer, int length) {
+    Pointer<Uint8> pointer,
+    int length,
+  ) {
     if (length < 0) {
       throw StateError('runtime buffer length is negative.');
     }
@@ -134,8 +130,9 @@ final class PixaRuntimeOwnedBuffer implements Finalizable {
     return PixaRuntimeOwnedBuffer._(handle, length);
   }
 
-  static final NativeFinalizer _finalizer =
-      NativeFinalizer(Native.addressOf(_ownedBufferFree));
+  static final NativeFinalizer _finalizer = NativeFinalizer(
+    Native.addressOf(_ownedBufferFree),
+  );
 
   final Pointer<Void> _handle;
 
@@ -174,11 +171,17 @@ final class PixaRuntimeOwnedBuffer implements Finalizable {
     }
     if (maxDecodedPixels <= 0) {
       throw RangeError.value(
-          maxDecodedPixels, 'maxDecodedPixels', 'must be greater than zero');
+        maxDecodedPixels,
+        'maxDecodedPixels',
+        'must be greater than zero',
+      );
     }
     if (maxOutputBytes <= 0) {
       throw RangeError.value(
-          maxOutputBytes, 'maxOutputBytes', 'must be greater than zero');
+        maxOutputBytes,
+        'maxOutputBytes',
+        'must be greater than zero',
+      );
     }
     final Pointer<Uint32> width = allocator.calloc<Uint32>();
     final Pointer<Uint32> height = allocator.calloc<Uint32>();
@@ -202,8 +205,10 @@ final class PixaRuntimeOwnedBuffer implements Finalizable {
         throw _runtimeFailure(errorPtr.value, errorLen.value);
       }
       return PixaRuntimeRgbaImage._(
-        buffer:
-            PixaRuntimeOwnedBuffer.fromAddress(output.address, outLen.value),
+        buffer: PixaRuntimeOwnedBuffer.fromAddress(
+          output.address,
+          outLen.value,
+        ),
         width: width.value,
         height: height.value,
         rowBytes: rowBytes.value,
@@ -424,13 +429,18 @@ final class PixaRuntimeLoader {
   }
 
   /// Loads an already encoded request through the single Rust runtime.
-  PixaRuntimeLoadResult loadPrepared(Uint8List requestPayload,
-      {Uint8List? inlineBytes, int cancelTokenId = 0}) {
-    return PixaRuntimeLoadResult.fromMessage(loadPreparedMessage(
-      requestPayload,
-      inlineBytes: inlineBytes,
-      cancelTokenId: cancelTokenId,
-    ));
+  PixaRuntimeLoadResult loadPrepared(
+    Uint8List requestPayload, {
+    Uint8List? inlineBytes,
+    int cancelTokenId = 0,
+  }) {
+    return PixaRuntimeLoadResult.fromMessage(
+      loadPreparedMessage(
+        requestPayload,
+        inlineBytes: inlineBytes,
+        cancelTokenId: cancelTokenId,
+      ),
+    );
   }
 
   /// Loads an encoded request and returns a sendable runtime handle message.
@@ -442,13 +452,17 @@ final class PixaRuntimeLoader {
   }) {
     final _RuntimeInputCopyCounter copyCounter = _RuntimeInputCopyCounter();
     return _withUtf8(rootPath, (Pointer<Uint8> rootPtr, int rootLen) {
-      return _withBytes(requestPayload,
-          (Pointer<Uint8> requestPtr, int requestLen) {
-        return _withBytes(inlineBytes,
-            (Pointer<Uint8> inlinePtr, int inlineLen) {
+      return _withBytes(requestPayload, (
+        Pointer<Uint8> requestPtr,
+        int requestLen,
+      ) {
+        return _withBytes(inlineBytes, (
+          Pointer<Uint8> inlinePtr,
+          int inlineLen,
+        ) {
           final Pointer<UintPtr> outLen = allocator.calloc<UintPtr>();
-          final Pointer<Pointer<Uint8>> errorPtr =
-              allocator.calloc<Pointer<Uint8>>();
+          final Pointer<Pointer<Uint8>> errorPtr = allocator
+              .calloc<Pointer<Uint8>>();
           final Pointer<UintPtr> errorLen = allocator.calloc<UintPtr>();
           try {
             final Pointer<Void> handle = _runtimeLoadHandle(
@@ -517,21 +531,25 @@ PixaRuntimeProgressDrain decodeRuntimeProgressDrainForTest(Uint8List bytes) {
           length,
         );
       }
-      events.add(PixaRuntimeProgressEvent(
-        stage: _progressStageName(stageCode),
-        name: name,
-        receivedBytes: receivedBytes,
-        expectedBytes: expectedBytes,
-        message: message,
-        previewBuffer: previewBuffer,
-        timestampMs: timestampMs,
-      ));
+      events.add(
+        PixaRuntimeProgressEvent(
+          stage: _progressStageName(stageCode),
+          name: name,
+          receivedBytes: receivedBytes,
+          expectedBytes: expectedBytes,
+          message: message,
+          previewBuffer: previewBuffer,
+          timestampMs: timestampMs,
+        ),
+      );
     }
     if (!reader.isComplete) {
       return PixaRuntimeProgressDrain.empty;
     }
     return PixaRuntimeProgressDrain(
-        droppedEvents: droppedEvents, events: events);
+      droppedEvents: droppedEvents,
+      events: events,
+    );
   } on FormatException {
     return PixaRuntimeProgressDrain.empty;
   }
@@ -806,19 +824,20 @@ final class _RuntimeInputCopyCounter {
 }
 
 @Native<
-    Pointer<Void> Function(
-      Pointer<Uint8>,
-      UintPtr,
-      Pointer<Uint8>,
-      UintPtr,
-      Pointer<Uint8>,
-      UintPtr,
-      Uint64,
-      Uint64,
-      Pointer<UintPtr>,
-      Pointer<Pointer<Uint8>>,
-      Pointer<UintPtr>,
-    )>(
+  Pointer<Void> Function(
+    Pointer<Uint8>,
+    UintPtr,
+    Pointer<Uint8>,
+    UintPtr,
+    Pointer<Uint8>,
+    UintPtr,
+    Uint64,
+    Uint64,
+    Pointer<UintPtr>,
+    Pointer<Pointer<Uint8>>,
+    Pointer<UintPtr>,
+  )
+>(
   assetId: 'package:pixa/pixa_runtime',
   symbol: 'pixa_load_handle_with_cancel_and_progress',
   isLeaf: false,
@@ -859,17 +878,18 @@ external Pointer<Uint8> _ownedBufferData(Pointer<Void> handle);
 external int _ownedBufferLen(Pointer<Void> handle);
 
 @Native<
-    Pointer<Void> Function(
-      Pointer<Void>,
-      Uint64,
-      UintPtr,
-      Pointer<Uint32>,
-      Pointer<Uint32>,
-      Pointer<UintPtr>,
-      Pointer<UintPtr>,
-      Pointer<Pointer<Uint8>>,
-      Pointer<UintPtr>,
-    )>(
+  Pointer<Void> Function(
+    Pointer<Void>,
+    Uint64,
+    UintPtr,
+    Pointer<Uint32>,
+    Pointer<Uint32>,
+    Pointer<UintPtr>,
+    Pointer<UintPtr>,
+    Pointer<Pointer<Uint8>>,
+    Pointer<UintPtr>,
+  )
+>(
   assetId: 'package:pixa/pixa_runtime',
   symbol: 'pixa_decode_rgba_from_owned_buffer',
   isLeaf: false,

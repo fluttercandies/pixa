@@ -39,16 +39,17 @@ final class PixaRuntimeBridge {
 
   /// Stable primary/secondary hashes for normalized cache-key material.
   static PixaRuntimeHashPair cacheKeyHashPair(Uint8List bytes) {
-    return _withRuntimeBytesAndHashPair(bytes, (Pointer<Uint8> ptr, int len,
-        Pointer<Uint64> primary, Pointer<Uint64> secondary) {
+    return _withRuntimeBytesAndHashPair(bytes, (
+      Pointer<Uint8> ptr,
+      int len,
+      Pointer<Uint64> primary,
+      Pointer<Uint64> secondary,
+    ) {
       final int status = _cacheKeyHashPair(ptr, len, primary, secondary);
       if (status != 0) {
         throw StateError('Failed to hash runtime cache key material.');
       }
-      return PixaRuntimeHashPair(
-        primary.value,
-        secondary.value,
-      );
+      return PixaRuntimeHashPair(primary.value, secondary.value);
     });
   }
 
@@ -68,9 +69,7 @@ final class PixaRuntimeBridge {
         throw StateError('Failed to read runtime plugin registry stats.');
       }
       try {
-        return PixaRuntimePluginRegistryStats.decode(
-          ptr.asTypedList(length),
-        );
+        return PixaRuntimePluginRegistryStats.decode(ptr.asTypedList(length));
       } finally {
         _bufferFree(ptr, length);
       }
@@ -105,8 +104,11 @@ final class PixaRuntimeBridge {
 
   /// Parses JPEG EXIF orientation, returning null when absent.
   static int? jpegExifOrientation(Uint8List bytes) {
-    return _withRuntimeBytesAndOut(bytes,
-        (Pointer<Uint8> ptr, int len, Pointer<Uint16> outOrientation) {
+    return _withRuntimeBytesAndOut(bytes, (
+      Pointer<Uint8> ptr,
+      int len,
+      Pointer<Uint16> outOrientation,
+    ) {
       final int status = _jpegExifOrientation(ptr, len, outOrientation);
       if (status == 1) {
         return null;
@@ -142,7 +144,9 @@ final class PixaRuntimeHashPair {
 }
 
 int _withRuntimeBytes(
-    Uint8List bytes, int Function(Pointer<Uint8>, int) operation) {
+  Uint8List bytes,
+  int Function(Pointer<Uint8>, int) operation,
+) {
   if (bytes.isEmpty) {
     return operation(nullptr.cast<Uint8>(), 0);
   }
@@ -292,12 +296,8 @@ external void _bufferFree(Pointer<Uint8> ptr, int len);
 external int _pixaFnv1a64(Pointer<Uint8> ptr, int len);
 
 @Native<
-    Int32 Function(
-      Pointer<Uint8>,
-      UintPtr,
-      Pointer<Uint64>,
-      Pointer<Uint64>,
-    )>(
+  Int32 Function(Pointer<Uint8>, UintPtr, Pointer<Uint64>, Pointer<Uint64>)
+>(
   assetId: 'package:pixa/pixa_runtime',
   symbol: 'pixa_cache_key_hash_pair',
   isLeaf: true,

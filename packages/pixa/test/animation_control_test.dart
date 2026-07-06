@@ -31,16 +31,19 @@ void main() {
     ]);
   });
 
-  testWidgets('controlled animation completer pauses frame scheduling',
-      (WidgetTester tester) async {
+  testWidgets('controlled animation completer pauses frame scheduling', (
+    WidgetTester tester,
+  ) async {
     final PixaAnimationController controller = PixaAnimationController();
     addTearDown(controller.dispose);
-    final List<ui.Image> sourceFrames = await tester.runAsync(
-      () async => <ui.Image>[
-        await _onePixelImage(1),
-        await _onePixelImage(2),
-      ],
-    ) as List<ui.Image>;
+    final List<ui.Image> sourceFrames =
+        await tester.runAsync(
+              () async => <ui.Image>[
+                await _onePixelImage(1),
+                await _onePixelImage(2),
+              ],
+            )
+            as List<ui.Image>;
     addTearDown(() {
       for (final ui.Image image in sourceFrames) {
         image.dispose();
@@ -49,25 +52,26 @@ void main() {
     final _FakeCodec codec = _FakeCodec(sourceFrames);
     final ImageStreamCompleter completer =
         PixaControlledAnimatedImageStreamCompleter(
-      codec: SynchronousFuture<ui.Codec>(codec),
-      scale: 1,
-      debugLabel: 'controlled-animation-test',
-      informationCollector: () => <DiagnosticsNode>[
-        ErrorDescription('controlled animation test'),
-      ],
-      controller: controller,
-      options: const PixaAnimationOptions(
-        frameCachePolicy: PixaAnimationFrameCachePolicy.keepNextFrame,
-        disposalPolicy: PixaAnimationDisposalPolicy.disposeDecodedFrames,
-      ),
-    );
+          codec: SynchronousFuture<ui.Codec>(codec),
+          scale: 1,
+          debugLabel: 'controlled-animation-test',
+          informationCollector: () => <DiagnosticsNode>[
+            ErrorDescription('controlled animation test'),
+          ],
+          controller: controller,
+          options: const PixaAnimationOptions(
+            frameCachePolicy: PixaAnimationFrameCachePolicy.keepNextFrame,
+            disposalPolicy: PixaAnimationDisposalPolicy.disposeDecodedFrames,
+          ),
+        );
     final List<int> frames = <int>[];
-    final ImageStreamListener listener = ImageStreamListener(
-      (ImageInfo image, bool synchronousCall) {
-        frames.add(codec.framesServed);
-        image.dispose();
-      },
-    );
+    final ImageStreamListener listener = ImageStreamListener((
+      ImageInfo image,
+      bool synchronousCall,
+    ) {
+      frames.add(codec.framesServed);
+      image.dispose();
+    });
 
     completer.addListener(listener);
     await _pumpUntil(tester, () => frames.isNotEmpty);
@@ -93,14 +97,10 @@ void main() {
     addTearDown(secondController.dispose);
 
     expect(
-      PixaProvider(
-        request: request,
-        animationController: firstController,
+      PixaProvider(request: request, animationController: firstController),
+      isNot(
+        PixaProvider(request: request, animationController: secondController),
       ),
-      isNot(PixaProvider(
-        request: request,
-        animationController: secondController,
-      )),
     );
     expect(PixaProvider(request: request), PixaProvider(request: request));
   });
@@ -160,8 +160,9 @@ Future<ui.Image> _onePixelImage(int frame) async {
     0x00,
     0xff,
   ]);
-  final ui.ImmutableBuffer buffer =
-      await ui.ImmutableBuffer.fromUint8List(bytes);
+  final ui.ImmutableBuffer buffer = await ui.ImmutableBuffer.fromUint8List(
+    bytes,
+  );
   final ui.ImageDescriptor descriptor = ui.ImageDescriptor.raw(
     buffer,
     width: 1,
@@ -178,7 +179,7 @@ Future<ui.Image> _onePixelImage(int frame) async {
 }
 
 Uint8List _minimalGif() {
-  return Uint8List.fromList(base64Decode(
-    'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
-  ));
+  return Uint8List.fromList(
+    base64Decode('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='),
+  );
 }

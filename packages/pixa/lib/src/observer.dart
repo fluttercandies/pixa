@@ -23,8 +23,9 @@ final class PixaEvent {
       requestId: requestId,
       stage: stage,
       name: name,
-      request:
-          request == null ? null : PixaRequestSnapshot.fromRequest(request),
+      request: request == null
+          ? null
+          : PixaRequestSnapshot.fromRequest(request),
       progress: progress,
       failure: failure,
       cacheStats: cacheStats,
@@ -105,20 +106,19 @@ final class PixaObserverSamplingPolicy {
 final class PixaRequestSnapshot {
   /// Creates a redacted request snapshot.
   PixaRequestSnapshot.fromRequest(PixaRequest request)
-      : sourceLabel = request.source.safeLabel,
-        cacheKey = request.cacheKey.value,
-        cacheNamespace = request.cacheNamespace,
-        targetWidth = request.targetSize?.width,
-        targetHeight = request.targetSize?.height,
-        scale = request.scale,
-        priority = request.priority.name,
-        cacheMode = request.cachePolicy.mode.name,
-        retryMode = request.retryPolicy.mode.name,
-        maxAttempts = request.retryPolicy.maxAttempts,
-        allowCrossHostRedirects =
-            request.redirectPolicy.allowCrossHostRedirects,
-        allowHttpsToHttpRedirect = request.redirectPolicy.allowHttpsToHttp,
-        headers = PixaRedactor.redactHeaders(request.headers);
+    : sourceLabel = request.source.safeLabel,
+      cacheKey = request.cacheKey.value,
+      cacheNamespace = request.cacheNamespace,
+      targetWidth = request.targetSize?.width,
+      targetHeight = request.targetSize?.height,
+      scale = request.scale,
+      priority = request.priority.name,
+      cacheMode = request.cachePolicy.mode.name,
+      retryMode = request.retryPolicy.mode.name,
+      maxAttempts = request.retryPolicy.maxAttempts,
+      allowCrossHostRedirects = request.redirectPolicy.allowCrossHostRedirects,
+      allowHttpsToHttpRedirect = request.redirectPolicy.allowHttpsToHttp,
+      headers = PixaRedactor.redactHeaders(request.headers);
 
   /// Redacted source label.
   final String sourceLabel;
@@ -189,8 +189,8 @@ Object? _redactAttributeValue(Object? value) {
   return switch (value) {
     String() => PixaRedactor.redactText(value),
     Map() => value.map((Object? key, Object? nested) {
-        return MapEntry<Object?, Object?>(key, _redactAttributeValue(nested));
-      }),
+      return MapEntry<Object?, Object?>(key, _redactAttributeValue(nested));
+    }),
     Iterable() when value is! String =>
       value.map(_redactAttributeValue).toList(),
     _ => value,

@@ -71,29 +71,84 @@ final List<RegExp> _unsupportedFormatClaimPatterns = <RegExp>[
 ];
 
 const List<_StableRasterFormat> _stableRasterFormats = <_StableRasterFormat>[
-  _StableRasterFormat('tiff', 'Tiff', 'TIFF', 'image/tiff',
-      providerRuntimeDefault: true),
-  _StableRasterFormat('pnm', 'Pnm', 'PNM', 'image/x-portable-anymap',
-      providerRuntimeDefault: true),
-  _StableRasterFormat('qoi', 'Qoi', 'QOI', 'image/qoi',
-      providerRuntimeDefault: true),
-  _StableRasterFormat('tga', 'Tga', 'TGA', 'image/x-tga',
-      providerRuntimeDefault: true),
-  _StableRasterFormat('dds', 'Dds', 'DDS', 'image/vnd.ms-dds',
-      providerRuntimeDefault: true),
-  _StableRasterFormat('hdr', 'Hdr', 'HDR', 'image/vnd.radiance',
-      providerRuntimeDefault: true),
-  _StableRasterFormat('farbfeld', 'Farbfeld', 'Farbfeld', 'image/x-farbfeld',
-      providerRuntimeDefault: true),
-  _StableRasterFormat('pcx', 'Pcx', 'PCX', 'image/x-pcx',
-      providerRuntimeDefault: true),
-  _StableRasterFormat('sgi', 'Sgi', 'SGI', 'image/sgi',
-      providerRuntimeDefault: true),
+  _StableRasterFormat(
+    'tiff',
+    'Tiff',
+    'TIFF',
+    'image/tiff',
+    providerRuntimeDefault: true,
+  ),
+  _StableRasterFormat(
+    'pnm',
+    'Pnm',
+    'PNM',
+    'image/x-portable-anymap',
+    providerRuntimeDefault: true,
+  ),
+  _StableRasterFormat(
+    'qoi',
+    'Qoi',
+    'QOI',
+    'image/qoi',
+    providerRuntimeDefault: true,
+  ),
+  _StableRasterFormat(
+    'tga',
+    'Tga',
+    'TGA',
+    'image/x-tga',
+    providerRuntimeDefault: true,
+  ),
+  _StableRasterFormat(
+    'dds',
+    'Dds',
+    'DDS',
+    'image/vnd.ms-dds',
+    providerRuntimeDefault: true,
+  ),
+  _StableRasterFormat(
+    'hdr',
+    'Hdr',
+    'HDR',
+    'image/vnd.radiance',
+    providerRuntimeDefault: true,
+  ),
+  _StableRasterFormat(
+    'farbfeld',
+    'Farbfeld',
+    'Farbfeld',
+    'image/x-farbfeld',
+    providerRuntimeDefault: true,
+  ),
+  _StableRasterFormat(
+    'pcx',
+    'Pcx',
+    'PCX',
+    'image/x-pcx',
+    providerRuntimeDefault: true,
+  ),
+  _StableRasterFormat(
+    'sgi',
+    'Sgi',
+    'SGI',
+    'image/sgi',
+    providerRuntimeDefault: true,
+  ),
   _StableRasterFormat('wbmp', 'Wbmp', 'WBMP', 'image/vnd.wap.wbmp'),
-  _StableRasterFormat('xbm', 'Xbm', 'XBM', 'image/x-xbitmap',
-      providerRuntimeDefault: true),
-  _StableRasterFormat('xpm', 'Xpm', 'XPM', 'image/x-xpixmap',
-      providerRuntimeDefault: true),
+  _StableRasterFormat(
+    'xbm',
+    'Xbm',
+    'XBM',
+    'image/x-xbitmap',
+    providerRuntimeDefault: true,
+  ),
+  _StableRasterFormat(
+    'xpm',
+    'Xpm',
+    'XPM',
+    'image/x-xpixmap',
+    providerRuntimeDefault: true,
+  ),
 ];
 
 final class _StableRasterFormat {
@@ -134,12 +189,21 @@ Iterable<File> _dependencyFiles(Directory root) sync* {
 }
 
 Iterable<File> _sourceFiles(Directory root) sync* {
-  yield* _filesUnder(root, 'packages',
-      extensions: <String>{'.dart', '.yaml', '.toml'});
-  yield* _filesUnder(root, 'examples',
-      extensions: <String>{'.dart', '.yaml', '.toml'});
-  yield* _filesUnder(root, 'rust',
-      extensions: <String>{'.rs', '.toml', '.lock'});
+  yield* _filesUnder(
+    root,
+    'packages',
+    extensions: <String>{'.dart', '.yaml', '.toml'},
+  );
+  yield* _filesUnder(
+    root,
+    'examples',
+    extensions: <String>{'.dart', '.yaml', '.toml'},
+  );
+  yield* _filesUnder(
+    root,
+    'rust',
+    extensions: <String>{'.rs', '.toml', '.lock'},
+  );
 }
 
 Iterable<File> _unsupportedFormatClaimFiles(Directory root) sync* {
@@ -176,7 +240,7 @@ Iterable<File> _filesUnder(
     if (entity is! File) {
       continue;
     }
-    final String path = entity.path;
+    final String path = entity.path.replaceAll(r'\', '/');
     if (path.contains('/build/') ||
         path.contains('/.dart_tool/') ||
         path.contains('/ephemeral/') ||
@@ -358,10 +422,7 @@ void _requireToken(
   );
 }
 
-void _checkRuntimePackagingDiscipline(
-  Directory root,
-  List<String> failures,
-) {
+void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
   final Map<String, String> sources = <String, String>{};
   for (final String path in <String>[
     'rust/Cargo.toml',
@@ -674,10 +735,14 @@ List<Object?> _manifestModules(
 }
 
 void _checkUnsafeBoundary(Directory root, List<String> failures) {
-  for (final File file
-      in _filesUnder(root, 'rust', extensions: <String>{'.rs'})) {
+  for (final File file in _filesUnder(
+    root,
+    'rust',
+    extensions: <String>{'.rs'},
+  )) {
     final String path = _relative(root, file);
-    final bool allowed = path.startsWith('rust/pixa_runtime/') ||
+    final bool allowed =
+        path.startsWith('rust/pixa_runtime/') ||
         path.startsWith('rust/pixa_runtime/examples/');
     if (allowed) {
       continue;
@@ -694,18 +759,14 @@ void _checkUnsafeBoundary(Directory root, List<String> failures) {
 }
 
 void _checkRustResolvedLicenses(Directory root, List<String> failures) {
-  final ProcessResult result = Process.runSync(
-    'cargo',
-    <String>[
-      'metadata',
-      '--manifest-path',
-      'rust/Cargo.toml',
-      '--format-version',
-      '1',
-      '--locked',
-    ],
-    workingDirectory: root.path,
-  );
+  final ProcessResult result = Process.runSync('cargo', <String>[
+    'metadata',
+    '--manifest-path',
+    'rust/Cargo.toml',
+    '--format-version',
+    '1',
+    '--locked',
+  ], workingDirectory: root.path);
   if (result.exitCode != 0) {
     failures.add('rust license audit: cargo metadata failed');
     return;
@@ -792,8 +853,9 @@ void _checkPublicExports(Directory root, List<String> failures) {
     final Set<String> unexpected = exported.difference(entry.value);
     final Set<String> missing = entry.value.difference(exported);
     for (final String path in unexpected) {
-      failures
-          .add('public API surface: ${entry.key} unexpectedly exports $path');
+      failures.add(
+        'public API surface: ${entry.key} unexpectedly exports $path',
+      );
     }
     for (final String path in missing) {
       failures.add('public API surface: ${entry.key} no longer exports $path');
@@ -802,8 +864,10 @@ void _checkPublicExports(Directory root, List<String> failures) {
 }
 
 Iterable<String> _exportPaths(String source) sync* {
-  final RegExp exportPattern =
-      RegExp(r'''export\s+['"]([^'"]+)['"]''', multiLine: true);
+  final RegExp exportPattern = RegExp(
+    r'''export\s+['"]([^'"]+)['"]''',
+    multiLine: true,
+  );
   for (final RegExpMatch match in exportPattern.allMatches(source)) {
     yield match.group(1)!;
   }
@@ -847,12 +911,7 @@ bool _isMissingCargoAudit(ProcessResult result) {
 }
 
 ProcessResult _runCargoAuditExecutable(Directory root) {
-  final List<String> args = <String>[
-    '-f',
-    'rust/Cargo.lock',
-    '-D',
-    'warnings',
-  ];
+  final List<String> args = <String>['-f', 'rust/Cargo.lock', '-D', 'warnings'];
   final ProcessResult pathResult = Process.runSync(
     'cargo-audit',
     args,
@@ -869,11 +928,7 @@ ProcessResult _runCargoAuditExecutable(Directory root) {
   if (!executable.existsSync()) {
     return pathResult;
   }
-  return Process.runSync(
-    executable.path,
-    args,
-    workingDirectory: root.path,
-  );
+  return Process.runSync(executable.path, args, workingDirectory: root.path);
 }
 
 void _checkDartDependencyAdvisories(Directory root, List<String> failures) {
@@ -902,7 +957,8 @@ void _checkDartDependencyAdvisories(Directory root, List<String> failures) {
     }
     if (_isDirectDartDependency(kind) && typed['isDiscontinued'] == true) {
       failures.add(
-          'dart dependency audit: direct dependency $name is discontinued');
+        'dart dependency audit: direct dependency $name is discontinued',
+      );
     }
   }
 }
@@ -912,8 +968,10 @@ bool _isDirectDartDependency(String kind) {
 }
 
 String _relative(Directory root, File file) {
-  final String prefix = '${root.path}/';
-  return file.path.startsWith(prefix)
-      ? file.path.substring(prefix.length)
-      : file.path;
+  final String rootPath = root.path.replaceAll(r'\', '/');
+  final String filePath = file.path.replaceAll(r'\', '/');
+  final String prefix = '$rootPath/';
+  return filePath.startsWith(prefix)
+      ? filePath.substring(prefix.length)
+      : filePath;
 }

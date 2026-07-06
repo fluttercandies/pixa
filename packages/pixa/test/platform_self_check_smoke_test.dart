@@ -18,59 +18,58 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
-  test('runtime platform self-check passes and can write a JSON report',
-      () async {
-    final Directory cacheRoot =
-        await Directory.systemTemp.createTemp('pixa-platform-self-check-');
-    addTearDown(() => cacheRoot.delete(recursive: true));
-
-    await Pixa.configure(PixaConfig(cacheRootPath: cacheRoot.path));
-    final PixaDebugSnapshot snapshot = PixaDebugInspector.snapshot();
-    final PixaRuntimePlatformSelfCheck selfCheck =
-        await _operationalSelfCheck(snapshot.platformSelfCheck, cacheRoot);
-
-    expect(
-      selfCheck.passed,
-      isTrue,
-      reason: _json(selfCheck.toJson()),
-    );
-    expect(selfCheck.isSupportedPlatform, isTrue);
-    expect(
-      selfCheck.failedChecks,
-      isEmpty,
-      reason: _json(selfCheck.toJson()),
-    );
-    expect(
-      selfCheck.checks.map((PixaRuntimePlatformCheck check) => check.name),
-      containsAll(<String>[
-        'runtimeLibraryLoad',
-        'symbolResolution',
-        'threadedRuntime',
-        'cacheDirectory',
-        'networkPolicy',
-        'runtimePipelineLoad',
-        'cacheDirectoryReadWrite',
-        'networkLoopbackFetch',
-        'abiArchitecture',
-      ]),
-    );
-
-    final String? reportPath =
-        Platform.environment['PIXA_PLATFORM_SELF_CHECK_REPORT'];
-    if (reportPath != null && reportPath.trim().isNotEmpty) {
-      final File report = File(reportPath);
-      report.parent.createSync(recursive: true);
-      report.writeAsStringSync(
-        const JsonEncoder.withIndent('  ').convert(<String, Object?>{
-          'generatedUtc': DateTime.now().toUtc().toIso8601String(),
-          'cacheRootPath': cacheRoot.path,
-          'evidence': _evidenceMetadata(selfCheck.platform),
-          'selfCheck': selfCheck.toJson(),
-          'capabilities': snapshot.toJson()['capabilities'],
-        }),
+  test(
+    'runtime platform self-check passes and can write a JSON report',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-platform-self-check-',
       );
-    }
-  });
+      addTearDown(() => cacheRoot.delete(recursive: true));
+
+      await Pixa.configure(PixaConfig(cacheRootPath: cacheRoot.path));
+      final PixaDebugSnapshot snapshot = PixaDebugInspector.snapshot();
+      final PixaRuntimePlatformSelfCheck selfCheck =
+          await _operationalSelfCheck(snapshot.platformSelfCheck, cacheRoot);
+
+      expect(selfCheck.passed, isTrue, reason: _json(selfCheck.toJson()));
+      expect(selfCheck.isSupportedPlatform, isTrue);
+      expect(
+        selfCheck.failedChecks,
+        isEmpty,
+        reason: _json(selfCheck.toJson()),
+      );
+      expect(
+        selfCheck.checks.map((PixaRuntimePlatformCheck check) => check.name),
+        containsAll(<String>[
+          'runtimeLibraryLoad',
+          'symbolResolution',
+          'threadedRuntime',
+          'cacheDirectory',
+          'networkPolicy',
+          'runtimePipelineLoad',
+          'cacheDirectoryReadWrite',
+          'networkLoopbackFetch',
+          'abiArchitecture',
+        ]),
+      );
+
+      final String? reportPath =
+          Platform.environment['PIXA_PLATFORM_SELF_CHECK_REPORT'];
+      if (reportPath != null && reportPath.trim().isNotEmpty) {
+        final File report = File(reportPath);
+        report.parent.createSync(recursive: true);
+        report.writeAsStringSync(
+          const JsonEncoder.withIndent('  ').convert(<String, Object?>{
+            'generatedUtc': DateTime.now().toUtc().toIso8601String(),
+            'cacheRootPath': cacheRoot.path,
+            'evidence': _evidenceMetadata(selfCheck.platform),
+            'selfCheck': selfCheck.toJson(),
+            'capabilities': snapshot.toJson()['capabilities'],
+          }),
+        );
+      }
+    },
+  );
 }
 
 Future<PixaRuntimePlatformSelfCheck> _operationalSelfCheck(
@@ -96,18 +95,21 @@ Future<PixaRuntimePlatformSelfCheck> _operationalSelfCheck(
 
 Future<PixaRuntimePlatformCheck> _runtimePipelineLoadCheck() async {
   try {
-    final PixaPipelineLoad load = await Pixa.pipeline.load(PixaRequest(
-      source: PixaSource.bytes(_minimalGif(), id: 'platform-runtime-load'),
-      cachePolicy: const PixaCachePolicy.noStore(),
-      decoderOptions: const <String, Object?>{'displayBackend': 'runtime'},
-    ));
+    final PixaPipelineLoad load = await Pixa.pipeline.load(
+      PixaRequest(
+        source: PixaSource.bytes(_minimalGif(), id: 'platform-runtime-load'),
+        cachePolicy: const PixaCachePolicy.noStore(),
+        decoderOptions: const <String, Object?>{'displayBackend': 'runtime'},
+      ),
+    );
     try {
       final image = load.decodeRuntimeRgba(
         maxDecodedPixels: 1,
         maxOutputBytes: 4,
       );
       try {
-        final bool valid = image.width == 1 &&
+        final bool valid =
+            image.width == 1 &&
             image.height == 1 &&
             image.rowBytes == 4 &&
             image.bytes.length == 4;
@@ -153,18 +155,22 @@ Future<PixaRuntimePlatformCheck> _networkLoopbackFetchCheck() async {
   try {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final Uint8List bytes = _minimalGif();
-    unawaited(server.forEach((HttpRequest request) async {
-      request.response
-        ..statusCode = HttpStatus.ok
-        ..headers.contentType = ContentType('image', 'gif')
-        ..headers.contentLength = bytes.length
-        ..add(bytes);
-      await request.response.close();
-    }));
-    final PixaPipelineLoad load = await Pixa.pipeline.load(PixaRequest.network(
-      'http://${InternetAddress.loopbackIPv4.address}:${server.port}/probe.gif',
-      cachePolicy: const PixaCachePolicy.noStore(),
-    ));
+    unawaited(
+      server.forEach((HttpRequest request) async {
+        request.response
+          ..statusCode = HttpStatus.ok
+          ..headers.contentType = ContentType('image', 'gif')
+          ..headers.contentLength = bytes.length
+          ..add(bytes);
+        await request.response.close();
+      }),
+    );
+    final PixaPipelineLoad load = await Pixa.pipeline.load(
+      PixaRequest.network(
+        'http://${InternetAddress.loopbackIPv4.address}:${server.port}/probe.gif',
+        cachePolicy: const PixaCachePolicy.noStore(),
+      ),
+    );
     try {
       final bool valid = load.bytes.length == bytes.length;
       return _check(
@@ -259,11 +265,14 @@ Map<String, Object?> _evidenceMetadata(String platform) {
     'runnerOs': Platform.operatingSystem,
     'runMode': _env('PIXA_PLATFORM_EVIDENCE_RUN_MODE') ?? 'flutter-test',
     'deviceId': _env('PIXA_PLATFORM_EVIDENCE_DEVICE_ID'),
-    'deviceKind': _env('PIXA_PLATFORM_EVIDENCE_DEVICE_KIND') ??
+    'deviceKind':
+        _env('PIXA_PLATFORM_EVIDENCE_DEVICE_KIND') ??
         (Platform.isAndroid || Platform.isIOS ? 'unknown' : 'desktop'),
-    'connection': _env('PIXA_PLATFORM_EVIDENCE_CONNECTION') ??
+    'connection':
+        _env('PIXA_PLATFORM_EVIDENCE_CONNECTION') ??
         (Platform.isAndroid || Platform.isIOS ? 'unknown' : 'local'),
-    'signing': _env('PIXA_PLATFORM_EVIDENCE_SIGNING') ??
+    'signing':
+        _env('PIXA_PLATFORM_EVIDENCE_SIGNING') ??
         (Platform.isIOS ? 'unknown' : 'not-applicable'),
   };
 }

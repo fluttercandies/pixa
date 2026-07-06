@@ -287,8 +287,10 @@ void main() {
     expect(icoCapability['engineDisplay'], isFalse);
     expect(icoCapability['defaultRuntimeDisplay'], isTrue);
     expect(platformSelfCheck['passed'], isTrue);
-    expect(
-        platformContract['targetAbis'], <String>['macos-arm64', 'macos-x64']);
+    expect(platformContract['targetAbis'], <String>[
+      'macos-arm64',
+      'macos-x64',
+    ]);
     expect(decodedStats['byteUtilization'], 0.25);
     final Map<String, Object?> config = json['config']! as Map<String, Object?>;
     expect(config['decodedCacheMaximumSize'], 23);
@@ -319,73 +321,76 @@ void main() {
     expect(stats.currentSizeBytes, cache.currentSizeBytes);
     expect(stats.liveImageCount, cache.liveImageCount);
     expect(stats.byteUtilization, cache.currentSizeBytes / 4096);
-    expect(
-      () => Pixa.tuneDecodedCache(maximumSize: -1),
-      throwsRangeError,
-    );
+    expect(() => Pixa.tuneDecodedCache(maximumSize: -1), throwsRangeError);
   });
 
-  test('PixaConfig applies Flutter decoded cache budget during configure',
-      () async {
-    final ImageCache cache = PaintingBinding.instance.imageCache;
-    final int previousMaximumSize = cache.maximumSize;
-    final int previousMaximumSizeBytes = cache.maximumSizeBytes;
-    addTearDown(() {
-      cache.maximumSize = previousMaximumSize;
-      cache.maximumSizeBytes = previousMaximumSizeBytes;
-    });
+  test(
+    'PixaConfig applies Flutter decoded cache budget during configure',
+    () async {
+      final ImageCache cache = PaintingBinding.instance.imageCache;
+      final int previousMaximumSize = cache.maximumSize;
+      final int previousMaximumSizeBytes = cache.maximumSizeBytes;
+      addTearDown(() {
+        cache.maximumSize = previousMaximumSize;
+        cache.maximumSizeBytes = previousMaximumSizeBytes;
+      });
 
-    await Pixa.configure(const PixaConfig(
-      cacheRootPath: '',
-      decodedCacheMaximumSize: 19,
-      decodedCacheMaximumSizeBytes: 8192,
-    ));
+      await Pixa.configure(
+        const PixaConfig(
+          cacheRootPath: '',
+          decodedCacheMaximumSize: 19,
+          decodedCacheMaximumSizeBytes: 8192,
+        ),
+      );
 
-    expect(cache.maximumSize, 19);
-    expect(cache.maximumSizeBytes, 8192);
-    expect(Pixa.config.decodedCacheMaximumSize, 19);
-    expect(Pixa.config.decodedCacheMaximumSizeBytes, 8192);
-  });
+      expect(cache.maximumSize, 19);
+      expect(cache.maximumSizeBytes, 8192);
+      expect(Pixa.config.decodedCacheMaximumSize, 19);
+      expect(Pixa.config.decodedCacheMaximumSizeBytes, 8192);
+    },
+  );
 
   testWidgets(
-      'Pixa.trimMemory clears Flutter decoded cache on critical pressure',
-      (WidgetTester tester) async {
-    final ImageCache cache = PaintingBinding.instance.imageCache;
-    final int previousMaximumSize = cache.maximumSize;
-    final int previousMaximumSizeBytes = cache.maximumSizeBytes;
-    cache.clear();
-    cache.clearLiveImages();
-    addTearDown(() {
+    'Pixa.trimMemory clears Flutter decoded cache on critical pressure',
+    (WidgetTester tester) async {
+      final ImageCache cache = PaintingBinding.instance.imageCache;
+      final int previousMaximumSize = cache.maximumSize;
+      final int previousMaximumSizeBytes = cache.maximumSizeBytes;
       cache.clear();
       cache.clearLiveImages();
-      cache.maximumSize = previousMaximumSize;
-      cache.maximumSizeBytes = previousMaximumSizeBytes;
-    });
-    final Directory cacheRoot =
-        Directory.systemTemp.createTempSync('pixa-trim-memory-');
-    addTearDown(() => cacheRoot.delete(recursive: true));
-    await Pixa.configure(PixaConfig(cacheRootPath: cacheRoot.path));
-    final ui.Image image =
-        await tester.runAsync(() => createTestImage(width: 1, height: 1)) ??
-            (throw StateError('Failed to create decoded cache test image.'));
-    addTearDown(image.dispose);
-    final Object cacheKey = Object();
+      addTearDown(() {
+        cache.clear();
+        cache.clearLiveImages();
+        cache.maximumSize = previousMaximumSize;
+        cache.maximumSizeBytes = previousMaximumSizeBytes;
+      });
+      final Directory cacheRoot = Directory.systemTemp.createTempSync(
+        'pixa-trim-memory-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      await Pixa.configure(PixaConfig(cacheRootPath: cacheRoot.path));
+      final ui.Image image =
+          await tester.runAsync(() => createTestImage(width: 1, height: 1)) ??
+          (throw StateError('Failed to create decoded cache test image.'));
+      addTearDown(image.dispose);
+      final Object cacheKey = Object();
 
-    cache.putIfAbsent(
-      cacheKey,
-      () => OneFrameImageStreamCompleter(
-        Future<ImageInfo>.value(ImageInfo(image: image.clone())),
-      ),
-    );
-    await tester.pump();
+      cache.putIfAbsent(
+        cacheKey,
+        () => OneFrameImageStreamCompleter(
+          Future<ImageInfo>.value(ImageInfo(image: image.clone())),
+        ),
+      );
+      await tester.pump();
 
-    expect(cache.containsKey(cacheKey), isTrue);
+      expect(cache.containsKey(cacheKey), isTrue);
 
-    await Pixa.trimMemory(level: PixaMemoryTrimLevel.critical);
+      await Pixa.trimMemory(level: PixaMemoryTrimLevel.critical);
 
-    expect(cache.containsKey(cacheKey), isFalse);
-    expect(Pixa.decodedCacheStats().currentSize, 0);
-  });
+      expect(cache.containsKey(cacheKey), isFalse);
+      expect(Pixa.decodedCacheStats().currentSize, 0);
+    },
+  );
 
   test('Pixa.configure rejects invalid runtime and decode budgets', () {
     expect(
@@ -478,8 +483,9 @@ void main() {
 
   test('PixaRedirectPolicy has value equality', () {
     const PixaRedirectPolicy defaultPolicy = PixaRedirectPolicy();
-    const PixaRedirectPolicy strictPolicy =
-        PixaRedirectPolicy(allowCrossHostRedirects: false);
+    const PixaRedirectPolicy strictPolicy = PixaRedirectPolicy(
+      allowCrossHostRedirects: false,
+    );
 
     expect(defaultPolicy, isNot(strictPolicy));
     expect(defaultPolicy.allowCrossHostRedirects, isTrue);
@@ -504,30 +510,34 @@ void main() {
     expect(payload.length, lessThan(256));
   });
 
-  test('PixaCacheKey computes primary and secondary hashes in runtime pair',
-      () {
-    final PixaCacheKey key = PixaCacheKey.fromParts(<Object?>['pixa']);
+  test(
+    'PixaCacheKey computes primary and secondary hashes in runtime pair',
+    () {
+      final PixaCacheKey key = PixaCacheKey.fromParts(<Object?>['pixa']);
 
-    expect(key.value, 'bef3f60dc4ff7eed');
-    expect(key.materialHash, 0x668135a3077b3346);
-  });
+      expect(key.value, 'bef3f60dc4ff7eed');
+      expect(key.materialHash, 0x668135a3077b3346);
+    },
+  );
 
-  test('sensitive request material partitions cache key without leaking labels',
-      () {
-    final PixaRequest first = PixaRequest.network(
-      'https://images.example.test/avatar.jpg?token=alpha',
-      headers: const <String, String>{'Authorization': 'Bearer alpha'},
-    );
-    final PixaRequest second = PixaRequest.network(
-      'https://images.example.test/avatar.jpg?token=bravo',
-      headers: const <String, String>{'Authorization': 'Bearer bravo'},
-    );
+  test(
+    'sensitive request material partitions cache key without leaking labels',
+    () {
+      final PixaRequest first = PixaRequest.network(
+        'https://images.example.test/avatar.jpg?token=alpha',
+        headers: const <String, String>{'Authorization': 'Bearer alpha'},
+      );
+      final PixaRequest second = PixaRequest.network(
+        'https://images.example.test/avatar.jpg?token=bravo',
+        headers: const <String, String>{'Authorization': 'Bearer bravo'},
+      );
 
-    expect(first.cacheKey, isNot(second.cacheKey));
-    expect(first.encodedCacheKey, isNot(second.encodedCacheKey));
-    expect(first.cacheKey.debugLabel, isNot(contains('alpha')));
-    expect(second.cacheKey.debugLabel, isNot(contains('bravo')));
-  });
+      expect(first.cacheKey, isNot(second.cacheKey));
+      expect(first.encodedCacheKey, isNot(second.encodedCacheKey));
+      expect(first.cacheKey.debugLabel, isNot(contains('alpha')));
+      expect(second.cacheKey.debugLabel, isNot(contains('bravo')));
+    },
+  );
 
   test('PixaRequest equality follows stable cache key material', () {
     final PixaRequest first = PixaRequest.network(
@@ -552,8 +562,9 @@ void main() {
 
   test('PixaRequest.copyWith updates limits and processor descriptors', () {
     final PixaRequest original = PixaRequest(
-      source:
-          PixaSource.network(Uri.parse('https://images.example.test/a.jpg')),
+      source: PixaSource.network(
+        Uri.parse('https://images.example.test/a.jpg'),
+      ),
     );
 
     final PixaRequest changed = original.copyWith(
@@ -600,10 +611,12 @@ void main() {
   });
 
   test('EXIF thumbnail source is keyed separately from full file source', () {
-    final PixaRequest full =
-        PixaRequest(source: PixaSource.file('/photos/private/full.jpg'));
-    final PixaRequest thumbnail =
-        PixaRequest.exifThumbnail('/photos/private/full.jpg');
+    final PixaRequest full = PixaRequest(
+      source: PixaSource.file('/photos/private/full.jpg'),
+    );
+    final PixaRequest thumbnail = PixaRequest.exifThumbnail(
+      '/photos/private/full.jpg',
+    );
 
     expect(thumbnail.source.safeLabel, 'exif-thumbnail:full.jpg');
     expect(thumbnail.encodedCacheKey, isNot(full.encodedCacheKey));
@@ -640,8 +653,9 @@ void main() {
   test('runtime progress drain decodes binary payload', () {
     final Uint8List payload = _binaryProgressPayload();
 
-    final PixaRuntimeProgressDrain drain =
-        decodeRuntimeProgressDrainForTest(payload);
+    final PixaRuntimeProgressDrain drain = decodeRuntimeProgressDrainForTest(
+      payload,
+    );
 
     expect(drain.droppedEvents, 2);
     expect(drain.events, hasLength(1));
@@ -655,9 +669,11 @@ void main() {
 
   test('runtime progress drain rejects unknown binary fields', () {
     final PixaRuntimeProgressDrain badStage = decodeRuntimeProgressDrainForTest(
-        _binaryProgressPayload(stageCode: 99));
-    final PixaRuntimeProgressDrain badFlags =
-        decodeRuntimeProgressDrainForTest(_binaryProgressPayload(flags: 0x10));
+      _binaryProgressPayload(stageCode: 99),
+    );
+    final PixaRuntimeProgressDrain badFlags = decodeRuntimeProgressDrainForTest(
+      _binaryProgressPayload(flags: 0x10),
+    );
 
     expect(badStage.events, isEmpty);
     expect(badFlags.events, isEmpty);
@@ -713,10 +729,12 @@ void main() {
   });
 
   test('runtime failure rejects unknown binary fields', () {
-    final PixaFailure badStage =
-        decodeRuntimeFailureForTest(_binaryFailurePayload(stageCode: 99));
-    final PixaFailure badRetry =
-        decodeRuntimeFailureForTest(_binaryFailurePayload(retryableCode: 2));
+    final PixaFailure badStage = decodeRuntimeFailureForTest(
+      _binaryFailurePayload(stageCode: 99),
+    );
+    final PixaFailure badRetry = decodeRuntimeFailureForTest(
+      _binaryFailurePayload(retryableCode: 2),
+    );
 
     expect(badStage.retryability, PixaRetryability.unknown);
     expect(badStage.safeMessage, contains('invalid error payload'));

@@ -20,10 +20,7 @@ final class PixaRuntimePluginBuildPlan {
     Uri? userManifest,
     Uri? userManifestDirectory,
   }) {
-    final List<Uri> manifestUris = <Uri>[
-      coreManifest,
-      ...additionalManifests,
-    ];
+    final List<Uri> manifestUris = <Uri>[coreManifest, ...additionalManifests];
     if (userManifest != null) {
       manifestUris.add(userManifest);
     }
@@ -35,12 +32,13 @@ final class PixaRuntimePluginBuildPlan {
           '${directory.path}',
         );
       }
-      final List<File> files = directory
-          .listSync()
-          .whereType<File>()
-          .where((File file) => file.path.endsWith('.json'))
-          .toList()
-        ..sort((File a, File b) => a.path.compareTo(b.path));
+      final List<File> files =
+          directory
+              .listSync()
+              .whereType<File>()
+              .where((File file) => file.path.endsWith('.json'))
+              .toList()
+            ..sort((File a, File b) => a.path.compareTo(b.path));
       manifestUris.addAll(files.map((File file) => file.uri));
     }
 
@@ -77,7 +75,8 @@ final class PixaRuntimePluginBuildPlan {
       final Object? rawModules = manifest['modules'];
       if (rawModules is! List<Object?>) {
         throw StateError(
-            'Pixa runtime plugin manifest modules must be a list.');
+          'Pixa runtime plugin manifest modules must be a list.',
+        );
       }
       for (final Object? rawModule in rawModules) {
         if (rawModule is! Map<Object?, Object?>) {
@@ -85,9 +84,9 @@ final class PixaRuntimePluginBuildPlan {
         }
         final PixaRuntimePluginModulePlan module =
             PixaRuntimePluginModulePlan.fromJson(
-          _stringMap(rawModule),
-          baseUri: manifestInput.baseUri,
-        );
+              _stringMap(rawModule),
+              baseUri: manifestInput.baseUri,
+            );
         final PixaRuntimePluginModulePlan? existing = modules[module.moduleId];
         if (existing != null) {
           throw StateError(
@@ -125,10 +124,11 @@ final class PixaRuntimePluginBuildPlan {
       (PixaRuntimePluginModulePlan module) => module.cacheStoreNamespaces,
       'cache store namespace',
     );
-    final List<PixaRuntimePluginModulePlan> sortedModules = modules.values
-        .toList()
-      ..sort((PixaRuntimePluginModulePlan a, PixaRuntimePluginModulePlan b) =>
-          a.moduleId.compareTo(b.moduleId));
+    final List<PixaRuntimePluginModulePlan> sortedModules =
+        modules.values.toList()..sort(
+          (PixaRuntimePluginModulePlan a, PixaRuntimePluginModulePlan b) =>
+              a.moduleId.compareTo(b.moduleId),
+        );
     return PixaRuntimePluginBuildPlan(
       modules: sortedModules,
       dependencies: List<Uri>.unmodifiable(dependencies),
@@ -139,23 +139,30 @@ final class PixaRuntimePluginBuildPlan {
   final List<Uri> dependencies;
 
   int get builtInHostModules => modules
-      .where((PixaRuntimePluginModulePlan module) =>
-          module.deployment == 'builtInHostModule')
+      .where(
+        (PixaRuntimePluginModulePlan module) =>
+            module.deployment == 'builtInHostModule',
+      )
       .length;
 
   int get hostLinkedPluginModules => modules
-      .where((PixaRuntimePluginModulePlan module) =>
-          module.deployment == 'hostLinkedPluginModule')
+      .where(
+        (PixaRuntimePluginModulePlan module) =>
+            module.deployment == 'hostLinkedPluginModule',
+      )
       .length;
 
   int get assetModules => modules
-      .where((PixaRuntimePluginModulePlan module) =>
-          module.deployment == 'assetModule')
+      .where(
+        (PixaRuntimePluginModulePlan module) =>
+            module.deployment == 'assetModule',
+      )
       .length;
 
   int get linkableModules => modules
       .where(
-          (PixaRuntimePluginModulePlan module) => module.canLinkIntoHostBinary)
+        (PixaRuntimePluginModulePlan module) => module.canLinkIntoHostBinary,
+      )
       .length;
 
   bool get canUseSingleHostBinary {
@@ -338,12 +345,14 @@ final class PixaRuntimePluginModulePlan {
       throw StateError('Unsupported Pixa runtime plugin deployment.');
     }
     if (capabilities.isEmpty ||
-        !capabilities.any(const <String>{
-          'fetcher',
-          'decoder',
-          'processor',
-          'cacheStore',
-        }.contains)) {
+        !capabilities.any(
+          const <String>{
+            'fetcher',
+            'decoder',
+            'processor',
+            'cacheStore',
+          }.contains,
+        )) {
       throw StateError('Pixa runtime plugin module exposes no capability.');
     }
     if (!hostManagedRuntime ||
@@ -358,9 +367,15 @@ final class PixaRuntimePluginModulePlan {
     _validateRouteClaim('fetcher', fetcherSourceKinds, 'fetcherSourceKinds');
     _validateDecoderRouteClaims();
     _validateRouteClaim(
-        'processor', processorOperations, 'processorOperations');
+      'processor',
+      processorOperations,
+      'processorOperations',
+    );
     _validateRouteClaim(
-        'cacheStore', cacheStoreNamespaces, 'cacheStoreNamespaces');
+      'cacheStore',
+      cacheStoreNamespaces,
+      'cacheStoreNamespaces',
+    );
     if (deployment == 'hostLinkedPluginModule' &&
         (entrypointSymbol == null || entrypointSymbol!.trim().isEmpty)) {
       throw StateError('Host-linked Pixa runtime plugin requires entrypoint.');
@@ -406,8 +421,9 @@ final class PixaRuntimePluginModulePlan {
         'decoderMimeTypes': _sortedList(decoderMimeTypes),
       if (decoderSignatures.isNotEmpty)
         'decoderSignatures': decoderSignatures
-            .map((PixaRuntimeDecoderSignaturePlan signature) =>
-                signature.toJson())
+            .map(
+              (PixaRuntimeDecoderSignaturePlan signature) => signature.toJson(),
+            )
             .toList(growable: false),
       if (capabilities.contains('decoder'))
         'decoderCapabilities': decoderCapabilities.toJson(),
@@ -437,7 +453,8 @@ final class PixaRuntimePluginModulePlan {
 
   void _validateDecoderRouteClaims() {
     final bool hasDecoder = capabilities.contains('decoder');
-    final bool hasRoutes = decoderMimeTypes.isNotEmpty ||
+    final bool hasRoutes =
+        decoderMimeTypes.isNotEmpty ||
         decoderFormatIds.isNotEmpty ||
         decoderSignatures.isNotEmpty;
     if (!hasDecoder && hasRoutes) {
@@ -479,13 +496,13 @@ final class PixaRuntimeDecoderCapabilitiesPlan {
     this.progressiveDecode = false,
     this.regionDecode = false,
     this.defaultRuntimeDisplay = false,
-  })  : metadataProbe = true,
-        staticDecode = true,
-        processorInput = true,
-        streamingInput = true,
-        zeroCopyInput = true,
-        ownedOutputBuffers = true,
-        stable = true;
+  }) : metadataProbe = true,
+       staticDecode = true,
+       processorInput = true,
+       streamingInput = true,
+       zeroCopyInput = true,
+       ownedOutputBuffers = true,
+       stable = true;
 
   factory PixaRuntimeDecoderCapabilitiesPlan.fromJson(
     Map<String, Object?>? json,
@@ -569,9 +586,7 @@ final class PixaRuntimeDecoderSignaturePlan {
     this.formatId,
   });
 
-  factory PixaRuntimeDecoderSignaturePlan.fromJson(
-    Map<String, Object?> json,
-  ) {
+  factory PixaRuntimeDecoderSignaturePlan.fromJson(Map<String, Object?> json) {
     final int? offset = _optionalInt(json, 'offset');
     if (offset == null || offset < 0) {
       throw StateError(
@@ -593,8 +608,10 @@ final class PixaRuntimeDecoderSignaturePlan {
         'header bytes.',
       );
     }
-    final String mimeType =
-        _requiredString(json, 'mimeType').split(';').first.trim().toLowerCase();
+    final String mimeType = _requiredString(
+      json,
+      'mimeType',
+    ).split(';').first.trim().toLowerCase();
     if (mimeType.isEmpty) {
       throw StateError(
         'Pixa runtime plugin decoder signature MIME type must not be empty.',
@@ -648,9 +665,7 @@ List<PixaRuntimeDecoderSignaturePlan> _optionalDecoderSignatures(
     return const <PixaRuntimeDecoderSignaturePlan>[];
   }
   if (raw is! List<Object?>) {
-    throw StateError(
-      'Pixa runtime plugin "decoderSignatures" must be a list.',
-    );
+    throw StateError('Pixa runtime plugin "decoderSignatures" must be a list.');
   }
   final List<PixaRuntimeDecoderSignaturePlan> signatures =
       <PixaRuntimeDecoderSignaturePlan>[];
@@ -660,14 +675,13 @@ List<PixaRuntimeDecoderSignaturePlan> _optionalDecoderSignatures(
         'Pixa runtime plugin decoder signature must be an object.',
       );
     }
-    signatures.add(PixaRuntimeDecoderSignaturePlan.fromJson(
-      _stringMap(value),
-    ));
+    signatures.add(PixaRuntimeDecoderSignaturePlan.fromJson(_stringMap(value)));
   }
   signatures.sort(
-    (PixaRuntimeDecoderSignaturePlan left,
-            PixaRuntimeDecoderSignaturePlan right) =>
-        left.routeKey.compareTo(right.routeKey),
+    (
+      PixaRuntimeDecoderSignaturePlan left,
+      PixaRuntimeDecoderSignaturePlan right,
+    ) => left.routeKey.compareTo(right.routeKey),
   );
   return List<PixaRuntimeDecoderSignaturePlan>.unmodifiable(signatures);
 }

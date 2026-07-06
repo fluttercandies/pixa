@@ -9,8 +9,10 @@ void main() {
       cachePolicy: const PixaCachePolicy.noStore(),
     );
 
-    final PixaRequest prefetch =
-        pixaEncodedPrefetchRequest(request, PixaPrefetchTarget.diskOnly);
+    final PixaRequest prefetch = pixaEncodedPrefetchRequest(
+      request,
+      PixaPrefetchTarget.diskOnly,
+    );
 
     expect(prefetch.priority, PixaPriority.low);
     expect(prefetch.cachePolicy.mode, PixaCacheMode.diskOnly);
@@ -23,20 +25,25 @@ void main() {
       cachePolicy: const PixaCachePolicy.noStore(),
     );
 
-    final PixaRequest prefetch =
-        pixaEncodedPrefetchRequest(request, PixaPrefetchTarget.encodedMemory);
+    final PixaRequest prefetch = pixaEncodedPrefetchRequest(
+      request,
+      PixaPrefetchTarget.encodedMemory,
+    );
 
     expect(prefetch.priority, PixaPriority.low);
     expect(prefetch.cachePolicy.mode, PixaCacheMode.memoryOnly);
   });
 
   test('decoded prefetch target is rejected by encoded pipeline helper', () {
-    final PixaRequest request =
-        PixaRequest.network('https://images.example.test/a.jpg');
+    final PixaRequest request = PixaRequest.network(
+      'https://images.example.test/a.jpg',
+    );
 
     expect(
       () => pixaEncodedPrefetchRequest(
-          request, PixaPrefetchTarget.decodedPrewarm),
+        request,
+        PixaPrefetchTarget.decodedPrewarm,
+      ),
       throwsArgumentError,
     );
   });
@@ -82,8 +89,9 @@ void main() {
   });
 
   test('decoded prefetch requires a BuildContext', () {
-    final PixaRequest request =
-        PixaRequest.network('https://images.example.test/a.jpg');
+    final PixaRequest request = PixaRequest.network(
+      'https://images.example.test/a.jpg',
+    );
 
     expect(
       Pixa.prefetch(request, target: PixaPrefetchTarget.decodedPrewarm),

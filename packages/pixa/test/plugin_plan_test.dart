@@ -39,40 +39,42 @@ void main() {
   test('runtime plugin plan accepts explicit host-linked modules', () {
     final PixaRuntimePluginBuildPlan plan =
         PixaRuntimePluginBuildPlan.fromManifestMaps(<Map<String, Object?>>[
-      _manifest(<Map<String, Object?>>[
-        <String, Object?>{
-          'moduleId': 'third.party.decoder',
-          'deployment': 'hostLinkedPluginModule',
-          'entrypointSymbol': 'pixa_plugin_init_decoder',
-          'implementationLanguage': 'c',
-          'capabilities': <String>['decoder'],
-          'decoderFormatIds': <String>['third-party'],
-          'decoderMimeTypes': <String>['image/third-party'],
-          'decoderCapabilities': <String, Object?>{
-            'metadataProbe': true,
-            'staticDecode': true,
-            'regionDecode': true,
-            'zeroCopyInput': true,
-            'ownedOutputBuffers': true,
-            'stable': true,
-          },
-          'link': <String, Object?>{
-            'searchPaths': <String>['runtime/lib'],
-            'staticLibraries': <String>['third_party_decoder'],
-            'frameworks': <String>['ImageIO'],
-            'linkArgs': <String>['-Wl,--gc-sections'],
-          },
-        },
-      ]),
-    ]);
+          _manifest(<Map<String, Object?>>[
+            <String, Object?>{
+              'moduleId': 'third.party.decoder',
+              'deployment': 'hostLinkedPluginModule',
+              'entrypointSymbol': 'pixa_plugin_init_decoder',
+              'implementationLanguage': 'c',
+              'capabilities': <String>['decoder'],
+              'decoderFormatIds': <String>['third-party'],
+              'decoderMimeTypes': <String>['image/third-party'],
+              'decoderCapabilities': <String, Object?>{
+                'metadataProbe': true,
+                'staticDecode': true,
+                'regionDecode': true,
+                'zeroCopyInput': true,
+                'ownedOutputBuffers': true,
+                'stable': true,
+              },
+              'link': <String, Object?>{
+                'searchPaths': <String>['runtime/lib'],
+                'staticLibraries': <String>['third_party_decoder'],
+                'frameworks': <String>['ImageIO'],
+                'linkArgs': <String>['-Wl,--gc-sections'],
+              },
+            },
+          ]),
+        ]);
 
     expect(plan.modules.single.moduleId, 'third.party.decoder');
     expect(plan.modules.single.decoderFormatIds, <String>['third-party']);
-    expect(plan.modules.single.link.staticLibraries,
-        <String>['third_party_decoder']);
+    expect(plan.modules.single.link.staticLibraries, <String>[
+      'third_party_decoder',
+    ]);
     expect(plan.modules.single.toJson()['link'], isA<Map<String, Object?>>());
-    expect(plan.modules.single.toJson()['decoderFormatIds'],
-        <String>['third-party']);
+    expect(plan.modules.single.toJson()['decoderFormatIds'], <String>[
+      'third-party',
+    ]);
     expect(
       (plan.modules.single.toJson()['decoderCapabilities']!
           as Map<String, Object?>)['regionDecode'],
@@ -86,84 +88,91 @@ void main() {
   test('runtime plugin plan accepts format-specific processor routes', () {
     final PixaRuntimePluginBuildPlan plan =
         PixaRuntimePluginBuildPlan.fromManifestMaps(<Map<String, Object?>>[
-      _manifest(<Map<String, Object?>>[
-        <String, Object?>{
-          'moduleId': 'pixa.processor.jpeg_roi',
-          'deployment': 'hostLinkedPluginModule',
-          'entrypointSymbol': 'pixa_jpeg_roi_init',
-          'implementationLanguage': 'rust',
-          'capabilities': <String>['processor'],
-          'processorOperations': <String>['tile:jpeg'],
-          'link': <String, Object?>{
-            'staticLibraries': <String>['pixa_jpeg_roi'],
-          },
-        },
-      ]),
-    ]);
+          _manifest(<Map<String, Object?>>[
+            <String, Object?>{
+              'moduleId': 'pixa.processor.jpeg_roi',
+              'deployment': 'hostLinkedPluginModule',
+              'entrypointSymbol': 'pixa_jpeg_roi_init',
+              'implementationLanguage': 'rust',
+              'capabilities': <String>['processor'],
+              'processorOperations': <String>['tile:jpeg'],
+              'link': <String, Object?>{
+                'staticLibraries': <String>['pixa_jpeg_roi'],
+              },
+            },
+          ]),
+        ]);
 
     expect(plan.modules.single.processorOperations, <String>{'tile:jpeg'});
-    expect(plan.modules.single.toJson()['processorOperations'],
-        <String>['tile:jpeg']);
+    expect(plan.modules.single.toJson()['processorOperations'], <String>[
+      'tile:jpeg',
+    ]);
     expect(plan.hostLinkedPluginModules, 1);
     expect(plan.canUseSingleHostBinary, isTrue);
   });
 
-  test('runtime plugin plan loads official optional JPEG and WebP ROI modules',
-      () {
-    final PixaRuntimePluginBuildPlan plan = PixaRuntimePluginBuildPlan.load(
-      coreManifest: Directory.current.uri.resolve('plugins/pixa_plugins.json'),
-      additionalManifests: <Uri>[
-        Directory.current.uri
-            .resolve('plugins/optional/pixa_jpeg_turbo_processor.json'),
-        Directory.current.uri
-            .resolve('plugins/optional/pixa_webp_processor.json'),
-      ],
-    );
+  test(
+    'runtime plugin plan loads official optional JPEG and WebP ROI modules',
+    () {
+      final PixaRuntimePluginBuildPlan plan = PixaRuntimePluginBuildPlan.load(
+        coreManifest: Directory.current.uri.resolve(
+          'plugins/pixa_plugins.json',
+        ),
+        additionalManifests: <Uri>[
+          Directory.current.uri.resolve(
+            'plugins/optional/pixa_jpeg_turbo_processor.json',
+          ),
+          Directory.current.uri.resolve(
+            'plugins/optional/pixa_webp_processor.json',
+          ),
+        ],
+      );
 
-    expect(plan.modules, hasLength(5));
-    expect(plan.hostLinkedPluginModules, 3);
-    expect(plan.canUseSingleHostBinary, isTrue);
+      expect(plan.modules, hasLength(5));
+      expect(plan.hostLinkedPluginModules, 3);
+      expect(plan.canUseSingleHostBinary, isTrue);
 
-    final PixaRuntimePluginModulePlan jpeg = plan.modules.singleWhere(
-      (PixaRuntimePluginModulePlan module) =>
-          module.moduleId == 'pixa.processor.jpeg_turbo',
-    );
-    expect(jpeg.entrypointSymbol, 'pixa_jpeg_turbo_processor_plugin_init');
-    expect(jpeg.processorOperations, <String>{'tile:jpeg'});
-    expect(jpeg.capabilities, <String>{'processor'});
-    expect(jpeg.link.isNotEmpty, isFalse);
+      final PixaRuntimePluginModulePlan jpeg = plan.modules.singleWhere(
+        (PixaRuntimePluginModulePlan module) =>
+            module.moduleId == 'pixa.processor.jpeg_turbo',
+      );
+      expect(jpeg.entrypointSymbol, 'pixa_jpeg_turbo_processor_plugin_init');
+      expect(jpeg.processorOperations, <String>{'tile:jpeg'});
+      expect(jpeg.capabilities, <String>{'processor'});
+      expect(jpeg.link.isNotEmpty, isFalse);
 
-    final PixaRuntimePluginModulePlan webp = plan.modules.singleWhere(
-      (PixaRuntimePluginModulePlan module) =>
-          module.moduleId == 'pixa.processor.webp',
-    );
-    expect(webp.entrypointSymbol, 'pixa_webp_processor_plugin_init');
-    expect(webp.processorOperations, <String>{'tile:webp'});
-    expect(webp.capabilities, <String>{'processor'});
-    expect(webp.link.isNotEmpty, isFalse);
-  });
+      final PixaRuntimePluginModulePlan webp = plan.modules.singleWhere(
+        (PixaRuntimePluginModulePlan module) =>
+            module.moduleId == 'pixa.processor.webp',
+      );
+      expect(webp.entrypointSymbol, 'pixa_webp_processor_plugin_init');
+      expect(webp.processorOperations, <String>{'tile:webp'});
+      expect(webp.capabilities, <String>{'processor'});
+      expect(webp.link.isNotEmpty, isFalse);
+    },
+  );
 
   test('runtime plugin plan accepts decoder signature routes', () {
     final PixaRuntimePluginBuildPlan plan =
         PixaRuntimePluginBuildPlan.fromManifestMaps(<Map<String, Object?>>[
-      _manifest(<Map<String, Object?>>[
-        <String, Object?>{
-          'moduleId': 'third.party.signature.decoder',
-          'deployment': 'hostLinkedPluginModule',
-          'entrypointSymbol': 'pixa_plugin_init_decoder',
-          'implementationLanguage': 'c',
-          'capabilities': <String>['decoder'],
-          'decoderSignatures': <Map<String, Object?>>[
+          _manifest(<Map<String, Object?>>[
             <String, Object?>{
-              'offset': 4,
-              'magicHex': '66 74 79 70 78 79 7A',
-              'mimeType': 'image/third-party',
-              'formatId': 'third-party',
+              'moduleId': 'third.party.signature.decoder',
+              'deployment': 'hostLinkedPluginModule',
+              'entrypointSymbol': 'pixa_plugin_init_decoder',
+              'implementationLanguage': 'c',
+              'capabilities': <String>['decoder'],
+              'decoderSignatures': <Map<String, Object?>>[
+                <String, Object?>{
+                  'offset': 4,
+                  'magicHex': '66 74 79 70 78 79 7A',
+                  'mimeType': 'image/third-party',
+                  'formatId': 'third-party',
+                },
+              ],
             },
-          ],
-        },
-      ]),
-    ]);
+          ]),
+        ]);
 
     final PixaRuntimeDecoderSignaturePlan signature =
         plan.modules.single.decoderSignatures.single;
@@ -185,40 +194,45 @@ void main() {
     expect(plan.modules.single.decoderCapabilities.zeroCopyInput, isTrue);
   });
 
-  test('runtime plugin plan scans user manifest directory deterministically',
-      () async {
-    final Directory temp =
-        await Directory.systemTemp.createTemp('pixa-plugin-plan-');
-    addTearDown(() => temp.deleteSync(recursive: true));
-    final Directory userDirectory = Directory('${temp.path}/user')
-      ..createSync();
-    File('${userDirectory.path}/b.json').writeAsStringSync(_manifestText(
-      moduleId: 'third.party.b',
-      capability: 'processor',
-    ));
-    File('${userDirectory.path}/a.json').writeAsStringSync(_manifestText(
-      moduleId: 'third.party.a',
-      capability: 'fetcher',
-      linkSearchPath: 'runtime/lib',
-    ));
-    final File core = File('${temp.path}/core.json')
-      ..writeAsStringSync('{"schema":1,"modules":[]}');
+  test(
+    'runtime plugin plan scans user manifest directory deterministically',
+    () async {
+      final Directory temp = await Directory.systemTemp.createTemp(
+        'pixa-plugin-plan-',
+      );
+      addTearDown(() => temp.deleteSync(recursive: true));
+      final Directory userDirectory = Directory('${temp.path}/user')
+        ..createSync();
+      File('${userDirectory.path}/b.json').writeAsStringSync(
+        _manifestText(moduleId: 'third.party.b', capability: 'processor'),
+      );
+      File('${userDirectory.path}/a.json').writeAsStringSync(
+        _manifestText(
+          moduleId: 'third.party.a',
+          capability: 'fetcher',
+          linkSearchPath: 'runtime/lib',
+        ),
+      );
+      final File core = File('${temp.path}/core.json')
+        ..writeAsStringSync('{"schema":1,"modules":[]}');
 
-    final PixaRuntimePluginBuildPlan plan = PixaRuntimePluginBuildPlan.load(
-      coreManifest: core.uri,
-      userManifestDirectory: userDirectory.uri,
-    );
+      final PixaRuntimePluginBuildPlan plan = PixaRuntimePluginBuildPlan.load(
+        coreManifest: core.uri,
+        userManifestDirectory: userDirectory.uri,
+      );
 
-    expect(
-      plan.modules.map((PixaRuntimePluginModulePlan module) => module.moduleId),
-      <String>['third.party.a', 'third.party.b'],
-    );
-    expect(
-      plan.modules.first.link.searchPaths,
-      <String>['${userDirectory.path}/runtime/lib'],
-    );
-    expect(plan.dependencies, hasLength(3));
-  });
+      expect(
+        plan.modules.map(
+          (PixaRuntimePluginModulePlan module) => module.moduleId,
+        ),
+        <String>['third.party.a', 'third.party.b'],
+      );
+      expect(plan.modules.first.link.searchPaths, <String>[
+        '${userDirectory.path}/runtime/lib',
+      ]);
+      expect(plan.dependencies, hasLength(3));
+    },
+  );
 
   test('runtime plugin plan rejects unsafe or ambiguous modules', () {
     expect(
@@ -227,11 +241,13 @@ void main() {
           _module('bad.buffers', ownedBuffers: false),
         ]),
       ]),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('owned buffers'),
-      )),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('owned buffers'),
+        ),
+      ),
     );
     expect(
       () => PixaRuntimePluginBuildPlan.fromManifestMaps(<Map<String, Object?>>[
@@ -239,11 +255,13 @@ void main() {
           _module('bad.external', deployment: 'external'),
         ]),
       ]),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('deployment'),
-      )),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('deployment'),
+        ),
+      ),
     );
     expect(
       () => PixaRuntimePluginBuildPlan.fromManifestMaps(<Map<String, Object?>>[
@@ -252,11 +270,13 @@ void main() {
           _module('dup.module'),
         ]),
       ]),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('Duplicate'),
-      )),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('Duplicate'),
+        ),
+      ),
     );
     expect(
       () => PixaRuntimePluginBuildPlan.fromManifestMaps(<Map<String, Object?>>[
@@ -269,11 +289,13 @@ void main() {
           },
         ]),
       ]),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('link.staticLibraries'),
-      )),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('link.staticLibraries'),
+        ),
+      ),
     );
     expect(
       () => PixaRuntimePluginBuildPlan.fromManifestMaps(<Map<String, Object?>>[
@@ -282,11 +304,13 @@ void main() {
           _module('dup.route.b'),
         ]),
       ]),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('Duplicate Pixa runtime plugin decoder MIME type'),
-      )),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('Duplicate Pixa runtime plugin decoder MIME type'),
+        ),
+      ),
     );
     expect(
       () => PixaRuntimePluginBuildPlan.fromManifestMaps(<Map<String, Object?>>[
@@ -303,11 +327,13 @@ void main() {
           ),
         ]),
       ]),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('Duplicate Pixa runtime plugin decoder format id'),
-      )),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('Duplicate Pixa runtime plugin decoder format id'),
+        ),
+      ),
     );
     expect(
       () => PixaRuntimePluginBuildPlan.fromManifestMaps(<Map<String, Object?>>[
@@ -336,37 +362,36 @@ void main() {
           ),
         ]),
       ]),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('Duplicate Pixa runtime plugin decoder signature'),
-      )),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('Duplicate Pixa runtime plugin decoder signature'),
+        ),
+      ),
     );
     expect(
       () => PixaRuntimePluginBuildPlan.fromManifestMaps(<Map<String, Object?>>[
         _manifest(<Map<String, Object?>>[
           <String, Object?>{
             ..._module('bad.decoder.capabilities'),
-            'decoderCapabilities': <String, Object?>{
-              'zeroCopyInput': false,
-            },
+            'decoderCapabilities': <String, Object?>{'zeroCopyInput': false},
           },
         ]),
       ]),
-      throwsA(isA<StateError>().having(
-        (StateError error) => error.message,
-        'message',
-        contains('zero-copy'),
-      )),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('zero-copy'),
+        ),
+      ),
     );
   });
 }
 
 Map<String, Object?> _manifest(List<Map<String, Object?>> modules) {
-  return <String, Object?>{
-    'schema': 1,
-    'modules': modules,
-  };
+  return <String, Object?>{'schema': 1, 'modules': modules};
 }
 
 Map<String, Object?> _module(

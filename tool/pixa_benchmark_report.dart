@@ -153,13 +153,15 @@ void main(List<String> args) {
 
   final File output = File(options.outputPath);
   output.parent.createSync(recursive: true);
-  output.writeAsStringSync(_renderReport(
-    rows,
-    smoke: options.smoke,
-    includeJpegTurbo: options.includeJpegTurbo,
-    includeWebpRoi: options.includeWebpRoi,
-    coverage: coverage,
-  ));
+  output.writeAsStringSync(
+    _renderReport(
+      rows,
+      smoke: options.smoke,
+      includeJpegTurbo: options.includeJpegTurbo,
+      includeWebpRoi: options.includeWebpRoi,
+      coverage: coverage,
+    ),
+  );
   stdout.writeln('Benchmark report written to ${output.path}');
 }
 
@@ -249,16 +251,16 @@ String _renderReport(
   buffer.writeln('- Generated UTC: ${now.toIso8601String()}');
   buffer.writeln('- Mode: ${smoke ? 'smoke' : 'full'}');
   buffer.writeln(
-      '- JPEG Turbo ROI: ${includeJpegTurbo ? 'enabled' : 'disabled'}');
+    '- JPEG Turbo ROI: ${includeJpegTurbo ? 'enabled' : 'disabled'}',
+  );
   buffer.writeln('- WebP ROI: ${includeWebpRoi ? 'enabled' : 'disabled'}');
   buffer.writeln(
-      '- Host: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
+    '- Host: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
+  );
   buffer.writeln('- Dart: ${Platform.version.split('\n').first}');
-  buffer.writeln('- Git: ${_commandText('git', <String>[
-        'rev-parse',
-        '--short',
-        'HEAD'
-      ])}');
+  buffer.writeln(
+    '- Git: ${_commandText('git', <String>['rev-parse', '--short', 'HEAD'])}',
+  );
   buffer.writeln('- Rust: ${_commandText('rustc', <String>['--version'])}');
   buffer.writeln('- Flutter: ${_flutterVersion()}');
   buffer.writeln();
@@ -271,7 +273,8 @@ String _renderReport(
   buffer.writeln('## Results');
   buffer.writeln();
   buffer.writeln(
-      '| Source | Benchmark | Iterations | Total us | Avg ns | Bytes |');
+    '| Source | Benchmark | Iterations | Total us | Avg ns | Bytes |',
+  );
   buffer.writeln('| --- | --- | ---: | ---: | ---: | ---: |');
   for (final _BenchmarkRow row in rows) {
     buffer.writeln(
@@ -295,8 +298,10 @@ String _commandText(String executable, List<String> arguments) {
 }
 
 String _flutterVersion() {
-  final ProcessResult result =
-      Process.runSync(_flutterExecutable(), <String>['--version', '--machine']);
+  final ProcessResult result = Process.runSync(_flutterExecutable(), <String>[
+    '--version',
+    '--machine',
+  ]);
   if (result.exitCode != 0) {
     return 'unavailable';
   }

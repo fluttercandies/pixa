@@ -75,15 +75,15 @@ final class PixaPluginExecutionPolicy {
 
   /// Uses only runtime modules on the hot path.
   const PixaPluginExecutionPolicy.runtimeOnly()
-      : runtime = true,
-        dart = false,
-        external = false;
+    : runtime = true,
+      dart = false,
+      external = false;
 
   /// Prefers runtime modules but permits explicit Dart plugins.
   const PixaPluginExecutionPolicy.runtimeFirstWithDart()
-      : runtime = true,
-        dart = true,
-        external = false;
+    : runtime = true,
+      dart = true,
+      external = false;
 
   /// Allows an external boundary for requests that explicitly opt into it.
   const PixaPluginExecutionPolicy.withExternal({
@@ -127,7 +127,7 @@ final class PixaCachePolicy {
 
   /// Public cache with optional maximum age.
   const PixaCachePolicy.public({Duration? maxAge})
-      : this(mode: PixaCacheMode.memoryAndDisk, maxAge: maxAge);
+    : this(mode: PixaCacheMode.memoryAndDisk, maxAge: maxAge);
 
   /// Cache-only policy.
   const PixaCachePolicy.cacheOnly() : this(mode: PixaCacheMode.cacheOnly);
@@ -163,8 +163,7 @@ final class PixaCachePolicy {
       PixaCacheMode.memoryOnly ||
       PixaCacheMode.memoryAndDisk ||
       PixaCacheMode.cacheOnly ||
-      PixaCacheMode.staleWhileRevalidate =>
-        true,
+      PixaCacheMode.staleWhileRevalidate => true,
       _ => false,
     };
   }
@@ -175,8 +174,7 @@ final class PixaCachePolicy {
       PixaCacheMode.diskOnly ||
       PixaCacheMode.memoryAndDisk ||
       PixaCacheMode.cacheOnly ||
-      PixaCacheMode.staleWhileRevalidate =>
-        true,
+      PixaCacheMode.staleWhileRevalidate => true,
       _ => false,
     };
   }
@@ -188,8 +186,7 @@ final class PixaCachePolicy {
       PixaCacheMode.memoryAndDisk ||
       PixaCacheMode.networkOnly ||
       PixaCacheMode.refresh ||
-      PixaCacheMode.staleWhileRevalidate =>
-        true,
+      PixaCacheMode.staleWhileRevalidate => true,
       _ => false,
     };
   }
@@ -201,8 +198,7 @@ final class PixaCachePolicy {
       PixaCacheMode.memoryAndDisk ||
       PixaCacheMode.networkOnly ||
       PixaCacheMode.refresh ||
-      PixaCacheMode.staleWhileRevalidate =>
-        true,
+      PixaCacheMode.staleWhileRevalidate => true,
       _ => false,
     };
   }
@@ -251,11 +247,11 @@ final class PixaRetryPolicy {
     Duration delay = const Duration(milliseconds: 250),
     Duration jitter = const Duration(milliseconds: 100),
   }) : this(
-          mode: PixaRetryMode.exponential,
-          maxAttempts: maxAttempts,
-          delay: delay,
-          jitter: jitter,
-        );
+         mode: PixaRetryMode.exponential,
+         maxAttempts: maxAttempts,
+         delay: delay,
+         jitter: jitter,
+       );
 
   /// Retry mode.
   final PixaRetryMode mode;
@@ -274,8 +270,9 @@ final class PixaRetryPolicy {
     if (mode == PixaRetryMode.none || attempt <= 1) {
       return Duration.zero;
     }
-    final int multiplier =
-        mode == PixaRetryMode.exponential ? 1 << (attempt - 2) : 1;
+    final int multiplier = mode == PixaRetryMode.exponential
+        ? 1 << (attempt - 2)
+        : 1;
     return delay * multiplier;
   }
 }
@@ -285,14 +282,15 @@ final class PixaRetryPolicy {
 final class PixaTargetSize {
   /// Creates a target size.
   const PixaTargetSize({this.width, this.height})
-      : assert(width == null || width > 0),
-        assert(height == null || height > 0);
+    : assert(width == null || width > 0),
+      assert(height == null || height > 0);
 
   /// Creates a target size from a Flutter size.
   factory PixaTargetSize.fromSize(Size size, double devicePixelRatio) {
     return PixaTargetSize(
-      width:
-          size.width.isFinite ? (size.width * devicePixelRatio).round() : null,
+      width: size.width.isFinite
+          ? (size.width * devicePixelRatio).round()
+          : null,
       height: size.height.isFinite
           ? (size.height * devicePixelRatio).round()
           : null,
@@ -435,8 +433,9 @@ final class PixaHeadersPolicy {
       if (value == null) {
         continue;
       }
-      material[name.toLowerCase()] =
-          PixaRedactor.isSensitiveHeader(name) ? '<sensitive>' : value;
+      material[name.toLowerCase()] = PixaRedactor.isSensitiveHeader(name)
+          ? '<sensitive>'
+          : value;
     }
     return material;
   }
@@ -518,7 +517,8 @@ final class PixaRequest {
       cachePolicy: cachePolicy,
       priority: priority,
       retryPolicy: retryPolicy,
-      lowRes: lowRes ??
+      lowRes:
+          lowRes ??
           (exifThumbnailFirst
               ? PixaRequest.exifThumbnail(
                   path,
@@ -617,27 +617,24 @@ final class PixaRequest {
   PixaCacheKey get cacheKey => _pixaRequestCacheKeys[this] ??= _buildCacheKey();
 
   PixaCacheKey _buildCacheKey() {
-    return PixaCacheKey.fromParts(
-      <Object?>[
-        cacheNamespace,
-        source.cacheMaterial,
-        sources.map((PixaSource source) => source.cacheMaterial),
-        headersPolicy.keyMaterial(headers),
-        _privatePartitionMaterial,
-        targetSize?.width,
-        targetSize?.height,
-        scale,
-        fit?.name,
-        processors,
-        decoderOptions,
-        pluginExecutionPolicy.runtime,
-        pluginExecutionPolicy.dart,
-        pluginExecutionPolicy.external,
-        redirectPolicy.allowCrossHostRedirects,
-        redirectPolicy.allowHttpsToHttp,
-      ],
-      debugLabel: '${source.safeLabel}#$cacheNamespace',
-    );
+    return PixaCacheKey.fromParts(<Object?>[
+      cacheNamespace,
+      source.cacheMaterial,
+      sources.map((PixaSource source) => source.cacheMaterial),
+      headersPolicy.keyMaterial(headers),
+      _privatePartitionMaterial,
+      targetSize?.width,
+      targetSize?.height,
+      scale,
+      fit?.name,
+      processors,
+      decoderOptions,
+      pluginExecutionPolicy.runtime,
+      pluginExecutionPolicy.dart,
+      pluginExecutionPolicy.external,
+      redirectPolicy.allowCrossHostRedirects,
+      redirectPolicy.allowHttpsToHttp,
+    ], debugLabel: '${source.safeLabel}#$cacheNamespace');
   }
 
   /// Stable key for the original encoded bytes before decode-size or processor variants.
@@ -645,17 +642,14 @@ final class PixaRequest {
       _pixaRequestEncodedCacheKeys[this] ??= _buildEncodedCacheKey();
 
   PixaCacheKey _buildEncodedCacheKey() {
-    return PixaCacheKey.fromParts(
-      <Object?>[
-        cacheNamespace,
-        source.cacheMaterial,
-        headersPolicy.keyMaterial(headers),
-        _privatePartitionMaterial,
-        redirectPolicy.allowCrossHostRedirects,
-        redirectPolicy.allowHttpsToHttp,
-      ],
-      debugLabel: 'encoded:${source.safeLabel}#$cacheNamespace',
-    );
+    return PixaCacheKey.fromParts(<Object?>[
+      cacheNamespace,
+      source.cacheMaterial,
+      headersPolicy.keyMaterial(headers),
+      _privatePartitionMaterial,
+      redirectPolicy.allowCrossHostRedirects,
+      redirectPolicy.allowHttpsToHttp,
+    ], debugLabel: 'encoded:${source.safeLabel}#$cacheNamespace');
   }
 
   Object get _privatePartitionMaterial {
@@ -719,7 +713,8 @@ final class PixaRequest {
   int get hashCode => cacheKey.hashCode;
 }
 
-final Expando<PixaCacheKey> _pixaRequestCacheKeys =
-    Expando<PixaCacheKey>('PixaRequest.cacheKey');
+final Expando<PixaCacheKey> _pixaRequestCacheKeys = Expando<PixaCacheKey>(
+  'PixaRequest.cacheKey',
+);
 final Expando<PixaCacheKey> _pixaRequestEncodedCacheKeys =
     Expando<PixaCacheKey>('PixaRequest.encodedCacheKey');

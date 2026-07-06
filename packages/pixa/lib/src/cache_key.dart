@@ -8,8 +8,10 @@ import 'runtime/runtime_bridge.dart';
 @immutable
 final class PixaCacheKey {
   /// Creates a cache key from normalized key material.
-  factory PixaCacheKey.fromParts(Iterable<Object?> parts,
-      {String? debugLabel}) {
+  factory PixaCacheKey.fromParts(
+    Iterable<Object?> parts, {
+    String? debugLabel,
+  }) {
     final String material = parts.map(_normalizePart).join('\n');
     final PixaRuntimeHashPair hashes = PixaRuntimeBridge.cacheKeyHashPair(
       Uint8List.fromList(utf8.encode(material)),
@@ -58,11 +60,11 @@ String _normalizePart(Object? value) {
   if (value is Map) {
     final List<MapEntry<String, String>> entries =
         value.entries.map((MapEntry<Object?, Object?> entry) {
-      return MapEntry<String, String>(
-        _normalizePart(entry.key),
-        _normalizePart(entry.value),
-      );
-    }).toList()
+            return MapEntry<String, String>(
+              _normalizePart(entry.key),
+              _normalizePart(entry.value),
+            );
+          }).toList()
           ..sort((MapEntry<String, String> a, MapEntry<String, String> b) {
             return a.key.compareTo(b.key);
           });

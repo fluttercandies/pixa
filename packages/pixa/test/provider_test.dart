@@ -14,8 +14,9 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('PixaProvider rejects decoded image bomb dimensions', () async {
-    final Directory cacheRoot =
-        await Directory.systemTemp.createTemp('pixa-provider-test-');
+    final Directory cacheRoot = await Directory.systemTemp.createTemp(
+      'pixa-provider-test-',
+    );
     addTearDown(() => cacheRoot.delete(recursive: true));
     await Pixa.configure(PixaConfig(cacheRootPath: cacheRoot.path));
     final PixaProvider provider = PixaProvider(
@@ -25,16 +26,13 @@ void main() {
         limits: const PixaRequestLimits(maxDecodedPixels: 100),
       ),
     );
-    final ImageStreamCompleter completer = provider.loadImage(
-      provider,
-      (
-        ui.ImmutableBuffer buffer, {
-        ui.TargetImageSizeCallback? getTargetSize,
-      }) async {
-        getTargetSize!(1000, 1000);
-        throw StateError('decode limit should throw before codec creation');
-      },
-    );
+    final ImageStreamCompleter completer = provider.loadImage(provider, (
+      ui.ImmutableBuffer buffer, {
+      ui.TargetImageSizeCallback? getTargetSize,
+    }) async {
+      getTargetSize!(1000, 1000);
+      throw StateError('decode limit should throw before codec creation');
+    });
     final Completer<Object> errorCompleter = Completer<Object>();
     final ImageStreamListener listener = ImageStreamListener(
       (ImageInfo image, bool synchronousCall) {
@@ -48,8 +46,9 @@ void main() {
     );
 
     completer.addListener(listener);
-    final Object error =
-        await errorCompleter.future.timeout(const Duration(seconds: 5));
+    final Object error = await errorCompleter.future.timeout(
+      const Duration(seconds: 5),
+    );
     completer.removeListener(listener);
 
     expect(error, isA<PixaFailure>());
@@ -60,29 +59,29 @@ void main() {
   });
 
   test('PixaProvider emits decode failure timing span', () async {
-    final Directory cacheRoot =
-        await Directory.systemTemp.createTemp('pixa-provider-decode-test-');
+    final Directory cacheRoot = await Directory.systemTemp.createTemp(
+      'pixa-provider-decode-test-',
+    );
     addTearDown(() => cacheRoot.delete(recursive: true));
     final List<PixaEvent> events = <PixaEvent>[];
-    await Pixa.configure(PixaConfig(
-      cacheRootPath: cacheRoot.path,
-      observers: <PixaObserver>[PixaCallbackObserver(events.add)],
-    ));
+    await Pixa.configure(
+      PixaConfig(
+        cacheRootPath: cacheRoot.path,
+        observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+      ),
+    );
     final PixaProvider provider = PixaProvider(
       request: PixaRequest(
         source: PixaSource.custom('decode-failure', () async => _minimalGif()),
         cachePolicy: const PixaCachePolicy.noStore(),
       ),
     );
-    final ImageStreamCompleter completer = provider.loadImage(
-      provider,
-      (
-        ui.ImmutableBuffer buffer, {
-        ui.TargetImageSizeCallback? getTargetSize,
-      }) async {
-        throw StateError('decoder failed');
-      },
-    );
+    final ImageStreamCompleter completer = provider.loadImage(provider, (
+      ui.ImmutableBuffer buffer, {
+      ui.TargetImageSizeCallback? getTargetSize,
+    }) async {
+      throw StateError('decoder failed');
+    });
     final Completer<Object> errorCompleter = Completer<Object>();
     final ImageStreamListener listener = ImageStreamListener(
       (ImageInfo image, bool synchronousCall) {
@@ -122,13 +121,13 @@ void main() {
   });
 
   test('PixaProvider limits concurrent Flutter decode callbacks', () async {
-    final Directory cacheRoot =
-        await Directory.systemTemp.createTemp('pixa-provider-decode-limit-');
+    final Directory cacheRoot = await Directory.systemTemp.createTemp(
+      'pixa-provider-decode-limit-',
+    );
     addTearDown(() => cacheRoot.delete(recursive: true));
-    await Pixa.configure(PixaConfig(
-      cacheRootPath: cacheRoot.path,
-      decodeConcurrency: 1,
-    ));
+    await Pixa.configure(
+      PixaConfig(cacheRootPath: cacheRoot.path, decodeConcurrency: 1),
+    );
 
     final Completer<void> firstEntered = Completer<void>();
     final Completer<void> secondEntered = Completer<void>();
@@ -169,8 +168,10 @@ void main() {
       ),
     );
     final ImageStreamCompleter firstCompleter = first.loadImage(first, decode);
-    final ImageStreamCompleter secondCompleter =
-        second.loadImage(second, decode);
+    final ImageStreamCompleter secondCompleter = second.loadImage(
+      second,
+      decode,
+    );
     final Completer<Object> firstError = Completer<Object>();
     final Completer<Object> secondError = Completer<Object>();
     final ImageStreamListener firstListener = ImageStreamListener(
@@ -215,122 +216,138 @@ void main() {
     expect(maxActiveDecodes, 1);
   });
 
-  test('PixaProvider rejects decode work when queued decode budget is full',
-      () async {
-    final Directory cacheRoot =
-        await Directory.systemTemp.createTemp('pixa-provider-decode-queue-');
-    addTearDown(() => cacheRoot.delete(recursive: true));
-    await Pixa.configure(PixaConfig(
-      cacheRootPath: cacheRoot.path,
-      decodeConcurrency: 1,
-      maxQueuedDecodes: 0,
-    ));
+  test(
+    'PixaProvider rejects decode work when queued decode budget is full',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-decode-queue-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      await Pixa.configure(
+        PixaConfig(
+          cacheRootPath: cacheRoot.path,
+          decodeConcurrency: 1,
+          maxQueuedDecodes: 0,
+        ),
+      );
 
-    final Completer<void> firstEntered = Completer<void>();
-    final Completer<void> releaseFirst = Completer<void>();
-    var decodeCalls = 0;
+      final Completer<void> firstEntered = Completer<void>();
+      final Completer<void> releaseFirst = Completer<void>();
+      var decodeCalls = 0;
 
-    Future<ui.Codec> decode(
-      ui.ImmutableBuffer buffer, {
-      ui.TargetImageSizeCallback? getTargetSize,
-    }) async {
-      decodeCalls += 1;
-      if (decodeCalls == 1) {
-        firstEntered.complete();
-        await releaseFirst.future;
+      Future<ui.Codec> decode(
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        decodeCalls += 1;
+        if (decodeCalls == 1) {
+          firstEntered.complete();
+          await releaseFirst.future;
+        }
+        throw StateError('stop decode after queue assertion');
       }
-      throw StateError('stop decode after queue assertion');
-    }
 
-    final PixaProvider first = PixaProvider(
-      request: PixaRequest(
-        source: PixaSource.custom('decode-queue-a', () async => _minimalGif()),
-        cachePolicy: const PixaCachePolicy.noStore(),
-      ),
-    );
-    final PixaProvider second = PixaProvider(
-      request: PixaRequest(
-        source: PixaSource.custom('decode-queue-b', () async => _minimalGif()),
-        cachePolicy: const PixaCachePolicy.noStore(),
-      ),
-    );
-    final ImageStreamCompleter firstCompleter = first.loadImage(first, decode);
-    final ImageStreamCompleter secondCompleter =
-        second.loadImage(second, decode);
-    final Completer<Object> firstError = Completer<Object>();
-    final Completer<Object> secondError = Completer<Object>();
-    final ImageStreamListener firstListener = ImageStreamListener(
-      (ImageInfo image, bool synchronousCall) {
-        fail('first decode should fail after release');
-      },
-      onError: (Object error, StackTrace? stackTrace) {
-        if (!firstError.isCompleted) {
-          firstError.complete(error);
-        }
-      },
-    );
-    final ImageStreamListener secondListener = ImageStreamListener(
-      (ImageInfo image, bool synchronousCall) {
-        fail('second decode should be rejected by queue budget');
-      },
-      onError: (Object error, StackTrace? stackTrace) {
-        if (!secondError.isCompleted) {
-          secondError.complete(error);
-        }
-      },
-    );
+      final PixaProvider first = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.custom(
+            'decode-queue-a',
+            () async => _minimalGif(),
+          ),
+          cachePolicy: const PixaCachePolicy.noStore(),
+        ),
+      );
+      final PixaProvider second = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.custom(
+            'decode-queue-b',
+            () async => _minimalGif(),
+          ),
+          cachePolicy: const PixaCachePolicy.noStore(),
+        ),
+      );
+      final ImageStreamCompleter firstCompleter = first.loadImage(
+        first,
+        decode,
+      );
+      final ImageStreamCompleter secondCompleter = second.loadImage(
+        second,
+        decode,
+      );
+      final Completer<Object> firstError = Completer<Object>();
+      final Completer<Object> secondError = Completer<Object>();
+      final ImageStreamListener firstListener = ImageStreamListener(
+        (ImageInfo image, bool synchronousCall) {
+          fail('first decode should fail after release');
+        },
+        onError: (Object error, StackTrace? stackTrace) {
+          if (!firstError.isCompleted) {
+            firstError.complete(error);
+          }
+        },
+      );
+      final ImageStreamListener secondListener = ImageStreamListener(
+        (ImageInfo image, bool synchronousCall) {
+          fail('second decode should be rejected by queue budget');
+        },
+        onError: (Object error, StackTrace? stackTrace) {
+          if (!secondError.isCompleted) {
+            secondError.complete(error);
+          }
+        },
+      );
 
-    firstCompleter.addListener(firstListener);
-    secondCompleter.addListener(secondListener);
-    final Object firstStartOrFailure =
-        await Future.any<Object>(<Future<Object>>[
-      firstEntered.future.then<Object>((_) => 'entered'),
-      firstError.future,
-    ]).timeout(const Duration(seconds: 5));
-    expect(firstStartOrFailure, 'entered');
+      firstCompleter.addListener(firstListener);
+      secondCompleter.addListener(secondListener);
+      final Object firstStartOrFailure = await Future.any<Object>(
+        <Future<Object>>[
+          firstEntered.future.then<Object>((_) => 'entered'),
+          firstError.future,
+        ],
+      ).timeout(const Duration(seconds: 5));
+      expect(firstStartOrFailure, 'entered');
 
-    final Object secondFailure =
-        await secondError.future.timeout(const Duration(seconds: 5));
-    expect(secondFailure, isA<PixaFailure>());
-    final PixaFailure failure = secondFailure as PixaFailure;
-    expect(failure.stage, PixaStage.decode);
-    expect(failure.safeMessage, contains('decode queue is full'));
-    expect(decodeCalls, 1);
+      final Object secondFailure = await secondError.future.timeout(
+        const Duration(seconds: 5),
+      );
+      expect(secondFailure, isA<PixaFailure>());
+      final PixaFailure failure = secondFailure as PixaFailure;
+      expect(failure.stage, PixaStage.decode);
+      expect(failure.safeMessage, contains('decode queue is full'));
+      expect(decodeCalls, 1);
 
-    releaseFirst.complete();
-    await firstError.future.timeout(const Duration(seconds: 5));
-    firstCompleter.removeListener(firstListener);
-    secondCompleter.removeListener(secondListener);
-  });
+      releaseFirst.complete();
+      await firstError.future.timeout(const Duration(seconds: 5));
+      firstCompleter.removeListener(firstListener);
+      secondCompleter.removeListener(secondListener);
+    },
+  );
 
   test('PixaProvider can opt into runtime display decoding', () async {
-    final Directory cacheRoot =
-        await Directory.systemTemp.createTemp('pixa-provider-runtime-decode-');
+    final Directory cacheRoot = await Directory.systemTemp.createTemp(
+      'pixa-provider-runtime-decode-',
+    );
     addTearDown(() => cacheRoot.delete(recursive: true));
     final List<PixaEvent> events = <PixaEvent>[];
-    await Pixa.configure(PixaConfig(
-      cacheRootPath: cacheRoot.path,
-      observers: <PixaObserver>[PixaCallbackObserver(events.add)],
-    ));
+    await Pixa.configure(
+      PixaConfig(
+        cacheRootPath: cacheRoot.path,
+        observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+      ),
+    );
 
     final PixaProvider provider = PixaProvider(
       request: PixaRequest(
         source: PixaSource.custom('runtime-display', () async => _minimalGif()),
         cachePolicy: const PixaCachePolicy.noStore(),
-        decoderOptions: const <String, Object?>{
-          'displayBackend': 'runtime',
-        },
+        decoderOptions: const <String, Object?>{'displayBackend': 'runtime'},
       ),
     );
-    final ImageStreamCompleter completer = provider.loadImage(
-      provider,
-      (
-        ui.ImmutableBuffer buffer, {
-        ui.TargetImageSizeCallback? getTargetSize,
-      }) async {
-        throw StateError('runtime display backend must not call engineDecode');
-      },
-    );
+    final ImageStreamCompleter completer = provider.loadImage(provider, (
+      ui.ImmutableBuffer buffer, {
+      ui.TargetImageSizeCallback? getTargetSize,
+    }) async {
+      throw StateError('runtime display backend must not call engineDecode');
+    });
     final Completer<ImageInfo> imageCompleter = Completer<ImageInfo>();
     final Completer<Object> errorCompleter = Completer<Object>();
     final ImageStreamListener listener = ImageStreamListener(
@@ -369,323 +386,41 @@ void main() {
     expect(complete.attributes['backend'], 'runtime-rgba');
     expect(complete.attributes['execution'], 'runtime');
 
-    final Map<String, Object?> snapshot =
-        PixaDebugInspector.snapshot().toJson();
+    final Map<String, Object?> snapshot = PixaDebugInspector.snapshot()
+        .toJson();
     final Map<String, Object?> displayDecoder =
         snapshot['displayDecoder']! as Map<String, Object?>;
     expect(displayDecoder['hasRuntimeDisplayBackend'], isTrue);
   });
 
-  test('engine-backed WBMP can explicitly use runtime display decoding',
-      () async {
-    final Directory cacheRoot =
-        await Directory.systemTemp.createTemp('pixa-provider-wbmp-runtime-');
-    addTearDown(() => cacheRoot.delete(recursive: true));
-    final List<PixaEvent> events = <PixaEvent>[];
-    await Pixa.configure(PixaConfig(
-      cacheRootPath: cacheRoot.path,
-      observers: <PixaObserver>[PixaCallbackObserver(events.add)],
-    ));
+  test(
+    'engine-backed WBMP can explicitly use runtime display decoding',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-wbmp-runtime-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      final List<PixaEvent> events = <PixaEvent>[];
+      await Pixa.configure(
+        PixaConfig(
+          cacheRootPath: cacheRoot.path,
+          observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+        ),
+      );
 
-    final PixaProvider provider = PixaProvider(
-      request: PixaRequest(
-        source: PixaSource.bytes(_wbmpBytes(), id: 'runtime-wbmp'),
-        cachePolicy: const PixaCachePolicy.noStore(),
-        decoderOptions: const <String, Object?>{
-          'displayBackend': 'runtime',
-        },
-      ),
-    );
-    final ImageStreamCompleter completer = provider.loadImage(
-      provider,
-      (
+      final PixaProvider provider = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.bytes(_wbmpBytes(), id: 'runtime-wbmp'),
+          cachePolicy: const PixaCachePolicy.noStore(),
+          decoderOptions: const <String, Object?>{'displayBackend': 'runtime'},
+        ),
+      );
+      final ImageStreamCompleter completer = provider.loadImage(provider, (
         ui.ImmutableBuffer buffer, {
         ui.TargetImageSizeCallback? getTargetSize,
       }) async {
         throw StateError('WBMP runtime opt-in must not call engineDecode');
-      },
-    );
-    final Completer<ImageInfo> imageCompleter = Completer<ImageInfo>();
-    final Completer<Object> errorCompleter = Completer<Object>();
-    final ImageStreamListener listener = ImageStreamListener(
-      (ImageInfo image, bool synchronousCall) {
-        if (!imageCompleter.isCompleted) {
-          imageCompleter.complete(image);
-        }
-      },
-      onError: (Object error, StackTrace? stackTrace) {
-        if (!errorCompleter.isCompleted) {
-          errorCompleter.complete(error);
-        }
-      },
-    );
-
-    completer.addListener(listener);
-    final Object result = await Future.any<Object>(<Future<Object>>[
-      imageCompleter.future,
-      errorCompleter.future,
-    ]).timeout(const Duration(seconds: 5));
-    completer.removeListener(listener);
-    expect(result, isA<ImageInfo>());
-    final ImageInfo image = result as ImageInfo;
-    addTearDown(image.dispose);
-
-    expect(image.image.width, 1);
-    expect(image.image.height, 1);
-    final ByteData pixels = await image.image.toByteData(
-          format: ui.ImageByteFormat.rawRgba,
-        ) ??
-        (throw StateError('Failed to read WBMP pixels.'));
-    expect(pixels.buffer.asUint8List(0, 4), <int>[255, 255, 255, 255]);
-    final PixaEvent start = events.singleWhere(
-      (PixaEvent event) => event.name == 'decode.start',
-    );
-    expect(start.attributes['backend'], 'runtime-rgba');
-    expect(start.attributes['execution'], 'runtime');
-  });
-
-  test('runtime display decode maps RGBA budget failure to decode failure',
-      () async {
-    final Directory cacheRoot = await Directory.systemTemp
-        .createTemp('pixa-provider-runtime-decode-budget-');
-    addTearDown(() => cacheRoot.delete(recursive: true));
-    final List<PixaEvent> events = <PixaEvent>[];
-    await Pixa.configure(PixaConfig(
-      cacheRootPath: cacheRoot.path,
-      observers: <PixaObserver>[PixaCallbackObserver(events.add)],
-    ));
-    final PixaProvider provider = PixaProvider(
-      request: PixaRequest(
-        source: PixaSource.custom(
-            'runtime-display-budget', () async => _minimalGif()),
-        cachePolicy: const PixaCachePolicy.noStore(),
-        decoderOptions: const <String, Object?>{
-          'displayBackend': 'runtime',
-        },
-        limits: const PixaRequestLimits(maxProcessorOutputBytes: 3),
-      ),
-    );
-    final ImageStreamCompleter completer = provider.loadImage(
-      provider,
-      (
-        ui.ImmutableBuffer buffer, {
-        ui.TargetImageSizeCallback? getTargetSize,
-      }) async {
-        throw StateError('runtime display backend must not call engineDecode');
-      },
-    );
-    final Completer<Object> errorCompleter = Completer<Object>();
-    final ImageStreamListener listener = ImageStreamListener(
-      (ImageInfo image, bool synchronousCall) {
-        fail('budget failure should not produce an ImageInfo');
-      },
-      onError: (Object error, StackTrace? stackTrace) {
-        if (!errorCompleter.isCompleted) {
-          errorCompleter.complete(error);
-        }
-      },
-    );
-
-    completer.addListener(listener);
-    final Object error =
-        await errorCompleter.future.timeout(const Duration(seconds: 5));
-    completer.removeListener(listener);
-
-    expect(error, isA<PixaFailure>());
-    final PixaFailure failure = error as PixaFailure;
-    expect(failure.stage, PixaStage.decode);
-    expect(failure.safeMessage, contains('RGBA output bytes exceed limit'));
-    final PixaEvent event = events.singleWhere(
-      (PixaEvent event) => event.name == 'decode.failure',
-    );
-    expect(event.stage, PixaStage.decode);
-    expect(event.attributes['backend'], 'runtime-rgba');
-    expect(event.attributes['execution'], 'runtime');
-  });
-
-  test('processed runtime output automatically uses runtime display decoding',
-      () async {
-    final Directory cacheRoot = await Directory.systemTemp
-        .createTemp('pixa-provider-runtime-decode-auto-');
-    addTearDown(() => cacheRoot.delete(recursive: true));
-    final List<PixaEvent> events = <PixaEvent>[];
-    await Pixa.configure(PixaConfig(
-      cacheRootPath: cacheRoot.path,
-      observers: <PixaObserver>[PixaCallbackObserver(events.add)],
-    ));
-
-    final PixaProvider provider = PixaProvider(
-      request: PixaRequest(
-        source: PixaSource.custom(
-            'runtime-display-auto', () async => _minimalGif()),
-        cachePolicy: const PixaCachePolicy.noStore(),
-        processors: const <String>[
-          'resize(width=1,height=1,mode=exact,filter=nearest)',
-        ],
-      ),
-    );
-    final ImageStreamCompleter completer = provider.loadImage(
-      provider,
-      (
-        ui.ImmutableBuffer buffer, {
-        ui.TargetImageSizeCallback? getTargetSize,
-      }) async {
-        throw StateError(
-            'processed runtime output should not call engineDecode');
-      },
-    );
-    final Completer<ImageInfo> imageCompleter = Completer<ImageInfo>();
-    final Completer<Object> errorCompleter = Completer<Object>();
-    final ImageStreamListener listener = ImageStreamListener(
-      (ImageInfo image, bool synchronousCall) {
-        if (!imageCompleter.isCompleted) {
-          imageCompleter.complete(image);
-        }
-      },
-      onError: (Object error, StackTrace? stackTrace) {
-        if (!errorCompleter.isCompleted) {
-          errorCompleter.complete(error);
-        }
-      },
-    );
-
-    completer.addListener(listener);
-    final Object result = await Future.any<Object>(<Future<Object>>[
-      imageCompleter.future,
-      errorCompleter.future,
-    ]).timeout(const Duration(seconds: 5));
-    completer.removeListener(listener);
-    expect(result, isA<ImageInfo>());
-    final ImageInfo image = result as ImageInfo;
-    addTearDown(image.dispose);
-
-    expect(image.image.width, 1);
-    expect(image.image.height, 1);
-    final PixaEvent start = events.singleWhere(
-      (PixaEvent event) => event.name == 'decode.start',
-    );
-    expect(start.attributes['backend'], 'runtime-rgba');
-    expect(start.attributes['execution'], 'runtime');
-  });
-
-  test('non-engine ICO MIME automatically uses runtime display decoding',
-      () async {
-    final Directory cacheRoot =
-        await Directory.systemTemp.createTemp('pixa-provider-runtime-ico-');
-    addTearDown(() => cacheRoot.delete(recursive: true));
-    final List<PixaEvent> events = <PixaEvent>[];
-    await Pixa.configure(PixaConfig(
-      cacheRootPath: cacheRoot.path,
-      observers: <PixaObserver>[PixaCallbackObserver(events.add)],
-    ));
-
-    final PixaProvider provider = PixaProvider(
-      request: PixaRequest(
-        source: PixaSource.bytes(_icoBytes(), id: 'runtime-ico'),
-        cachePolicy: const PixaCachePolicy.noStore(),
-        decoderOptions: const <String, Object?>{
-          'mimeType': 'image/x-icon',
-        },
-      ),
-    );
-    final ImageStreamCompleter completer = provider.loadImage(
-      provider,
-      (
-        ui.ImmutableBuffer buffer, {
-        ui.TargetImageSizeCallback? getTargetSize,
-      }) async {
-        throw StateError('ICO should be decoded by runtime display backend');
-      },
-    );
-    final Completer<ImageInfo> imageCompleter = Completer<ImageInfo>();
-    final Completer<Object> errorCompleter = Completer<Object>();
-    final ImageStreamListener listener = ImageStreamListener(
-      (ImageInfo image, bool synchronousCall) {
-        if (!imageCompleter.isCompleted) {
-          imageCompleter.complete(image);
-        }
-      },
-      onError: (Object error, StackTrace? stackTrace) {
-        if (!errorCompleter.isCompleted) {
-          errorCompleter.complete(error);
-        }
-      },
-    );
-
-    completer.addListener(listener);
-    final Object result = await Future.any<Object>(<Future<Object>>[
-      imageCompleter.future,
-      errorCompleter.future,
-    ]).timeout(const Duration(seconds: 5));
-    completer.removeListener(listener);
-    expect(result, isA<ImageInfo>());
-    final ImageInfo image = result as ImageInfo;
-    addTearDown(image.dispose);
-
-    expect(image.image.width, 1);
-    expect(image.image.height, 1);
-    final PixaEvent start = events.singleWhere(
-      (PixaEvent event) => event.name == 'decode.start',
-    );
-    expect(start.attributes['backend'], 'runtime-rgba');
-    expect(start.attributes['execution'], 'runtime');
-  });
-
-  test('runtime-only bytes automatically use runtime display decoding',
-      () async {
-    final Directory cacheRoot =
-        await Directory.systemTemp.createTemp('pixa-provider-runtime-only-');
-    addTearDown(() => cacheRoot.delete(recursive: true));
-    final List<PixaEvent> events = <PixaEvent>[];
-    await Pixa.configure(PixaConfig(
-      cacheRootPath: cacheRoot.path,
-      observers: <PixaObserver>[PixaCallbackObserver(events.add)],
-    ));
-
-    final Map<String, (Uint8List, List<int>, int, int)> fixtures =
-        <String, (Uint8List, List<int>, int, int)>{
-      'tiff': (_tiffBytes(), <int>[255, 0, 0, 255], 1, 1),
-      'pnm': (_pnmBytes(), <int>[255, 0, 0, 255], 1, 1),
-      'qoi': (_qoiBytes(), <int>[255, 0, 0, 255], 1, 1),
-      'tga': (_tgaBytes(), <int>[255, 0, 0, 255], 1, 1),
-      'dds': (_ddsBytes(), <int>[255, 0, 0, 255], 4, 4),
-      'hdr': (_hdrBytes(), <int>[254, 0, 0, 255], 1, 1),
-      'farbfeld': (_farbfeldBytes(), <int>[255, 0, 0, 255], 1, 1),
-      'pcx': (_pcxBytes(), <int>[255, 0, 0, 255], 1, 1),
-      'sgi': (_sgiBytes(), <int>[255, 0, 0, 255], 1, 1),
-      'xbm': (_xbmBytes(), <int>[0, 0, 0, 255], 1, 1),
-      'xpm': (_xpmBytes(), <int>[255, 0, 0, 255], 1, 1),
-    };
-    for (final MapEntry<String, (Uint8List, List<int>, int, int)> fixture
-        in fixtures.entries) {
-      final (Uint8List bytes, List<int> expectedPixel, int width, int height) =
-          fixture.value;
-      expect(
-        pixaIsRuntimeOnlyDisplayMime(pixaSniffImageMimeType(bytes)),
-        isTrue,
-        reason: '${fixture.key} bytes should select runtime-rgba by sniffing',
-      );
-      events.clear();
-      final PixaProvider provider = PixaProvider(
-        request: PixaRequest(
-          source: PixaSource.bytes(
-            bytes,
-            id: 'runtime-${fixture.key}',
-          ),
-          cachePolicy: const PixaCachePolicy.noStore(),
-        ),
-      );
-      final ImageStreamCompleter completer = provider.loadImage(
-        provider,
-        (
-          ui.ImmutableBuffer buffer, {
-          ui.TargetImageSizeCallback? getTargetSize,
-        }) async {
-          throw StateError(
-            '${fixture.key} should be decoded by runtime display backend',
-          );
-        },
-      );
+      });
       final Completer<ImageInfo> imageCompleter = Completer<ImageInfo>();
       final Completer<Object> errorCompleter = Completer<Object>();
       final ImageStreamListener listener = ImageStreamListener(
@@ -707,31 +442,327 @@ void main() {
         errorCompleter.future,
       ]).timeout(const Duration(seconds: 5));
       completer.removeListener(listener);
-      expect(result, isA<ImageInfo>(), reason: fixture.key);
+      expect(result, isA<ImageInfo>());
       final ImageInfo image = result as ImageInfo;
       addTearDown(image.dispose);
 
-      expect(image.image.width, width, reason: fixture.key);
-      expect(image.image.height, height, reason: fixture.key);
-      final ByteData pixels = await image.image.toByteData(
-            format: ui.ImageByteFormat.rawRgba,
-          ) ??
-          (throw StateError('Failed to read ${fixture.key} pixels.'));
-      expect(
-        pixels.buffer.asUint8List(0, 4),
-        expectedPixel,
-        reason: fixture.key,
-      );
+      expect(image.image.width, 1);
+      expect(image.image.height, 1);
+      final ByteData pixels =
+          await image.image.toByteData(format: ui.ImageByteFormat.rawRgba) ??
+          (throw StateError('Failed to read WBMP pixels.'));
+      expect(pixels.buffer.asUint8List(0, 4), <int>[255, 255, 255, 255]);
       final PixaEvent start = events.singleWhere(
         (PixaEvent event) => event.name == 'decode.start',
       );
-      expect(start.attributes['backend'], 'runtime-rgba', reason: fixture.key);
-      expect(start.attributes['execution'], 'runtime', reason: fixture.key);
-    }
-  });
+      expect(start.attributes['backend'], 'runtime-rgba');
+      expect(start.attributes['execution'], 'runtime');
+    },
+  );
 
-  testWidgets('PixaProvider key reuses Flutter decoded ImageCache',
-      (WidgetTester tester) async {
+  test(
+    'runtime display decode maps RGBA budget failure to decode failure',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-runtime-decode-budget-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      final List<PixaEvent> events = <PixaEvent>[];
+      await Pixa.configure(
+        PixaConfig(
+          cacheRootPath: cacheRoot.path,
+          observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+        ),
+      );
+      final PixaProvider provider = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.custom(
+            'runtime-display-budget',
+            () async => _minimalGif(),
+          ),
+          cachePolicy: const PixaCachePolicy.noStore(),
+          decoderOptions: const <String, Object?>{'displayBackend': 'runtime'},
+          limits: const PixaRequestLimits(maxProcessorOutputBytes: 3),
+        ),
+      );
+      final ImageStreamCompleter completer = provider.loadImage(provider, (
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        throw StateError('runtime display backend must not call engineDecode');
+      });
+      final Completer<Object> errorCompleter = Completer<Object>();
+      final ImageStreamListener listener = ImageStreamListener(
+        (ImageInfo image, bool synchronousCall) {
+          fail('budget failure should not produce an ImageInfo');
+        },
+        onError: (Object error, StackTrace? stackTrace) {
+          if (!errorCompleter.isCompleted) {
+            errorCompleter.complete(error);
+          }
+        },
+      );
+
+      completer.addListener(listener);
+      final Object error = await errorCompleter.future.timeout(
+        const Duration(seconds: 5),
+      );
+      completer.removeListener(listener);
+
+      expect(error, isA<PixaFailure>());
+      final PixaFailure failure = error as PixaFailure;
+      expect(failure.stage, PixaStage.decode);
+      expect(failure.safeMessage, contains('RGBA output bytes exceed limit'));
+      final PixaEvent event = events.singleWhere(
+        (PixaEvent event) => event.name == 'decode.failure',
+      );
+      expect(event.stage, PixaStage.decode);
+      expect(event.attributes['backend'], 'runtime-rgba');
+      expect(event.attributes['execution'], 'runtime');
+    },
+  );
+
+  test(
+    'processed runtime output automatically uses runtime display decoding',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-runtime-decode-auto-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      final List<PixaEvent> events = <PixaEvent>[];
+      await Pixa.configure(
+        PixaConfig(
+          cacheRootPath: cacheRoot.path,
+          observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+        ),
+      );
+
+      final PixaProvider provider = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.custom(
+            'runtime-display-auto',
+            () async => _minimalGif(),
+          ),
+          cachePolicy: const PixaCachePolicy.noStore(),
+          processors: const <String>[
+            'resize(width=1,height=1,mode=exact,filter=nearest)',
+          ],
+        ),
+      );
+      final ImageStreamCompleter completer = provider.loadImage(provider, (
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        throw StateError(
+          'processed runtime output should not call engineDecode',
+        );
+      });
+      final Completer<ImageInfo> imageCompleter = Completer<ImageInfo>();
+      final Completer<Object> errorCompleter = Completer<Object>();
+      final ImageStreamListener listener = ImageStreamListener(
+        (ImageInfo image, bool synchronousCall) {
+          if (!imageCompleter.isCompleted) {
+            imageCompleter.complete(image);
+          }
+        },
+        onError: (Object error, StackTrace? stackTrace) {
+          if (!errorCompleter.isCompleted) {
+            errorCompleter.complete(error);
+          }
+        },
+      );
+
+      completer.addListener(listener);
+      final Object result = await Future.any<Object>(<Future<Object>>[
+        imageCompleter.future,
+        errorCompleter.future,
+      ]).timeout(const Duration(seconds: 5));
+      completer.removeListener(listener);
+      expect(result, isA<ImageInfo>());
+      final ImageInfo image = result as ImageInfo;
+      addTearDown(image.dispose);
+
+      expect(image.image.width, 1);
+      expect(image.image.height, 1);
+      final PixaEvent start = events.singleWhere(
+        (PixaEvent event) => event.name == 'decode.start',
+      );
+      expect(start.attributes['backend'], 'runtime-rgba');
+      expect(start.attributes['execution'], 'runtime');
+    },
+  );
+
+  test(
+    'non-engine ICO MIME automatically uses runtime display decoding',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-runtime-ico-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      final List<PixaEvent> events = <PixaEvent>[];
+      await Pixa.configure(
+        PixaConfig(
+          cacheRootPath: cacheRoot.path,
+          observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+        ),
+      );
+
+      final PixaProvider provider = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.bytes(_icoBytes(), id: 'runtime-ico'),
+          cachePolicy: const PixaCachePolicy.noStore(),
+          decoderOptions: const <String, Object?>{'mimeType': 'image/x-icon'},
+        ),
+      );
+      final ImageStreamCompleter completer = provider.loadImage(provider, (
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        throw StateError('ICO should be decoded by runtime display backend');
+      });
+      final Completer<ImageInfo> imageCompleter = Completer<ImageInfo>();
+      final Completer<Object> errorCompleter = Completer<Object>();
+      final ImageStreamListener listener = ImageStreamListener(
+        (ImageInfo image, bool synchronousCall) {
+          if (!imageCompleter.isCompleted) {
+            imageCompleter.complete(image);
+          }
+        },
+        onError: (Object error, StackTrace? stackTrace) {
+          if (!errorCompleter.isCompleted) {
+            errorCompleter.complete(error);
+          }
+        },
+      );
+
+      completer.addListener(listener);
+      final Object result = await Future.any<Object>(<Future<Object>>[
+        imageCompleter.future,
+        errorCompleter.future,
+      ]).timeout(const Duration(seconds: 5));
+      completer.removeListener(listener);
+      expect(result, isA<ImageInfo>());
+      final ImageInfo image = result as ImageInfo;
+      addTearDown(image.dispose);
+
+      expect(image.image.width, 1);
+      expect(image.image.height, 1);
+      final PixaEvent start = events.singleWhere(
+        (PixaEvent event) => event.name == 'decode.start',
+      );
+      expect(start.attributes['backend'], 'runtime-rgba');
+      expect(start.attributes['execution'], 'runtime');
+    },
+  );
+
+  test(
+    'runtime-only bytes automatically use runtime display decoding',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-runtime-only-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      final List<PixaEvent> events = <PixaEvent>[];
+      await Pixa.configure(
+        PixaConfig(
+          cacheRootPath: cacheRoot.path,
+          observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+        ),
+      );
+
+      final Map<String, (Uint8List, List<int>, int, int)> fixtures =
+          <String, (Uint8List, List<int>, int, int)>{
+            'tiff': (_tiffBytes(), <int>[255, 0, 0, 255], 1, 1),
+            'pnm': (_pnmBytes(), <int>[255, 0, 0, 255], 1, 1),
+            'qoi': (_qoiBytes(), <int>[255, 0, 0, 255], 1, 1),
+            'tga': (_tgaBytes(), <int>[255, 0, 0, 255], 1, 1),
+            'dds': (_ddsBytes(), <int>[255, 0, 0, 255], 4, 4),
+            'hdr': (_hdrBytes(), <int>[254, 0, 0, 255], 1, 1),
+            'farbfeld': (_farbfeldBytes(), <int>[255, 0, 0, 255], 1, 1),
+            'pcx': (_pcxBytes(), <int>[255, 0, 0, 255], 1, 1),
+            'sgi': (_sgiBytes(), <int>[255, 0, 0, 255], 1, 1),
+            'xbm': (_xbmBytes(), <int>[0, 0, 0, 255], 1, 1),
+            'xpm': (_xpmBytes(), <int>[255, 0, 0, 255], 1, 1),
+          };
+      for (final MapEntry<String, (Uint8List, List<int>, int, int)> fixture
+          in fixtures.entries) {
+        final (
+          Uint8List bytes,
+          List<int> expectedPixel,
+          int width,
+          int height,
+        ) = fixture.value;
+        expect(
+          pixaIsRuntimeOnlyDisplayMime(pixaSniffImageMimeType(bytes)),
+          isTrue,
+          reason: '${fixture.key} bytes should select runtime-rgba by sniffing',
+        );
+        events.clear();
+        final PixaProvider provider = PixaProvider(
+          request: PixaRequest(
+            source: PixaSource.bytes(bytes, id: 'runtime-${fixture.key}'),
+            cachePolicy: const PixaCachePolicy.noStore(),
+          ),
+        );
+        final ImageStreamCompleter completer = provider.loadImage(provider, (
+          ui.ImmutableBuffer buffer, {
+          ui.TargetImageSizeCallback? getTargetSize,
+        }) async {
+          throw StateError(
+            '${fixture.key} should be decoded by runtime display backend',
+          );
+        });
+        final Completer<ImageInfo> imageCompleter = Completer<ImageInfo>();
+        final Completer<Object> errorCompleter = Completer<Object>();
+        final ImageStreamListener listener = ImageStreamListener(
+          (ImageInfo image, bool synchronousCall) {
+            if (!imageCompleter.isCompleted) {
+              imageCompleter.complete(image);
+            }
+          },
+          onError: (Object error, StackTrace? stackTrace) {
+            if (!errorCompleter.isCompleted) {
+              errorCompleter.complete(error);
+            }
+          },
+        );
+
+        completer.addListener(listener);
+        final Object result = await Future.any<Object>(<Future<Object>>[
+          imageCompleter.future,
+          errorCompleter.future,
+        ]).timeout(const Duration(seconds: 5));
+        completer.removeListener(listener);
+        expect(result, isA<ImageInfo>(), reason: fixture.key);
+        final ImageInfo image = result as ImageInfo;
+        addTearDown(image.dispose);
+
+        expect(image.image.width, width, reason: fixture.key);
+        expect(image.image.height, height, reason: fixture.key);
+        final ByteData pixels =
+            await image.image.toByteData(format: ui.ImageByteFormat.rawRgba) ??
+            (throw StateError('Failed to read ${fixture.key} pixels.'));
+        expect(
+          pixels.buffer.asUint8List(0, 4),
+          expectedPixel,
+          reason: fixture.key,
+        );
+        final PixaEvent start = events.singleWhere(
+          (PixaEvent event) => event.name == 'decode.start',
+        );
+        expect(
+          start.attributes['backend'],
+          'runtime-rgba',
+          reason: fixture.key,
+        );
+        expect(start.attributes['execution'], 'runtime', reason: fixture.key);
+      }
+    },
+  );
+
+  testWidgets('PixaProvider key reuses Flutter decoded ImageCache', (
+    WidgetTester tester,
+  ) async {
     final ImageCache imageCache = PaintingBinding.instance.imageCache;
     imageCache.clear();
     imageCache.clearLiveImages();
@@ -743,7 +774,7 @@ void main() {
     int loaderCalls = 0;
     final ui.Image image =
         await tester.runAsync(() => createTestImage(width: 1, height: 1)) ??
-            (throw StateError('Failed to create test image.'));
+        (throw StateError('Failed to create test image.'));
     addTearDown(image.dispose);
     final PixaRequest request = PixaRequest(
       source: PixaSource.custom('decoded-cache-hit', () async {
@@ -769,7 +800,8 @@ void main() {
       () {
         loaderCalls += 1;
         throw StateError(
-            'Flutter ImageCache should reuse the PixaProvider key');
+          'Flutter ImageCache should reuse the PixaProvider key',
+        );
       },
     )!;
 
@@ -785,8 +817,10 @@ void main() {
     final PixaRequest request = provider.request;
 
     expect(request.source, isA<PixaNetworkSource>());
-    expect((request.source as PixaNetworkSource).uri.toString(),
-        'https://images.example.test/a.jpg');
+    expect(
+      (request.source as PixaNetworkSource).uri.toString(),
+      'https://images.example.test/a.jpg',
+    );
     expect(request.headers, isEmpty);
     expect(request.targetSize, const PixaTargetSize());
     expect(request.scale, 1.0);
@@ -960,12 +994,7 @@ Uint8List _tiffBytes() {
 }
 
 List<int> _tiffEntry(int tag, int type, int count, int value) {
-  return <int>[
-    ..._le16(tag),
-    ..._le16(type),
-    ..._le32(count),
-    ..._le32(value),
-  ];
+  return <int>[..._le16(tag), ..._le16(type), ..._le32(count), ..._le32(value)];
 }
 
 Uint8List _pnmBytes() {

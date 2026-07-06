@@ -100,7 +100,7 @@ final class _Options {
       ...Platform.environment,
       'PIXA_EXAMPLE_SMOKE_REPORT': reportPath(root),
       'PIXA_EXAMPLE_EVIDENCE_PLATFORM': platform,
-      if (deviceId != null) 'PIXA_EXAMPLE_EVIDENCE_DEVICE_ID': deviceId!,
+      'PIXA_EXAMPLE_EVIDENCE_DEVICE_ID': ?deviceId,
       'PIXA_EXAMPLE_EVIDENCE_DEVICE_KIND':
           deviceKind ?? _defaultDeviceKind(platform),
       'PIXA_EXAMPLE_EVIDENCE_CONNECTION':
@@ -114,12 +114,12 @@ List<String> _buildCommand(_Options options) {
   return switch (options.platform) {
     'android' => <String>['build', 'apk', '--debug'],
     'ios' => <String>[
-        'build',
-        'ios',
-        '--debug',
-        '--simulator',
-        '--no-codesign',
-      ],
+      'build',
+      'ios',
+      '--debug',
+      '--simulator',
+      '--no-codesign',
+    ],
     'linux' => <String>['build', 'linux', '--debug'],
     'macos' => <String>['build', 'macos', '--debug'],
     'windows' => <String>['build', 'windows', '--debug'],
@@ -173,16 +173,18 @@ Future<void> _runSmoke(
     environment: environment,
   );
   final StringBuffer output = StringBuffer();
-  final Future<void> stdoutDone =
-      process.stdout.transform(utf8.decoder).forEach((String chunk) {
-    stdout.write(chunk);
-    output.write(chunk);
-  });
-  final Future<void> stderrDone =
-      process.stderr.transform(utf8.decoder).forEach((String chunk) {
-    stderr.write(chunk);
-    output.write(chunk);
-  });
+  final Future<void> stdoutDone = process.stdout
+      .transform(utf8.decoder)
+      .forEach((String chunk) {
+        stdout.write(chunk);
+        output.write(chunk);
+      });
+  final Future<void> stderrDone = process.stderr
+      .transform(utf8.decoder)
+      .forEach((String chunk) {
+        stderr.write(chunk);
+        output.write(chunk);
+      });
   final int exitCode = await process.exitCode;
   await stdoutDone;
   await stderrDone;

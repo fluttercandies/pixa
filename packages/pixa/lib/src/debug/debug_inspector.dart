@@ -78,11 +78,13 @@ final class PixaDebugSnapshot {
         'exifParser': capabilities.exifParser,
         'pixelProcessors': capabilities.pixelProcessors,
         'runtimePluginAbiVersion': capabilities.runtimePluginAbiVersion,
-        'runtimePluginRegistryStats':
-            capabilities.runtimePluginRegistryStats.toJson(),
+        'runtimePluginRegistryStats': capabilities.runtimePluginRegistryStats
+            .toJson(),
         'imageFormats': capabilities.imageFormats
-            .map((PixaRuntimeImageFormatCapability capability) =>
-                capability.toJson())
+            .map(
+              (PixaRuntimeImageFormatCapability capability) =>
+                  capability.toJson(),
+            )
             .toList(growable: false),
         'platformSelfCheck': platformSelfCheck.toJson(),
       },

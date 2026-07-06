@@ -87,7 +87,9 @@ void main() {
           'decodedWidth=512,decodedHeight=512,sampleSize=1,filter=triangle)',
     ]);
     expect(
-        tileRequest.targetSize, const PixaTargetSize(width: 512, height: 512));
+      tileRequest.targetSize,
+      const PixaTargetSize(width: 512, height: 512),
+    );
   });
 
   test('planner separates visible tiles from near-viewport prefetch tiles', () {
@@ -113,6 +115,8 @@ void main() {
       isFalse,
     );
     expect(
-        plan.tileCount, plan.visibleTiles.length + plan.prefetchTiles.length);
+      plan.tileCount,
+      plan.visibleTiles.length + plan.prefetchTiles.length,
+    );
   });
 }

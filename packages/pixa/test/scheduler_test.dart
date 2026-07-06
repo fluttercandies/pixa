@@ -11,63 +11,75 @@ import 'package:pixa/src/runtime/runtime_memory_cache.dart';
 
 void main() {
   test(
-      'priority bucket scheduler starts immediate work before thousands of low requests',
-      () async {
-    final Completer<Uint8List> blockerBytes = Completer<Uint8List>();
-    final Completer<String> secondStarted = Completer<String>();
-    var startEvents = 0;
-    final PixaPipeline pipeline = PixaPipeline(
-      cacheRootPath: '',
-      maxConcurrentRuntimeLoads: 1,
-      observers: <PixaObserver>[
-        PixaCallbackObserver((PixaEvent event) {
-          if (event.name != 'scheduler.start') {
-            return;
-          }
-          startEvents++;
-          if (startEvents == 2 && !secondStarted.isCompleted) {
-            secondStarted.complete(event.request!.sourceLabel);
-          }
-        }),
-      ],
-    );
+    'priority bucket scheduler starts immediate work before thousands of low requests',
+    () async {
+      final Completer<Uint8List> blockerBytes = Completer<Uint8List>();
+      final Completer<String> secondStarted = Completer<String>();
+      var startEvents = 0;
+      final PixaPipeline pipeline = PixaPipeline(
+        cacheRootPath: '',
+        maxConcurrentRuntimeLoads: 1,
+        observers: <PixaObserver>[
+          PixaCallbackObserver((PixaEvent event) {
+            if (event.name != 'scheduler.start') {
+              return;
+            }
+            startEvents++;
+            if (startEvents == 2 && !secondStarted.isCompleted) {
+              secondStarted.complete(event.request!.sourceLabel);
+            }
+          }),
+        ],
+      );
 
-    final PixaPipelineHandle blockerHandle = pipeline.startLoad(PixaRequest(
-      source: PixaSource.custom('blocker', () => blockerBytes.future),
-      cachePolicy: const PixaCachePolicy.noStore(),
-      priority: PixaPriority.low,
-    ));
-    final List<PixaPipelineHandle> lowHandles = <PixaPipelineHandle>[
-      for (int index = 0; index < 1200; index++)
-        pipeline.startLoad(PixaRequest(
-          source: PixaSource.custom('low-$index', () async => _minimalGif()),
+      final PixaPipelineHandle blockerHandle = pipeline.startLoad(
+        PixaRequest(
+          source: PixaSource.custom('blocker', () => blockerBytes.future),
           cachePolicy: const PixaCachePolicy.noStore(),
           priority: PixaPriority.low,
-        )),
-    ];
-    final PixaPipelineHandle urgentHandle = pipeline.startLoad(PixaRequest(
-      source: PixaSource.custom('urgent', () async => _minimalGif()),
-      cachePolicy: const PixaCachePolicy.noStore(),
-      priority: PixaPriority.immediate,
-    ));
+        ),
+      );
+      final List<PixaPipelineHandle> lowHandles = <PixaPipelineHandle>[
+        for (int index = 0; index < 1200; index++)
+          pipeline.startLoad(
+            PixaRequest(
+              source: PixaSource.custom(
+                'low-$index',
+                () async => _minimalGif(),
+              ),
+              cachePolicy: const PixaCachePolicy.noStore(),
+              priority: PixaPriority.low,
+            ),
+          ),
+      ];
+      final PixaPipelineHandle urgentHandle = pipeline.startLoad(
+        PixaRequest(
+          source: PixaSource.custom('urgent', () async => _minimalGif()),
+          cachePolicy: const PixaCachePolicy.noStore(),
+          priority: PixaPriority.immediate,
+        ),
+      );
 
-    blockerBytes.complete(_minimalGif());
-    final String started = await secondStarted.future.timeout(
-      const Duration(seconds: 5),
-    );
+      blockerBytes.complete(_minimalGif());
+      final String started = await secondStarted.future.timeout(
+        const Duration(seconds: 5),
+      );
 
-    expect(started, 'custom:urgent');
+      expect(started, 'custom:urgent');
 
-    urgentHandle.cancel();
-    for (final PixaPipelineHandle handle in lowHandles) {
-      handle.cancel();
-    }
-    await Future.wait<void>(<PixaPipelineHandle>[
-      blockerHandle,
-      urgentHandle,
-      ...lowHandles,
-    ].map(_drainHandle));
-  });
+      urgentHandle.cancel();
+      for (final PixaPipelineHandle handle in lowHandles) {
+        handle.cancel();
+      }
+      await Future.wait<void>(
+        <PixaPipelineHandle>[
+          blockerHandle,
+          urgentHandle,
+          ...lowHandles,
+        ].map(_drainHandle),
+      );
+    },
+  );
 
   test('scheduler lazily skips thousands of cancelled queued loads', () async {
     final Completer<Uint8List> blockerBytes = Completer<Uint8List>();
@@ -90,32 +102,39 @@ void main() {
       ],
     );
 
-    final PixaPipelineHandle blockerHandle = pipeline.startLoad(PixaRequest(
-      source: PixaSource.custom('blocker', () => blockerBytes.future),
-      cachePolicy: const PixaCachePolicy.noStore(),
-      priority: PixaPriority.low,
-    ));
+    final PixaPipelineHandle blockerHandle = pipeline.startLoad(
+      PixaRequest(
+        source: PixaSource.custom('blocker', () => blockerBytes.future),
+        cachePolicy: const PixaCachePolicy.noStore(),
+        priority: PixaPriority.low,
+      ),
+    );
     final List<PixaPipelineHandle> cancelledHandles = <PixaPipelineHandle>[
       for (int index = 0; index < 1200; index++)
-        pipeline.startLoad(PixaRequest(
-          source: PixaSource.custom('cancelled-$index', () async {
-            cancelledLoaderCalls++;
-            return _minimalGif();
-          }),
-          cachePolicy: const PixaCachePolicy.noStore(),
-          priority: PixaPriority.low,
-        )),
+        pipeline.startLoad(
+          PixaRequest(
+            source: PixaSource.custom('cancelled-$index', () async {
+              cancelledLoaderCalls++;
+              return _minimalGif();
+            }),
+            cachePolicy: const PixaCachePolicy.noStore(),
+            priority: PixaPriority.low,
+          ),
+        ),
     ];
-    final List<Future<void>> cancelledDrains =
-        cancelledHandles.map(_drainHandle).toList();
+    final List<Future<void>> cancelledDrains = cancelledHandles
+        .map(_drainHandle)
+        .toList();
     for (final PixaPipelineHandle handle in cancelledHandles) {
       handle.cancel();
     }
-    final PixaPipelineHandle urgentHandle = pipeline.startLoad(PixaRequest(
-      source: PixaSource.custom('urgent', () async => _minimalGif()),
-      cachePolicy: const PixaCachePolicy.noStore(),
-      priority: PixaPriority.immediate,
-    ));
+    final PixaPipelineHandle urgentHandle = pipeline.startLoad(
+      PixaRequest(
+        source: PixaSource.custom('urgent', () async => _minimalGif()),
+        cachePolicy: const PixaCachePolicy.noStore(),
+        priority: PixaPriority.immediate,
+      ),
+    );
 
     blockerBytes.complete(_minimalGif());
     final String started = await secondStarted.future.timeout(
@@ -132,212 +151,236 @@ void main() {
     ]);
   });
 
-  test('scheduler rejects low priority work when queued load budget is full',
-      () async {
-    final Completer<Uint8List> blockerBytes = Completer<Uint8List>();
-    final List<PixaEvent> events = <PixaEvent>[];
-    final PixaPipeline pipeline = PixaPipeline(
-      cacheRootPath: '',
-      maxConcurrentRuntimeLoads: 1,
-      maxQueuedRuntimeLoads: 1,
-      observers: <PixaObserver>[PixaCallbackObserver(events.add)],
-    );
+  test(
+    'scheduler rejects low priority work when queued load budget is full',
+    () async {
+      final Completer<Uint8List> blockerBytes = Completer<Uint8List>();
+      final List<PixaEvent> events = <PixaEvent>[];
+      final PixaPipeline pipeline = PixaPipeline(
+        cacheRootPath: '',
+        maxConcurrentRuntimeLoads: 1,
+        maxQueuedRuntimeLoads: 1,
+        observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+      );
 
-    final PixaPipelineHandle blockerHandle = pipeline.startLoad(PixaRequest(
-      source: PixaSource.custom('blocker', () => blockerBytes.future),
-      cachePolicy: const PixaCachePolicy.noStore(),
-      priority: PixaPriority.low,
-    ));
-    await Future<void>.delayed(Duration.zero);
-    final PixaPipelineHandle queuedHandle = pipeline.startLoad(PixaRequest(
-      source: PixaSource.custom('queued', () async => _minimalGif()),
-      cachePolicy: const PixaCachePolicy.noStore(),
-      priority: PixaPriority.low,
-    ));
-    final PixaPipelineHandle rejectedHandle = pipeline.startLoad(PixaRequest(
-      source: PixaSource.custom('rejected', () async => _minimalGif()),
-      cachePolicy: const PixaCachePolicy.noStore(),
-      priority: PixaPriority.low,
-    ));
+      final PixaPipelineHandle blockerHandle = pipeline.startLoad(
+        PixaRequest(
+          source: PixaSource.custom('blocker', () => blockerBytes.future),
+          cachePolicy: const PixaCachePolicy.noStore(),
+          priority: PixaPriority.low,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      final PixaPipelineHandle queuedHandle = pipeline.startLoad(
+        PixaRequest(
+          source: PixaSource.custom('queued', () async => _minimalGif()),
+          cachePolicy: const PixaCachePolicy.noStore(),
+          priority: PixaPriority.low,
+        ),
+      );
+      final PixaPipelineHandle rejectedHandle = pipeline.startLoad(
+        PixaRequest(
+          source: PixaSource.custom('rejected', () async => _minimalGif()),
+          cachePolicy: const PixaCachePolicy.noStore(),
+          priority: PixaPriority.low,
+        ),
+      );
 
-    final Object rejected = await rejectedHandle.future.then<Object>(
-      (_) =>
-          fail('full low-priority queue should reject new low-priority work'),
-      onError: (Object error) => error,
-    );
+      final Object rejected = await rejectedHandle.future.then<Object>(
+        (_) =>
+            fail('full low-priority queue should reject new low-priority work'),
+        onError: (Object error) => error,
+      );
 
-    expect(rejected, isA<PixaFailure>());
-    final PixaFailure failure = rejected as PixaFailure;
-    expect(failure.stage, PixaStage.request);
-    expect(failure.safeMessage, contains('queue is full'));
-    expect(pipeline.schedulerStats().queueDepth, 1);
-    expect(pipeline.schedulerStats().totalBackpressureDropped, 1);
-    expect(
-      events.any(
-          (PixaEvent event) => event.name == 'scheduler.backpressureReject'),
-      isTrue,
-    );
+      expect(rejected, isA<PixaFailure>());
+      final PixaFailure failure = rejected as PixaFailure;
+      expect(failure.stage, PixaStage.request);
+      expect(failure.safeMessage, contains('queue is full'));
+      expect(pipeline.schedulerStats().queueDepth, 1);
+      expect(pipeline.schedulerStats().totalBackpressureDropped, 1);
+      expect(
+        events.any(
+          (PixaEvent event) => event.name == 'scheduler.backpressureReject',
+        ),
+        isTrue,
+      );
 
-    blockerBytes.complete(_minimalGif());
-    final PixaPipelineLoad blockerLoad = await blockerHandle.future;
-    final PixaPipelineLoad queuedLoad = await queuedHandle.future;
-    blockerLoad.dispose();
-    queuedLoad.dispose();
-  });
+      blockerBytes.complete(_minimalGif());
+      final PixaPipelineLoad blockerLoad = await blockerHandle.future;
+      final PixaPipelineLoad queuedLoad = await queuedHandle.future;
+      blockerLoad.dispose();
+      queuedLoad.dispose();
+    },
+  );
 
-  test('scheduler sheds queued low priority work for urgent visible load',
-      () async {
-    final Completer<Uint8List> blockerBytes = Completer<Uint8List>();
-    final Completer<String> secondStarted = Completer<String>();
-    final List<PixaEvent> events = <PixaEvent>[];
-    var startEvents = 0;
-    final PixaPipeline pipeline = PixaPipeline(
-      cacheRootPath: '',
-      maxConcurrentRuntimeLoads: 1,
-      maxQueuedRuntimeLoads: 1,
-      observers: <PixaObserver>[
-        PixaCallbackObserver((PixaEvent event) {
-          events.add(event);
-          if (event.name != 'scheduler.start') {
-            return;
-          }
-          startEvents++;
-          if (startEvents == 2 && !secondStarted.isCompleted) {
-            secondStarted.complete(event.request!.sourceLabel);
-          }
-        }),
-      ],
-    );
+  test(
+    'scheduler sheds queued low priority work for urgent visible load',
+    () async {
+      final Completer<Uint8List> blockerBytes = Completer<Uint8List>();
+      final Completer<String> secondStarted = Completer<String>();
+      final List<PixaEvent> events = <PixaEvent>[];
+      var startEvents = 0;
+      final PixaPipeline pipeline = PixaPipeline(
+        cacheRootPath: '',
+        maxConcurrentRuntimeLoads: 1,
+        maxQueuedRuntimeLoads: 1,
+        observers: <PixaObserver>[
+          PixaCallbackObserver((PixaEvent event) {
+            events.add(event);
+            if (event.name != 'scheduler.start') {
+              return;
+            }
+            startEvents++;
+            if (startEvents == 2 && !secondStarted.isCompleted) {
+              secondStarted.complete(event.request!.sourceLabel);
+            }
+          }),
+        ],
+      );
 
-    final PixaPipelineHandle blockerHandle = pipeline.startLoad(PixaRequest(
-      source: PixaSource.custom('blocker', () => blockerBytes.future),
-      cachePolicy: const PixaCachePolicy.noStore(),
-      priority: PixaPriority.low,
-    ));
-    await Future<void>.delayed(Duration.zero);
-    final PixaPipelineHandle droppedHandle = pipeline.startLoad(PixaRequest(
-      source: PixaSource.custom('prefetch', () async => _minimalGif()),
-      cachePolicy: const PixaCachePolicy.noStore(),
-      priority: PixaPriority.low,
-    ));
-    final PixaPipelineHandle urgentHandle = pipeline.startLoad(PixaRequest(
-      source: PixaSource.custom('urgent', () async => _minimalGif()),
-      cachePolicy: const PixaCachePolicy.noStore(),
-      priority: PixaPriority.immediate,
-    ));
+      final PixaPipelineHandle blockerHandle = pipeline.startLoad(
+        PixaRequest(
+          source: PixaSource.custom('blocker', () => blockerBytes.future),
+          cachePolicy: const PixaCachePolicy.noStore(),
+          priority: PixaPriority.low,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      final PixaPipelineHandle droppedHandle = pipeline.startLoad(
+        PixaRequest(
+          source: PixaSource.custom('prefetch', () async => _minimalGif()),
+          cachePolicy: const PixaCachePolicy.noStore(),
+          priority: PixaPriority.low,
+        ),
+      );
+      final PixaPipelineHandle urgentHandle = pipeline.startLoad(
+        PixaRequest(
+          source: PixaSource.custom('urgent', () async => _minimalGif()),
+          cachePolicy: const PixaCachePolicy.noStore(),
+          priority: PixaPriority.immediate,
+        ),
+      );
 
-    final Object dropped = await droppedHandle.future.then<Object>(
-      (_) => fail('low-priority queued work should be shed'),
-      onError: (Object error) => error,
-    );
-    expect(dropped, isA<PixaFailure>());
-    expect((dropped as PixaFailure).stage, PixaStage.cancel);
-    expect(pipeline.schedulerStats().queueDepth, 1);
-    expect(pipeline.schedulerStats().totalBackpressureDropped, 1);
+      final Object dropped = await droppedHandle.future.then<Object>(
+        (_) => fail('low-priority queued work should be shed'),
+        onError: (Object error) => error,
+      );
+      expect(dropped, isA<PixaFailure>());
+      expect((dropped as PixaFailure).stage, PixaStage.cancel);
+      expect(pipeline.schedulerStats().queueDepth, 1);
+      expect(pipeline.schedulerStats().totalBackpressureDropped, 1);
 
-    blockerBytes.complete(_minimalGif());
-    final String started = await secondStarted.future.timeout(
-      const Duration(seconds: 5),
-    );
-    expect(started, 'custom:urgent');
-    expect(
-      events
-          .any((PixaEvent event) => event.name == 'scheduler.backpressureDrop'),
-      isTrue,
-    );
+      blockerBytes.complete(_minimalGif());
+      final String started = await secondStarted.future.timeout(
+        const Duration(seconds: 5),
+      );
+      expect(started, 'custom:urgent');
+      expect(
+        events.any(
+          (PixaEvent event) => event.name == 'scheduler.backpressureDrop',
+        ),
+        isTrue,
+      );
 
-    final PixaPipelineLoad blockerLoad = await blockerHandle.future;
-    final PixaPipelineLoad urgentLoad = await urgentHandle.future;
-    blockerLoad.dispose();
-    urgentLoad.dispose();
-  });
+      final PixaPipelineLoad blockerLoad = await blockerHandle.future;
+      final PixaPipelineLoad urgentLoad = await urgentHandle.future;
+      blockerLoad.dispose();
+      urgentLoad.dispose();
+    },
+  );
 
-  test('queued coalesced load is promoted by a higher-priority listener',
-      () async {
-    final Completer<Uint8List> blockerBytes = Completer<Uint8List>();
-    final Completer<String> secondStarted = Completer<String>();
-    final List<PixaEvent> events = <PixaEvent>[];
-    int startEvents = 0;
+  test(
+    'queued coalesced load is promoted by a higher-priority listener',
+    () async {
+      final Completer<Uint8List> blockerBytes = Completer<Uint8List>();
+      final Completer<String> secondStarted = Completer<String>();
+      final List<PixaEvent> events = <PixaEvent>[];
+      int startEvents = 0;
 
-    final PixaPipeline pipeline = PixaPipeline(
-      cacheRootPath: '',
-      maxConcurrentRuntimeLoads: 1,
-      observers: <PixaObserver>[
-        PixaCallbackObserver((PixaEvent event) {
-          events.add(event);
-          if (event.name != 'scheduler.start') {
-            return;
-          }
-          startEvents += 1;
-          final String? sourceLabel = event.request?.sourceLabel;
-          if (startEvents == 2 &&
-              sourceLabel != null &&
-              !secondStarted.isCompleted) {
-            secondStarted.complete(sourceLabel);
-          }
-        }),
-      ],
-    );
+      final PixaPipeline pipeline = PixaPipeline(
+        cacheRootPath: '',
+        maxConcurrentRuntimeLoads: 1,
+        observers: <PixaObserver>[
+          PixaCallbackObserver((PixaEvent event) {
+            events.add(event);
+            if (event.name != 'scheduler.start') {
+              return;
+            }
+            startEvents += 1;
+            final String? sourceLabel = event.request?.sourceLabel;
+            if (startEvents == 2 &&
+                sourceLabel != null &&
+                !secondStarted.isCompleted) {
+              secondStarted.complete(sourceLabel);
+            }
+          }),
+        ],
+      );
 
-    final PixaRequest blocker = PixaRequest(
-      source: PixaSource.custom('blocker', () => blockerBytes.future),
-      cachePolicy: const PixaCachePolicy.noStore(),
-      priority: PixaPriority.low,
-    );
-    final PixaRequest visibleLow = PixaRequest(
-      source: PixaSource.custom('visible', () async => _minimalGif()),
-      cachePolicy: const PixaCachePolicy.noStore(),
-      priority: PixaPriority.low,
-    );
-    final PixaRequest normal = PixaRequest(
-      source: PixaSource.custom('normal', () async => _minimalGif()),
-      cachePolicy: const PixaCachePolicy.noStore(),
-      priority: PixaPriority.normal,
-    );
+      final PixaRequest blocker = PixaRequest(
+        source: PixaSource.custom('blocker', () => blockerBytes.future),
+        cachePolicy: const PixaCachePolicy.noStore(),
+        priority: PixaPriority.low,
+      );
+      final PixaRequest visibleLow = PixaRequest(
+        source: PixaSource.custom('visible', () async => _minimalGif()),
+        cachePolicy: const PixaCachePolicy.noStore(),
+        priority: PixaPriority.low,
+      );
+      final PixaRequest normal = PixaRequest(
+        source: PixaSource.custom('normal', () async => _minimalGif()),
+        cachePolicy: const PixaCachePolicy.noStore(),
+        priority: PixaPriority.normal,
+      );
 
-    final PixaPipelineHandle blockerHandle = pipeline.startLoad(blocker);
-    final PixaPipelineHandle visibleLowHandle = pipeline.startLoad(visibleLow);
-    final PixaPipelineHandle normalHandle = pipeline.startLoad(normal);
-    final PixaPipelineHandle visibleHighHandle =
-        pipeline.startLoad(visibleLow.copyWith(priority: PixaPriority.high));
+      final PixaPipelineHandle blockerHandle = pipeline.startLoad(blocker);
+      final PixaPipelineHandle visibleLowHandle = pipeline.startLoad(
+        visibleLow,
+      );
+      final PixaPipelineHandle normalHandle = pipeline.startLoad(normal);
+      final PixaPipelineHandle visibleHighHandle = pipeline.startLoad(
+        visibleLow.copyWith(priority: PixaPriority.high),
+      );
 
-    blockerBytes.complete(_minimalGif());
+      blockerBytes.complete(_minimalGif());
 
-    final String promotedStart = await secondStarted.future
-        .timeout(const Duration(seconds: 5), onTimeout: () {
-      throw StateError('Timed out waiting for the promoted load to start.');
-    });
+      final String promotedStart = await secondStarted.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          throw StateError('Timed out waiting for the promoted load to start.');
+        },
+      );
 
-    expect(promotedStart, 'custom:visible');
-    expect(
-      events.any((PixaEvent event) =>
-          event.name == 'scheduler.priorityPromoted' &&
-          event.attributes['from'] == 'low' &&
-          event.attributes['to'] == 'high'),
-      isTrue,
-    );
+      expect(promotedStart, 'custom:visible');
+      expect(
+        events.any(
+          (PixaEvent event) =>
+              event.name == 'scheduler.priorityPromoted' &&
+              event.attributes['from'] == 'low' &&
+              event.attributes['to'] == 'high',
+        ),
+        isTrue,
+      );
 
-    final List<PixaPipelineLoad> loads = await Future.wait(
-      <Future<PixaPipelineLoad>>[
-        blockerHandle.future,
-        visibleLowHandle.future,
-        normalHandle.future,
-        visibleHighHandle.future,
-      ],
-    );
-    for (final PixaPipelineLoad load in loads) {
-      load.dispose();
-    }
-  });
+      final List<PixaPipelineLoad> loads =
+          await Future.wait(<Future<PixaPipelineLoad>>[
+            blockerHandle.future,
+            visibleLowHandle.future,
+            normalHandle.future,
+            visibleHighHandle.future,
+          ]);
+      for (final PixaPipelineLoad load in loads) {
+        load.dispose();
+      }
+    },
+  );
 
   test('inline source failure is reported at fetch stage', () async {
     final List<PixaEvent> events = <PixaEvent>[];
     final PixaPipeline pipeline = PixaPipeline(
       cacheRootPath: '',
       maxConcurrentRuntimeLoads: 1,
-      observers: <PixaObserver>[
-        PixaCallbackObserver(events.add),
-      ],
+      observers: <PixaObserver>[PixaCallbackObserver(events.add)],
     );
     final PixaRequest request = PixaRequest(
       source: PixaSource.custom('broken', () async {
@@ -346,7 +389,9 @@ void main() {
       cachePolicy: const PixaCachePolicy.noStore(),
     );
 
-    final Object error = await pipeline.load(request).then<Object>(
+    final Object error = await pipeline
+        .load(request)
+        .then<Object>(
           (_) => fail('custom source failure should fail the load'),
           onError: (Object error) => error,
         );
@@ -357,10 +402,12 @@ void main() {
     expect(failure.safeMessage, contains('custom:broken'));
     expect(failure.retryability, PixaRetryability.notRetryable);
     expect(
-      events.any((PixaEvent event) =>
-          event.name == 'runtime.load.start' &&
-          event.attributes['retryMode'] == 'none' &&
-          event.attributes['maxAttempts'] == 1),
+      events.any(
+        (PixaEvent event) =>
+            event.name == 'runtime.load.start' &&
+            event.attributes['retryMode'] == 'none' &&
+            event.attributes['maxAttempts'] == 1,
+      ),
       isTrue,
     );
     final PixaEvent failureEvent = events.singleWhere(
@@ -416,174 +463,186 @@ void main() {
   });
 
   test(
-      'registered Dart fetcher handles explicit custom source with observer spans',
-      () async {
-    final List<PixaEvent> events = <PixaEvent>[];
-    final List<PixaProgress> progressEvents = <PixaProgress>[];
-    final PixaRegistry registry = PixaRegistry()
-      ..registerFetcher(_DartFetcherDescriptor(
-        id: 'plugin-fetcher',
-        sourceKinds: const <String>{'plugin'},
-        fetcher: _PluginFetcher(),
-      ));
-    final PixaPipeline pipeline = PixaPipeline(
-      cacheRootPath: '',
-      maxConcurrentRuntimeLoads: 1,
-      registry: registry,
-      observers: <PixaObserver>[
-        PixaCallbackObserver(events.add),
-      ],
-    );
-    final PixaRequest request = PixaRequest(
-      source: PixaSource.custom('plugin', () async {
-        throw StateError('fallback loader must not run');
-      }),
-      cachePolicy: const PixaCachePolicy.noStore(),
-    );
+    'registered Dart fetcher handles explicit custom source with observer spans',
+    () async {
+      final List<PixaEvent> events = <PixaEvent>[];
+      final List<PixaProgress> progressEvents = <PixaProgress>[];
+      final PixaRegistry registry = PixaRegistry()
+        ..registerFetcher(
+          _DartFetcherDescriptor(
+            id: 'plugin-fetcher',
+            sourceKinds: const <String>{'plugin'},
+            fetcher: _PluginFetcher(),
+          ),
+        );
+      final PixaPipeline pipeline = PixaPipeline(
+        cacheRootPath: '',
+        maxConcurrentRuntimeLoads: 1,
+        registry: registry,
+        observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+      );
+      final PixaRequest request = PixaRequest(
+        source: PixaSource.custom('plugin', () async {
+          throw StateError('fallback loader must not run');
+        }),
+        cachePolicy: const PixaCachePolicy.noStore(),
+      );
 
-    final PixaPipelineHandle handle =
-        pipeline.startLoad(request, onProgress: progressEvents.add);
-    final PixaPipelineLoad load = await handle.future;
-    load.dispose();
+      final PixaPipelineHandle handle = pipeline.startLoad(
+        request,
+        onProgress: progressEvents.add,
+      );
+      final PixaPipelineLoad load = await handle.future;
+      load.dispose();
 
-    expect(
-      progressEvents.any((PixaProgress progress) =>
-          progress.stage == PixaStage.fetch &&
-          progress.receivedBytes == _minimalGif().length &&
-          progress.expectedBytes == _minimalGif().length),
-      isTrue,
-    );
-    final int pluginStart = events.indexWhere(
-      (PixaEvent event) => event.name == 'plugin.fetch.start',
-    );
-    final int pluginProgress = events.indexWhere(
-      (PixaEvent event) => event.name == 'plugin.fetch.progress',
-    );
-    final int pluginComplete = events.indexWhere(
-      (PixaEvent event) => event.name == 'plugin.fetch.complete',
-    );
-    final int requestComplete = events.indexWhere(
-      (PixaEvent event) => event.name == 'request.complete',
-    );
+      expect(
+        progressEvents.any(
+          (PixaProgress progress) =>
+              progress.stage == PixaStage.fetch &&
+              progress.receivedBytes == _minimalGif().length &&
+              progress.expectedBytes == _minimalGif().length,
+        ),
+        isTrue,
+      );
+      final int pluginStart = events.indexWhere(
+        (PixaEvent event) => event.name == 'plugin.fetch.start',
+      );
+      final int pluginProgress = events.indexWhere(
+        (PixaEvent event) => event.name == 'plugin.fetch.progress',
+      );
+      final int pluginComplete = events.indexWhere(
+        (PixaEvent event) => event.name == 'plugin.fetch.complete',
+      );
+      final int requestComplete = events.indexWhere(
+        (PixaEvent event) => event.name == 'request.complete',
+      );
 
-    expect(pluginStart, isNonNegative);
-    expect(pluginProgress, greaterThan(pluginStart));
-    expect(pluginComplete, greaterThan(pluginProgress));
-    expect(requestComplete, greaterThan(pluginComplete));
-    expect(events[pluginComplete].attributes['fetcherId'], 'plugin-fetcher');
-    expect(events[pluginComplete].attributes['sourceKind'], 'plugin');
-    expect(events[pluginComplete].attributes['bytes'], _minimalGif().length);
-  });
-
-  test('registered Dart processor runs and reuses processed memory cache',
-      () async {
-    PixaRuntimeMemoryCache.clear();
-    final List<PixaEvent> events = <PixaEvent>[];
-    final _CountingProcessor processor = _CountingProcessor();
-    final PixaRegistry registry = PixaRegistry()
-      ..registerProcessor(_DartProcessorDescriptor(
-        id: 'plugin-processor',
-        operations: const <String>{'tag'},
-        processor: processor,
-      ));
-    final PixaPipeline pipeline = PixaPipeline(
-      cacheRootPath: '',
-      maxConcurrentRuntimeLoads: 1,
-      registry: registry,
-      observers: <PixaObserver>[PixaCallbackObserver(events.add)],
-    );
-    var loaderCalls = 0;
-    final PixaRequest request = PixaRequest(
-      source: PixaSource.custom('processor-source', () async {
-        loaderCalls++;
-        return _minimalGif();
-      }),
-      processors: const <String>['tag(label=avatar)'],
-      cachePolicy: const PixaCachePolicy(mode: PixaCacheMode.memoryOnly),
-    );
-
-    final PixaPipelineLoad first = await pipeline.load(request);
-    first.dispose();
-    final PixaPipelineLoad second = await pipeline.load(request);
-    second.dispose();
-
-    expect(loaderCalls, 1);
-    expect(processor.calls, 1);
-    expect(processor.lastArguments, <String, Object?>{'label': 'avatar'});
-    expect(
-      events.map((PixaEvent event) => event.name),
-      containsAllInOrder(<String>[
-        'plugin.processor.start',
-        'plugin.processor.complete',
-        'cache.processed.memory.write',
-        'cache.processed.memory.hit',
-      ]),
-    );
-  });
+      expect(pluginStart, isNonNegative);
+      expect(pluginProgress, greaterThan(pluginStart));
+      expect(pluginComplete, greaterThan(pluginProgress));
+      expect(requestComplete, greaterThan(pluginComplete));
+      expect(events[pluginComplete].attributes['fetcherId'], 'plugin-fetcher');
+      expect(events[pluginComplete].attributes['sourceKind'], 'plugin');
+      expect(events[pluginComplete].attributes['bytes'], _minimalGif().length);
+    },
+  );
 
   test(
-      'registered Dart decoder runs only with explicit opt-in and reuses cache',
-      () async {
-    PixaRuntimeMemoryCache.clear();
-    final List<PixaEvent> events = <PixaEvent>[];
-    final _CountingDecoder decoder = _CountingDecoder();
-    final PixaRegistry registry = PixaRegistry()
-      ..registerDecoder(_DartDecoderDescriptor(
-        id: 'plugin-decoder',
-        mimeTypes: const <String>{'image/gif'},
-        priority: 10,
-        decoder: decoder,
-      ));
-    final PixaPipeline pipeline = PixaPipeline(
-      cacheRootPath: '',
-      maxConcurrentRuntimeLoads: 1,
-      registry: registry,
-      observers: <PixaObserver>[PixaCallbackObserver(events.add)],
-    );
-    var loaderCalls = 0;
-    final PixaRequest request = PixaRequest(
-      source: PixaSource.custom('decoder-source', () async {
-        loaderCalls++;
-        return _minimalGif();
-      }),
-      pluginExecutionPolicy:
-          const PixaPluginExecutionPolicy.runtimeFirstWithDart(),
-      decoderOptions: const <String, Object?>{
-        'mimeType': 'image/gif',
-      },
-      cachePolicy: const PixaCachePolicy(mode: PixaCacheMode.memoryOnly),
-    );
+    'registered Dart processor runs and reuses processed memory cache',
+    () async {
+      PixaRuntimeMemoryCache.clear();
+      final List<PixaEvent> events = <PixaEvent>[];
+      final _CountingProcessor processor = _CountingProcessor();
+      final PixaRegistry registry = PixaRegistry()
+        ..registerProcessor(
+          _DartProcessorDescriptor(
+            id: 'plugin-processor',
+            operations: const <String>{'tag'},
+            processor: processor,
+          ),
+        );
+      final PixaPipeline pipeline = PixaPipeline(
+        cacheRootPath: '',
+        maxConcurrentRuntimeLoads: 1,
+        registry: registry,
+        observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+      );
+      var loaderCalls = 0;
+      final PixaRequest request = PixaRequest(
+        source: PixaSource.custom('processor-source', () async {
+          loaderCalls++;
+          return _minimalGif();
+        }),
+        processors: const <String>['tag(label=avatar)'],
+        cachePolicy: const PixaCachePolicy(mode: PixaCacheMode.memoryOnly),
+      );
 
-    final PixaPipelineLoad first = await pipeline.load(request);
-    first.dispose();
-    final PixaPipelineLoad second = await pipeline.load(request);
-    second.dispose();
+      final PixaPipelineLoad first = await pipeline.load(request);
+      first.dispose();
+      final PixaPipelineLoad second = await pipeline.load(request);
+      second.dispose();
 
-    expect(loaderCalls, 1);
-    expect(decoder.calls, 1);
-    expect(decoder.lastMimeType, 'image/gif');
-    expect(
-      events.map((PixaEvent event) => event.name),
-      containsAllInOrder(<String>[
-        'plugin.decoder.start',
-        'plugin.decoder.complete',
-        'cache.decoder.memory.write',
-        'cache.decoder.memory.hit',
-      ]),
-    );
-  });
+      expect(loaderCalls, 1);
+      expect(processor.calls, 1);
+      expect(processor.lastArguments, <String, Object?>{'label': 'avatar'});
+      expect(
+        events.map((PixaEvent event) => event.name),
+        containsAllInOrder(<String>[
+          'plugin.processor.start',
+          'plugin.processor.complete',
+          'cache.processed.memory.write',
+          'cache.processed.memory.hit',
+        ]),
+      );
+    },
+  );
+
+  test(
+    'registered Dart decoder runs only with explicit opt-in and reuses cache',
+    () async {
+      PixaRuntimeMemoryCache.clear();
+      final List<PixaEvent> events = <PixaEvent>[];
+      final _CountingDecoder decoder = _CountingDecoder();
+      final PixaRegistry registry = PixaRegistry()
+        ..registerDecoder(
+          _DartDecoderDescriptor(
+            id: 'plugin-decoder',
+            mimeTypes: const <String>{'image/gif'},
+            priority: 10,
+            decoder: decoder,
+          ),
+        );
+      final PixaPipeline pipeline = PixaPipeline(
+        cacheRootPath: '',
+        maxConcurrentRuntimeLoads: 1,
+        registry: registry,
+        observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+      );
+      var loaderCalls = 0;
+      final PixaRequest request = PixaRequest(
+        source: PixaSource.custom('decoder-source', () async {
+          loaderCalls++;
+          return _minimalGif();
+        }),
+        pluginExecutionPolicy:
+            const PixaPluginExecutionPolicy.runtimeFirstWithDart(),
+        decoderOptions: const <String, Object?>{'mimeType': 'image/gif'},
+        cachePolicy: const PixaCachePolicy(mode: PixaCacheMode.memoryOnly),
+      );
+
+      final PixaPipelineLoad first = await pipeline.load(request);
+      first.dispose();
+      final PixaPipelineLoad second = await pipeline.load(request);
+      second.dispose();
+
+      expect(loaderCalls, 1);
+      expect(decoder.calls, 1);
+      expect(decoder.lastMimeType, 'image/gif');
+      expect(
+        events.map((PixaEvent event) => event.name),
+        containsAllInOrder(<String>[
+          'plugin.decoder.start',
+          'plugin.decoder.complete',
+          'cache.decoder.memory.write',
+          'cache.decoder.memory.hit',
+        ]),
+      );
+    },
+  );
 
   test('registered Dart decoder can route by explicit format id', () async {
     PixaRuntimeMemoryCache.clear();
     final _CountingDecoder decoder = _CountingDecoder();
     final PixaRegistry registry = PixaRegistry()
-      ..registerDecoder(_DartDecoderDescriptor(
-        id: 'plugin-decoder-format',
-        mimeTypes: const <String>{},
-        formatIds: const <String>{'gif'},
-        priority: 10,
-        decoder: decoder,
-      ));
+      ..registerDecoder(
+        _DartDecoderDescriptor(
+          id: 'plugin-decoder-format',
+          mimeTypes: const <String>{},
+          formatIds: const <String>{'gif'},
+          priority: 10,
+          decoder: decoder,
+        ),
+      );
     final PixaPipeline pipeline = PixaPipeline(
       cacheRootPath: '',
       maxConcurrentRuntimeLoads: 1,
@@ -608,32 +667,36 @@ void main() {
     expect(decoder.lastMimeType, 'image/gif');
   });
 
-  test('registered Dart decoder does not run without explicit opt-in',
-      () async {
-    final _CountingDecoder decoder = _CountingDecoder();
-    final PixaRegistry registry = PixaRegistry()
-      ..registerDecoder(_DartDecoderDescriptor(
-        id: 'plugin-decoder',
-        mimeTypes: const <String>{'image/gif'},
-        priority: 10,
-        decoder: decoder,
-      ));
-    final PixaPipeline pipeline = PixaPipeline(
-      cacheRootPath: '',
-      maxConcurrentRuntimeLoads: 1,
-      registry: registry,
-    );
-    final PixaRequest request = PixaRequest(
-      source: PixaSource.custom('decoder-source', () async => _minimalGif()),
-      decoderOptions: const <String, Object?>{'mimeType': 'image/gif'},
-      cachePolicy: const PixaCachePolicy.noStore(),
-    );
+  test(
+    'registered Dart decoder does not run without explicit opt-in',
+    () async {
+      final _CountingDecoder decoder = _CountingDecoder();
+      final PixaRegistry registry = PixaRegistry()
+        ..registerDecoder(
+          _DartDecoderDescriptor(
+            id: 'plugin-decoder',
+            mimeTypes: const <String>{'image/gif'},
+            priority: 10,
+            decoder: decoder,
+          ),
+        );
+      final PixaPipeline pipeline = PixaPipeline(
+        cacheRootPath: '',
+        maxConcurrentRuntimeLoads: 1,
+        registry: registry,
+      );
+      final PixaRequest request = PixaRequest(
+        source: PixaSource.custom('decoder-source', () async => _minimalGif()),
+        decoderOptions: const <String, Object?>{'mimeType': 'image/gif'},
+        cachePolicy: const PixaCachePolicy.noStore(),
+      );
 
-    final PixaPipelineLoad load = await pipeline.load(request);
-    load.dispose();
+      final PixaPipelineLoad load = await pipeline.load(request);
+      load.dispose();
 
-    expect(decoder.calls, 0);
-  });
+      expect(decoder.calls, 0);
+    },
+  );
 
   test('runtime load emits complete timing span', () async {
     final List<PixaEvent> events = <PixaEvent>[];
@@ -698,23 +761,25 @@ void main() {
     );
     addTearDown(() => server.close(force: true));
     var requestCount = 0;
-    unawaited(server.forEach((HttpRequest request) {
-      requestCount += 1;
-      if (requestCount < 3) {
-        request.response
-          ..statusCode = HttpStatus.internalServerError
-          ..headers.contentLength = 5
-          ..write('error');
-      } else {
-        final Uint8List bytes = _minimalGif();
-        request.response
-          ..statusCode = HttpStatus.ok
-          ..headers.contentType = ContentType('image', 'gif')
-          ..headers.contentLength = bytes.length
-          ..add(bytes);
-      }
-      request.response.close();
-    }));
+    unawaited(
+      server.forEach((HttpRequest request) {
+        requestCount += 1;
+        if (requestCount < 3) {
+          request.response
+            ..statusCode = HttpStatus.internalServerError
+            ..headers.contentLength = 5
+            ..write('error');
+        } else {
+          final Uint8List bytes = _minimalGif();
+          request.response
+            ..statusCode = HttpStatus.ok
+            ..headers.contentType = ContentType('image', 'gif')
+            ..headers.contentLength = bytes.length
+            ..add(bytes);
+        }
+        request.response.close();
+      }),
+    );
     final List<PixaEvent> events = <PixaEvent>[];
     final PixaPipeline pipeline = PixaPipeline(
       cacheRootPath: '',
@@ -722,16 +787,18 @@ void main() {
       observers: <PixaObserver>[PixaCallbackObserver(events.add)],
     );
 
-    final PixaPipelineLoad load = await pipeline.load(PixaRequest.network(
-      'http://${InternetAddress.loopbackIPv4.address}:${server.port}/image.gif',
-      cachePolicy: const PixaCachePolicy.noStore(),
-      retryPolicy: const PixaRetryPolicy(
-        mode: PixaRetryMode.fixed,
-        maxAttempts: 3,
-        delay: Duration.zero,
-        jitter: Duration.zero,
+    final PixaPipelineLoad load = await pipeline.load(
+      PixaRequest.network(
+        'http://${InternetAddress.loopbackIPv4.address}:${server.port}/image.gif',
+        cachePolicy: const PixaCachePolicy.noStore(),
+        retryPolicy: const PixaRetryPolicy(
+          mode: PixaRetryMode.fixed,
+          maxAttempts: 3,
+          delay: Duration.zero,
+          jitter: Duration.zero,
+        ),
       ),
-    ));
+    );
     load.dispose();
 
     expect(requestCount, 3);
@@ -753,18 +820,20 @@ void main() {
       0,
     );
     addTearDown(() => server.close(force: true));
-    unawaited(server.forEach((HttpRequest request) async {
-      final int split = bytes.length - 2;
-      request.response
-        ..statusCode = HttpStatus.ok
-        ..headers.contentType = ContentType('image', 'jpeg')
-        ..headers.contentLength = bytes.length
-        ..add(bytes.sublist(0, split));
-      await request.response.flush();
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-      request.response.add(bytes.sublist(split));
-      await request.response.close();
-    }));
+    unawaited(
+      server.forEach((HttpRequest request) async {
+        final int split = bytes.length - 2;
+        request.response
+          ..statusCode = HttpStatus.ok
+          ..headers.contentType = ContentType('image', 'jpeg')
+          ..headers.contentLength = bytes.length
+          ..add(bytes.sublist(0, split));
+        await request.response.flush();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        request.response.add(bytes.sublist(split));
+        await request.response.close();
+      }),
+    );
     final List<PixaEvent> events = <PixaEvent>[];
     final List<PixaProgress> progress = <PixaProgress>[];
     final PixaPipeline pipeline = PixaPipeline(
@@ -801,8 +870,9 @@ void main() {
   });
 
   test('inline source disk cache hit skips loader bytes', () async {
-    final Directory cacheRoot =
-        await Directory.systemTemp.createTemp('pixa-inline-hit-');
+    final Directory cacheRoot = await Directory.systemTemp.createTemp(
+      'pixa-inline-hit-',
+    );
     addTearDown(() => cacheRoot.delete(recursive: true));
     var loaderCalls = 0;
     final List<PixaEvent> events = <PixaEvent>[];
@@ -830,14 +900,16 @@ void main() {
     expect(loaderCalls, 0);
     expect(
       events.any(
-          (PixaEvent event) => event.name == 'inline.bytes.skippedForCacheHit'),
+        (PixaEvent event) => event.name == 'inline.bytes.skippedForCacheHit',
+      ),
       isTrue,
     );
   });
 
   test('cache-first multi-source selects cached secondary source', () async {
-    final Directory cacheRoot =
-        await Directory.systemTemp.createTemp('pixa-multi-source-');
+    final Directory cacheRoot = await Directory.systemTemp.createTemp(
+      'pixa-multi-source-',
+    );
     addTearDown(() => cacheRoot.delete(recursive: true));
     final List<PixaEvent> events = <PixaEvent>[];
     final PixaPipeline pipeline = PixaPipeline(
@@ -852,7 +924,8 @@ void main() {
     final PixaRequest request = PixaRequest(
       source: PixaSource.custom('primary', () async {
         throw StateError(
-            'primary loader must not run when secondary is cached');
+          'primary loader must not run when secondary is cached',
+        );
       }),
       sources: <PixaSource>[secondary],
     );
@@ -954,12 +1027,14 @@ final class _PluginFetcher implements PixaFetcher {
   PixaBytePayload fetch(PixaSource source, PixaExecutionContext context) {
     context.cancellationSignal.throwIfCancellationRequested();
     final Uint8List bytes = _minimalGif();
-    context.emit(PixaProgress(
-      requestId: context.requestId,
-      stage: PixaStage.fetch,
-      receivedBytes: bytes.length,
-      expectedBytes: bytes.length,
-    ));
+    context.emit(
+      PixaProgress(
+        requestId: context.requestId,
+        stage: PixaStage.fetch,
+        receivedBytes: bytes.length,
+        expectedBytes: bytes.length,
+      ),
+    );
     return PixaBytePayload(bytes: bytes, mimeType: 'image/gif');
   }
 }
@@ -972,12 +1047,14 @@ final class _CountingProcessor implements PixaProcessor {
   PixaBytePayload process(PixaBytePayload input, PixaProcessorContext context) {
     calls++;
     lastArguments = context.arguments;
-    context.execution.emit(PixaProgress(
-      requestId: context.execution.requestId,
-      stage: PixaStage.process,
-      receivedBytes: input.bytes.length,
-      expectedBytes: input.bytes.length,
-    ));
+    context.execution.emit(
+      PixaProgress(
+        requestId: context.execution.requestId,
+        stage: PixaStage.process,
+        receivedBytes: input.bytes.length,
+        expectedBytes: input.bytes.length,
+      ),
+    );
     return input;
   }
 }
@@ -990,12 +1067,14 @@ final class _CountingDecoder implements PixaDecoder {
   PixaBytePayload decode(PixaBytePayload input, PixaExecutionContext context) {
     calls++;
     lastMimeType = input.mimeType;
-    context.emit(PixaProgress(
-      requestId: context.requestId,
-      stage: PixaStage.decode,
-      receivedBytes: input.bytes.length,
-      expectedBytes: input.bytes.length,
-    ));
+    context.emit(
+      PixaProgress(
+        requestId: context.requestId,
+        stage: PixaStage.decode,
+        receivedBytes: input.bytes.length,
+        expectedBytes: input.bytes.length,
+      ),
+    );
     return input;
   }
 }

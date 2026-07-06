@@ -9,10 +9,7 @@ const String pixaS3FetcherPluginId = 'pixa.fetcher.s3';
 const String pixaS3FetcherDescriptorId = 'pixa.fetcher.s3';
 
 /// Custom source kinds claimed by the S3 descriptor.
-const Set<String> pixaS3SourceKinds = <String>{
-  's3',
-  's3-object',
-};
+const Set<String> pixaS3SourceKinds = <String>{'s3', 's3-object'};
 
 /// Registers the official S3 fetcher descriptor.
 ///

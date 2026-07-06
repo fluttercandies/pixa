@@ -9,8 +9,9 @@ import 'package:pixa/pixa.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('large image double tap toggles focused zoom',
-      (WidgetTester tester) async {
+  testWidgets('large image double tap toggles focused zoom', (
+    WidgetTester tester,
+  ) async {
     await _configure('pixa-large-image-double-tap-');
     final Completer<Uint8List> pendingBytes = Completer<Uint8List>();
     final PixaLargeImageController controller = PixaLargeImageController();
@@ -67,8 +68,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
   });
 
-  testWidgets('large image controller zoom clamps to image bounds',
-      (WidgetTester tester) async {
+  testWidgets('large image controller zoom clamps to image bounds', (
+    WidgetTester tester,
+  ) async {
     await _configure('pixa-large-image-controller-');
     final Completer<Uint8List> pendingBytes = Completer<Uint8List>();
     final PixaLargeImageController controller = PixaLargeImageController();

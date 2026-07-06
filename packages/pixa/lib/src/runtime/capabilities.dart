@@ -90,8 +90,7 @@ bool _isSupportedPlatform(TargetPlatform platform) {
     TargetPlatform.iOS ||
     TargetPlatform.macOS ||
     TargetPlatform.windows ||
-    TargetPlatform.linux =>
-      true,
+    TargetPlatform.linux => true,
     TargetPlatform.fuchsia => false,
   };
 }
@@ -112,14 +111,14 @@ final class PixaRuntimePlatformContract {
   /// Android platform contract.
   static const PixaRuntimePlatformContract android =
       PixaRuntimePlatformContract(
-    platform: 'android',
-    targetAbis: <String>['arm64-v8a', 'armeabi-v7a', 'x86_64'],
-    runtimeLibraryLoad: true,
-    symbolResolution: true,
-    threadedRuntime: true,
-    cacheDirectory: true,
-    networkPolicy: true,
-  );
+        platform: 'android',
+        targetAbis: <String>['arm64-v8a', 'armeabi-v7a', 'x86_64'],
+        runtimeLibraryLoad: true,
+        symbolResolution: true,
+        threadedRuntime: true,
+        cacheDirectory: true,
+        networkPolicy: true,
+      );
 
   /// iOS platform contract.
   static const PixaRuntimePlatformContract iOS = PixaRuntimePlatformContract(
@@ -127,7 +126,7 @@ final class PixaRuntimePlatformContract {
     targetAbis: <String>[
       'ios-arm64',
       'ios-simulator-arm64',
-      'ios-simulator-x64'
+      'ios-simulator-x64',
     ],
     runtimeLibraryLoad: true,
     symbolResolution: true,
@@ -150,14 +149,14 @@ final class PixaRuntimePlatformContract {
   /// Windows platform contract.
   static const PixaRuntimePlatformContract windows =
       PixaRuntimePlatformContract(
-    platform: 'windows',
-    targetAbis: <String>['windows-x64'],
-    runtimeLibraryLoad: true,
-    symbolResolution: true,
-    threadedRuntime: true,
-    cacheDirectory: true,
-    networkPolicy: true,
-  );
+        platform: 'windows',
+        targetAbis: <String>['windows-x64'],
+        runtimeLibraryLoad: true,
+        symbolResolution: true,
+        threadedRuntime: true,
+        cacheDirectory: true,
+        networkPolicy: true,
+      );
 
   /// Linux platform contract.
   static const PixaRuntimePlatformContract linux = PixaRuntimePlatformContract(
@@ -172,13 +171,7 @@ final class PixaRuntimePlatformContract {
 
   /// Supported platform contracts.
   static const List<PixaRuntimePlatformContract> supported =
-      <PixaRuntimePlatformContract>[
-    android,
-    iOS,
-    macOS,
-    windows,
-    linux,
-  ];
+      <PixaRuntimePlatformContract>[android, iOS, macOS, windows, linux];
 
   /// Returns the platform contract for a Flutter platform.
   factory PixaRuntimePlatformContract.forPlatform(TargetPlatform platform) {
@@ -189,8 +182,8 @@ final class PixaRuntimePlatformContract {
       TargetPlatform.windows => windows,
       TargetPlatform.linux => linux,
       TargetPlatform.fuchsia => throw UnsupportedError(
-          'Pixa has no platform contract for fuchsia.',
-        ),
+        'Pixa has no platform contract for fuchsia.',
+      ),
     };
   }
 
@@ -291,7 +284,8 @@ final class PixaRuntimePlatformSelfCheck {
       _platformCheck(
         name: 'symbolResolution',
         required: contract?.symbolResolution ?? status.isSupportedPlatform,
-        passed: status.runtimeAvailable &&
+        passed:
+            status.runtimeAvailable &&
             capabilities.runtimePluginAbiVersion != null,
         passedMessage: 'runtime ABI symbols resolved',
         failedMessage: 'runtime ABI symbols are unavailable',
@@ -439,37 +433,42 @@ final class PixaRuntimeImageFormatCapability {
 }
 
 List<PixaRuntimeImageFormatCapability> _decodeImageFormatCapabilities(
-    Uint8List bytes) {
+  Uint8List bytes,
+) {
   if (bytes.length < 6 ||
       bytes[0] != 0x50 ||
       bytes[1] != 0x58 ||
       bytes[2] != 0x46 ||
       bytes[3] != 0x31) {
     throw const FormatException(
-        'Invalid runtime image format capability payload.');
+      'Invalid runtime image format capability payload.',
+    );
   }
   final int count = bytes[4] | (bytes[5] << 8);
   final int expectedLength = 6 + count * 3;
   if (bytes.length != expectedLength) {
     throw const FormatException(
-        'Invalid runtime image format capability length.');
+      'Invalid runtime image format capability length.',
+    );
   }
   final List<PixaRuntimeImageFormatCapability> capabilities =
       <PixaRuntimeImageFormatCapability>[];
   for (int index = 0; index < count; index += 1) {
     final int offset = 6 + index * 3;
     final int flags = bytes[offset + 1] | (bytes[offset + 2] << 8);
-    capabilities.add(PixaRuntimeImageFormatCapability(
-      format: pixaImageMetadataFormatFromRuntimeCode(bytes[offset]),
-      sniffing: flags & 0x0001 != 0,
-      metadata: flags & 0x0002 != 0,
-      engineDisplay: flags & 0x0004 != 0,
-      runtimeDisplay: flags & 0x0008 != 0,
-      processorDecode: flags & 0x0010 != 0,
-      animated: flags & 0x0020 != 0,
-      defaultRuntimeDisplay: flags & 0x0040 != 0,
-      regionDecode: flags & 0x0080 != 0,
-    ));
+    capabilities.add(
+      PixaRuntimeImageFormatCapability(
+        format: pixaImageMetadataFormatFromRuntimeCode(bytes[offset]),
+        sniffing: flags & 0x0001 != 0,
+        metadata: flags & 0x0002 != 0,
+        engineDisplay: flags & 0x0004 != 0,
+        runtimeDisplay: flags & 0x0008 != 0,
+        processorDecode: flags & 0x0010 != 0,
+        animated: flags & 0x0020 != 0,
+        defaultRuntimeDisplay: flags & 0x0040 != 0,
+        regionDecode: flags & 0x0080 != 0,
+      ),
+    );
   }
   return List<PixaRuntimeImageFormatCapability>.unmodifiable(capabilities);
 }

@@ -14,46 +14,47 @@ void main() {
     final PixaRuntimeCapabilities capabilities =
         PixaRuntimeCapabilities.current();
 
-    final PixaRuntimeImageFormatCapability jpeg =
-        capabilities.imageFormats.singleWhere(
-      (PixaRuntimeImageFormatCapability capability) =>
-          capability.format == PixaImageMetadataFormat.jpeg,
-    );
-    final PixaRuntimeImageFormatCapability png =
-        capabilities.imageFormats.singleWhere(
-      (PixaRuntimeImageFormatCapability capability) =>
-          capability.format == PixaImageMetadataFormat.png,
-    );
-    final PixaRuntimeImageFormatCapability ico =
-        capabilities.imageFormats.singleWhere(
-      (PixaRuntimeImageFormatCapability capability) =>
-          capability.format == PixaImageMetadataFormat.ico,
-    );
-    final PixaRuntimeImageFormatCapability pcx =
-        capabilities.imageFormats.singleWhere(
-      (PixaRuntimeImageFormatCapability capability) =>
-          capability.format == PixaImageMetadataFormat.pcx,
-    );
-    final PixaRuntimeImageFormatCapability wbmp =
-        capabilities.imageFormats.singleWhere(
-      (PixaRuntimeImageFormatCapability capability) =>
-          capability.format == PixaImageMetadataFormat.wbmp,
-    );
-    final PixaRuntimeImageFormatCapability bmp =
-        capabilities.imageFormats.singleWhere(
-      (PixaRuntimeImageFormatCapability capability) =>
-          capability.format == PixaImageMetadataFormat.bmp,
-    );
-    final PixaRuntimeImageFormatCapability farbfeld =
-        capabilities.imageFormats.singleWhere(
-      (PixaRuntimeImageFormatCapability capability) =>
-          capability.format == PixaImageMetadataFormat.farbfeld,
-    );
+    final PixaRuntimeImageFormatCapability jpeg = capabilities.imageFormats
+        .singleWhere(
+          (PixaRuntimeImageFormatCapability capability) =>
+              capability.format == PixaImageMetadataFormat.jpeg,
+        );
+    final PixaRuntimeImageFormatCapability png = capabilities.imageFormats
+        .singleWhere(
+          (PixaRuntimeImageFormatCapability capability) =>
+              capability.format == PixaImageMetadataFormat.png,
+        );
+    final PixaRuntimeImageFormatCapability ico = capabilities.imageFormats
+        .singleWhere(
+          (PixaRuntimeImageFormatCapability capability) =>
+              capability.format == PixaImageMetadataFormat.ico,
+        );
+    final PixaRuntimeImageFormatCapability pcx = capabilities.imageFormats
+        .singleWhere(
+          (PixaRuntimeImageFormatCapability capability) =>
+              capability.format == PixaImageMetadataFormat.pcx,
+        );
+    final PixaRuntimeImageFormatCapability wbmp = capabilities.imageFormats
+        .singleWhere(
+          (PixaRuntimeImageFormatCapability capability) =>
+              capability.format == PixaImageMetadataFormat.wbmp,
+        );
+    final PixaRuntimeImageFormatCapability bmp = capabilities.imageFormats
+        .singleWhere(
+          (PixaRuntimeImageFormatCapability capability) =>
+              capability.format == PixaImageMetadataFormat.bmp,
+        );
+    final PixaRuntimeImageFormatCapability farbfeld = capabilities.imageFormats
+        .singleWhere(
+          (PixaRuntimeImageFormatCapability capability) =>
+              capability.format == PixaImageMetadataFormat.farbfeld,
+        );
 
     expect(
       capabilities.imageFormats
-          .map((PixaRuntimeImageFormatCapability capability) =>
-              capability.format)
+          .map(
+            (PixaRuntimeImageFormatCapability capability) => capability.format,
+          )
           .toSet(),
       PixaImageMetadataFormat.values.toSet(),
     );
@@ -85,10 +86,10 @@ void main() {
         PixaRuntimeCapabilities.current();
     final Map<PixaImageMetadataFormat, bool> defaults =
         <PixaImageMetadataFormat, bool>{
-      for (final PixaRuntimeImageFormatCapability capability
-          in capabilities.imageFormats)
-        capability.format: capability.defaultRuntimeDisplay,
-    };
+          for (final PixaRuntimeImageFormatCapability capability
+              in capabilities.imageFormats)
+            capability.format: capability.defaultRuntimeDisplay,
+        };
 
     for (final MapEntry<PixaImageMetadataFormat, String> entry
         in _primaryMimeTypes.entries) {
@@ -97,8 +98,8 @@ void main() {
         defaults[entry.key],
         reason: '${entry.key.name} should follow runtime PXF1 flags',
       );
-      final PixaImageFormatRoute route =
-          const PixaImageFormatCatalog().routeForMimeType(entry.value)!;
+      final PixaImageFormatRoute route = const PixaImageFormatCatalog()
+          .routeForMimeType(entry.value)!;
       expect(
         route.capabilities.defaultRuntimeDisplay,
         defaults[entry.key],
@@ -109,10 +110,7 @@ void main() {
       pixaImageFormatFromMimeType('image/x-pcx; charset=binary'),
       PixaImageMetadataFormat.pcx,
     );
-    expect(
-      pixaIsRuntimeOnlyDisplayMime('image/png; charset=binary'),
-      isFalse,
-    );
+    expect(pixaIsRuntimeOnlyDisplayMime('image/png; charset=binary'), isFalse);
   });
 
   test('Dart display MIME policy marks stable runtime-only raster formats', () {
@@ -160,14 +158,18 @@ void main() {
     final Set<String> claimedMimeTypes = <String>{};
     for (final PixaImageFormatDescriptor descriptor in descriptors) {
       expect(
-          pixaPrimaryMimeType(descriptor.format), descriptor.primaryMimeType);
+        pixaPrimaryMimeType(descriptor.format),
+        descriptor.primaryMimeType,
+      );
       expect(
         pixaImageFormatFromMimeType(descriptor.primaryMimeType),
         descriptor.format,
       );
       expect(pixaFormatId(descriptor.format), descriptor.format.name);
-      expect(pixaImageFormatFromFormatId(descriptor.format.name),
-          descriptor.format);
+      expect(
+        pixaImageFormatFromFormatId(descriptor.format.name),
+        descriptor.format,
+      );
       for (final String mimeType in descriptor.mimeTypes) {
         expect(
           claimedMimeTypes.add(mimeType),
@@ -294,14 +296,14 @@ void main() {
 
   test('owned buffer decodes to RGBA owned buffer', () {
     final Uint8List bytes = _minimalGif();
-    final PixaRuntimeLoadResult load =
-        const PixaRuntimeLoader(rootPath: '').load(
-      PixaRequest(
-        source: PixaSource.bytes(bytes, id: 'runtime-rgba'),
-        cachePolicy: PixaCachePolicy.noStore(),
-      ),
-      inlineBytes: bytes,
-    );
+    final PixaRuntimeLoadResult load = const PixaRuntimeLoader(rootPath: '')
+        .load(
+          PixaRequest(
+            source: PixaSource.bytes(bytes, id: 'runtime-rgba'),
+            cachePolicy: PixaCachePolicy.noStore(),
+          ),
+          inlineBytes: bytes,
+        );
     addTearDown(load.dispose);
 
     final PixaRuntimeRgbaImage rgba = load.buffer.decodeRgba(
@@ -318,64 +320,72 @@ void main() {
 
   test('runtime RGBA decode reports typed output budget failure', () {
     final Uint8List bytes = _minimalGif();
-    final PixaRuntimeLoadResult load =
-        const PixaRuntimeLoader(rootPath: '').load(
-      PixaRequest(
-        source: PixaSource.bytes(bytes, id: 'runtime-rgba-budget'),
-        cachePolicy: PixaCachePolicy.noStore(),
-      ),
-      inlineBytes: bytes,
-    );
+    final PixaRuntimeLoadResult load = const PixaRuntimeLoader(rootPath: '')
+        .load(
+          PixaRequest(
+            source: PixaSource.bytes(bytes, id: 'runtime-rgba-budget'),
+            cachePolicy: PixaCachePolicy.noStore(),
+          ),
+          inlineBytes: bytes,
+        );
     addTearDown(load.dispose);
 
     expect(
       () => load.buffer.decodeRgba(maxDecodedPixels: 1, maxOutputBytes: 3),
-      throwsA(isA<PixaFailure>()
-          .having(
-              (PixaFailure failure) => failure.stage, 'stage', PixaStage.decode)
-          .having((PixaFailure failure) => failure.safeMessage, 'message',
-              contains('RGBA output bytes exceed limit'))),
+      throwsA(
+        isA<PixaFailure>()
+            .having(
+              (PixaFailure failure) => failure.stage,
+              'stage',
+              PixaStage.decode,
+            )
+            .having(
+              (PixaFailure failure) => failure.safeMessage,
+              'message',
+              contains('RGBA output bytes exceed limit'),
+            ),
+      ),
     );
   });
 }
 
 const Map<PixaImageMetadataFormat, String> _primaryMimeTypes =
     <PixaImageMetadataFormat, String>{
-  PixaImageMetadataFormat.jpeg: 'image/jpeg',
-  PixaImageMetadataFormat.png: 'image/png',
-  PixaImageMetadataFormat.gif: 'image/gif',
-  PixaImageMetadataFormat.webp: 'image/webp',
-  PixaImageMetadataFormat.bmp: 'image/bmp',
-  PixaImageMetadataFormat.wbmp: 'image/vnd.wap.wbmp',
-  PixaImageMetadataFormat.ico: 'image/x-icon',
-  PixaImageMetadataFormat.tiff: 'image/tiff',
-  PixaImageMetadataFormat.pnm: 'image/x-portable-anymap',
-  PixaImageMetadataFormat.qoi: 'image/qoi',
-  PixaImageMetadataFormat.tga: 'image/x-tga',
-  PixaImageMetadataFormat.dds: 'image/vnd.ms-dds',
-  PixaImageMetadataFormat.hdr: 'image/vnd.radiance',
-  PixaImageMetadataFormat.farbfeld: 'image/x-farbfeld',
-  PixaImageMetadataFormat.pcx: 'image/x-pcx',
-  PixaImageMetadataFormat.sgi: 'image/sgi',
-  PixaImageMetadataFormat.xbm: 'image/x-xbitmap',
-  PixaImageMetadataFormat.xpm: 'image/x-xpixmap',
-};
+      PixaImageMetadataFormat.jpeg: 'image/jpeg',
+      PixaImageMetadataFormat.png: 'image/png',
+      PixaImageMetadataFormat.gif: 'image/gif',
+      PixaImageMetadataFormat.webp: 'image/webp',
+      PixaImageMetadataFormat.bmp: 'image/bmp',
+      PixaImageMetadataFormat.wbmp: 'image/vnd.wap.wbmp',
+      PixaImageMetadataFormat.ico: 'image/x-icon',
+      PixaImageMetadataFormat.tiff: 'image/tiff',
+      PixaImageMetadataFormat.pnm: 'image/x-portable-anymap',
+      PixaImageMetadataFormat.qoi: 'image/qoi',
+      PixaImageMetadataFormat.tga: 'image/x-tga',
+      PixaImageMetadataFormat.dds: 'image/vnd.ms-dds',
+      PixaImageMetadataFormat.hdr: 'image/vnd.radiance',
+      PixaImageMetadataFormat.farbfeld: 'image/x-farbfeld',
+      PixaImageMetadataFormat.pcx: 'image/x-pcx',
+      PixaImageMetadataFormat.sgi: 'image/sgi',
+      PixaImageMetadataFormat.xbm: 'image/x-xbitmap',
+      PixaImageMetadataFormat.xpm: 'image/x-xpixmap',
+    };
 
 const Set<PixaImageMetadataFormat> _stableRuntimeOnlyRasterFormats =
     <PixaImageMetadataFormat>{
-  PixaImageMetadataFormat.ico,
-  PixaImageMetadataFormat.tiff,
-  PixaImageMetadataFormat.pnm,
-  PixaImageMetadataFormat.qoi,
-  PixaImageMetadataFormat.tga,
-  PixaImageMetadataFormat.dds,
-  PixaImageMetadataFormat.hdr,
-  PixaImageMetadataFormat.farbfeld,
-  PixaImageMetadataFormat.pcx,
-  PixaImageMetadataFormat.sgi,
-  PixaImageMetadataFormat.xbm,
-  PixaImageMetadataFormat.xpm,
-};
+      PixaImageMetadataFormat.ico,
+      PixaImageMetadataFormat.tiff,
+      PixaImageMetadataFormat.pnm,
+      PixaImageMetadataFormat.qoi,
+      PixaImageMetadataFormat.tga,
+      PixaImageMetadataFormat.dds,
+      PixaImageMetadataFormat.hdr,
+      PixaImageMetadataFormat.farbfeld,
+      PixaImageMetadataFormat.pcx,
+      PixaImageMetadataFormat.sgi,
+      PixaImageMetadataFormat.xbm,
+      PixaImageMetadataFormat.xpm,
+    };
 
 Uint8List _minimalGif() {
   return Uint8List.fromList(<int>[

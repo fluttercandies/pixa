@@ -77,8 +77,8 @@ final class PixaProgressivePreview {
     required this.mimeType,
     required this.sequence,
     Object? retainedOwner,
-  })  : bytes = bytes.asUnmodifiableView(),
-        _retainedOwner = retainedOwner;
+  }) : bytes = bytes.asUnmodifiableView(),
+       _retainedOwner = retainedOwner;
 
   /// Encoded preview bytes.
   final Uint8List bytes;
