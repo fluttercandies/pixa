@@ -838,6 +838,7 @@ void _checkPublicExports(Directory root, List<String> failures) {
       'src/cache/cache_stats.dart',
       'src/debug/debug_inspector.dart',
       'src/display_decoder.dart',
+      'src/registry.dart',
       'src/runtime/capabilities.dart',
       'src/runtime/runtime_plugin_stats.dart',
       'src/scheduler_stats.dart',

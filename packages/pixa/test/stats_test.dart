@@ -16,6 +16,7 @@ import 'package:pixa/pixa_debug.dart'
         PixaRuntimePluginRegistryStats,
         PixaRuntimePlatformContract,
         PixaRuntimePlatformStatus,
+        PixaRegistryArchitectureSnapshot,
         PixaSchedulerStats;
 import 'package:pixa/src/cache_key.dart';
 import 'package:pixa/src/runtime/runtime_loader.dart';
@@ -190,6 +191,31 @@ void main() {
         ),
         cacheRootPath: '/tmp/pixa-cache',
       ),
+      registryArchitecture: const PixaRegistryArchitectureSnapshot(
+        fetchers: 1,
+        decoders: 2,
+        processors: 3,
+        cacheStores: 1,
+        videoFrameBackends: 1,
+        videoFrameBackendsUseRuntimeOnly: true,
+        videoFrameEncodedOutputBackends: 1,
+        decoderSignatureRoutes: 4,
+        decodersWithMetadataProbe: 2,
+        decodersWithRegionDecode: 1,
+        decodersWithStreamingInput: 2,
+        runtimeHandlers: 7,
+        dartHandlers: 0,
+        externalHandlers: 0,
+        runtimeModules: 3,
+        builtInHostModules: 2,
+        hostLinkedPluginModules: 1,
+        assetModules: 0,
+        linkableRuntimeModules: 3,
+        allRuntimeHandlersUseHostRuntime: true,
+        allRuntimeHandlersUseBinaryMessages: true,
+        allRuntimeHandlersUseOwnedBuffers: true,
+        allRuntimeHandlersUseStreamHandles: true,
+      ),
       cacheStats: PixaCacheStats(
         memoryEntries: 1,
         memoryBytes: 128,
@@ -245,6 +271,8 @@ void main() {
         json['capabilities']! as Map<String, Object?>;
     final Map<String, Object?> displayDecoder =
         json['displayDecoder']! as Map<String, Object?>;
+    final Map<String, Object?> registryArchitecture =
+        json['registryArchitecture']! as Map<String, Object?>;
     final List<Object?> displayDecoderBackends =
         displayDecoder['backends']! as List<Object?>;
     final Map<String, Object?> engineDisplayBackend =
@@ -276,6 +304,9 @@ void main() {
     expect(engineDisplayBackend['streamKind'], 'multi-frame-codec');
     expect(engineDisplayBackend['usesFlutterEngine'], isTrue);
     expect(engineDisplayBackend['ownsPipeline'], isFalse);
+    expect(registryArchitecture['videoFrameBackends'], 1);
+    expect(registryArchitecture['videoFrameBackendsUseRuntimeOnly'], isTrue);
+    expect(registryArchitecture['runtimeCanUseSingleHostBinary'], isTrue);
     expect(platformContract['platform'], 'macOS');
     expect(capabilities['runtimePluginAbiVersion'], 1);
     expect(pluginStats['hostLinkedModules'], 1);

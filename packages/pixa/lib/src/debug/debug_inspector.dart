@@ -3,6 +3,7 @@ import '../config.dart';
 import '../display_decoder.dart';
 import '../runtime/capabilities.dart';
 import '../pixa.dart';
+import '../registry.dart';
 import '../scheduler_stats.dart';
 
 /// Debug snapshot for inspector surfaces and diagnostics.
@@ -14,6 +15,7 @@ final class PixaDebugSnapshot {
     required this.displayDecoder,
     required this.capabilities,
     required this.platformSelfCheck,
+    required this.registryArchitecture,
     required this.cacheStats,
     required this.decodedCacheStats,
     required this.schedulerStats,
@@ -33,6 +35,9 @@ final class PixaDebugSnapshot {
 
   /// Runtime platform self-check report.
   final PixaRuntimePlatformSelfCheck platformSelfCheck;
+
+  /// Plugin registry and runtime module architecture snapshot.
+  final PixaRegistryArchitectureSnapshot registryArchitecture;
 
   /// runtime cache statistics, when Pixa is configured.
   final PixaCacheStats? cacheStats;
@@ -88,6 +93,7 @@ final class PixaDebugSnapshot {
             .toList(growable: false),
         'platformSelfCheck': platformSelfCheck.toJson(),
       },
+      'registryArchitecture': registryArchitecture.toJson(),
       'cacheStats': cacheStats == null
           ? null
           : <String, Object?>{
@@ -162,6 +168,9 @@ final class PixaDebugInspector {
             ? Pixa.pipeline.cacheRootPath
             : Pixa.config.cacheRootPath,
       ),
+      registryArchitecture: configured
+          ? Pixa.pipeline.registry.architectureSnapshot()
+          : PixaRegistry().architectureSnapshot(),
       cacheStats: configured ? Pixa.cacheStats() : null,
       decodedCacheStats: Pixa.decodedCacheStats(),
       schedulerStats: configured ? Pixa.pipeline.schedulerStats() : null,

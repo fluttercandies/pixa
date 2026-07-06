@@ -6,4 +6,5 @@ export 'src/display_decoder.dart'
     show PixaDisplayDecoderBackendSnapshot, PixaDisplayDecoderSnapshot;
 export 'src/runtime/capabilities.dart';
 export 'src/runtime/runtime_plugin_stats.dart';
+export 'src/registry.dart' show PixaRegistryArchitectureSnapshot;
 export 'src/scheduler_stats.dart';
