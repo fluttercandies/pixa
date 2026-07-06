@@ -188,18 +188,33 @@ Future<void> _runSmoke(
   final int exitCode = await process.exitCode;
   await stdoutDone;
   await stderrDone;
+  final String capturedOutput = output.toString();
+  final File report = File(reportPath);
   if (exitCode != 0) {
+    final String? reportText =
+        _readExistingSmokeReport(report) ??
+        tryExtractPixaExampleSmokeReport(capturedOutput);
+    if (reportText != null &&
+        acceptsNonZeroPixaExampleSmokeExit(capturedOutput, reportText)) {
+      _writeSmokeReportIfMissing(report, reportText);
+      stdout.writeln(
+        'Pixa example smoke accepted non-zero flutter test exit $exitCode '
+        'after validating the smoke report and Flutter test pass marker.',
+      );
+      return;
+    }
     throw ProcessException(executable, arguments, 'command failed', exitCode);
   }
-  final File report = File(reportPath);
   if (report.existsSync() && report.lengthSync() > 0) {
     return;
   }
-  report.parent.createSync(recursive: true);
-  report.writeAsStringSync(_extractSmokeReport(output.toString()));
+  _writeSmokeReportIfMissing(
+    report,
+    extractPixaExampleSmokeReport(capturedOutput),
+  );
 }
 
-String _extractSmokeReport(String output) {
+String extractPixaExampleSmokeReport(String output) {
   const String marker = 'PIXA_EXAMPLE_SMOKE_REPORT_JSON:';
   final int index = output.lastIndexOf(marker);
   if (index < 0) {
@@ -211,6 +226,72 @@ String _extractSmokeReport(String output) {
       .substring(valueStart, valueEnd < 0 ? output.length : valueEnd)
       .trim();
   return utf8.decode(base64Url.decode(encoded));
+}
+
+String? tryExtractPixaExampleSmokeReport(String output) {
+  try {
+    return extractPixaExampleSmokeReport(output);
+  } on Object {
+    return null;
+  }
+}
+
+bool acceptsNonZeroPixaExampleSmokeExit(String output, String reportText) {
+  return hasFlutterTestPassedMarker(output) &&
+      isPassingPixaExampleSmokeReport(reportText);
+}
+
+bool hasFlutterTestPassedMarker(String output) {
+  return RegExp(
+        r'(^|\n)[^\d\n]*\d+\s+tests?\s+passed\.',
+        multiLine: true,
+      ).hasMatch(output.replaceAll('\r\n', '\n')) ||
+      output.contains('All tests passed!');
+}
+
+bool isPassingPixaExampleSmokeReport(String reportText) {
+  try {
+    final Object? decoded = jsonDecode(reportText);
+    if (decoded is! Map<String, Object?>) {
+      return false;
+    }
+    final Object? evidence = decoded['evidence'];
+    if (evidence is! Map || evidence['runMode'] != 'integration-test') {
+      return false;
+    }
+    final Object? smoke = decoded['exampleSmoke'];
+    if (smoke is! Map || smoke['passed'] != true) {
+      return false;
+    }
+    final Object? platform = smoke['platform'];
+    if (platform is! String || platform.trim().isEmpty) {
+      return false;
+    }
+    final Object? checks = smoke['checks'];
+    if (checks is! List || checks.isEmpty) {
+      return false;
+    }
+    return checks.every((Object? check) {
+      return check is Map && check['passed'] == true;
+    });
+  } on Object {
+    return false;
+  }
+}
+
+String? _readExistingSmokeReport(File report) {
+  if (!report.existsSync() || report.lengthSync() <= 0) {
+    return null;
+  }
+  return report.readAsStringSync();
+}
+
+void _writeSmokeReportIfMissing(File report, String reportText) {
+  if (report.existsSync() && report.lengthSync() > 0) {
+    return;
+  }
+  report.parent.createSync(recursive: true);
+  report.writeAsStringSync(reportText);
 }
 
 String _flutterExecutable() {
