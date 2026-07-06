@@ -4573,6 +4573,7 @@ mod tests {
             RuntimePluginModule::built_in("pixa.video_frame.test", capabilities).with_routes(
                 RuntimePluginRoutes {
                     fetcher_source_kinds: vec!["video-frame:platform".to_string()],
+                    video_frame_output_mime_types: vec!["image/gif".to_string()],
                     ..RuntimePluginRoutes::default()
                 },
             ),

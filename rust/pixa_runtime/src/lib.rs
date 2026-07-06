@@ -248,6 +248,7 @@ struct GeneratedPluginModule {
 #[derive(Clone, Copy)]
 struct GeneratedPluginRoutes {
     fetcher_source_kinds: &'static [&'static str],
+    video_frame_output_mime_types: &'static [&'static str],
     decoder_format_ids: &'static [&'static str],
     decoder_mime_types: &'static [&'static str],
     decoder_signatures: &'static [GeneratedPluginDecoderSignature],
@@ -341,6 +342,11 @@ fn generated_routes(routes: GeneratedPluginRoutes) -> PluginRoutes {
     PluginRoutes {
         fetcher_source_kinds: routes
             .fetcher_source_kinds
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect(),
+        video_frame_output_mime_types: routes
+            .video_frame_output_mime_types
             .iter()
             .map(|value| (*value).to_string())
             .collect(),
@@ -1833,7 +1839,7 @@ fn encode_cache_stats(stats: RuntimeCacheStats) -> RuntimeResult<Vec<u8>> {
 }
 
 fn encode_plugin_registry_stats(stats: PluginRegistryStats) -> RuntimeResult<Vec<u8>> {
-    let mut bytes = Vec::with_capacity(4 + 9 * 8);
+    let mut bytes = Vec::with_capacity(4 + 11 * 8);
     bytes.extend_from_slice(b"PXM1");
     push_usize_as_u64(&mut bytes, stats.modules, "modules")?;
     push_usize_as_u64(&mut bytes, stats.built_in_modules, "built_in_modules")?;
@@ -1841,6 +1847,16 @@ fn encode_plugin_registry_stats(stats: PluginRegistryStats) -> RuntimeResult<Vec
     push_usize_as_u64(&mut bytes, stats.runtime_asset_modules, "asset_modules")?;
     push_usize_as_u64(&mut bytes, stats.linkable_modules, "linkable_modules")?;
     push_usize_as_u64(&mut bytes, stats.fetchers, "fetchers")?;
+    push_usize_as_u64(
+        &mut bytes,
+        stats.video_frame_fetchers,
+        "video_frame_fetchers",
+    )?;
+    push_usize_as_u64(
+        &mut bytes,
+        stats.video_frame_encoded_output_fetchers,
+        "video_frame_encoded_output_fetchers",
+    )?;
     push_usize_as_u64(&mut bytes, stats.decoders, "decoders")?;
     push_usize_as_u64(&mut bytes, stats.processors, "processors")?;
     push_usize_as_u64(&mut bytes, stats.cache_stores, "cache_stores")?;
@@ -2121,6 +2137,46 @@ mod tests {
     #[test]
     fn exposes_plugin_host_abi_version() {
         assert_eq!(pixa_plugin_abi_version(), PIXA_PLUGIN_ABI_VERSION);
+    }
+
+    #[test]
+    fn generated_video_frame_routes_keep_output_mime_contract() {
+        let module = GeneratedPluginModule {
+            module_id: "pixa.video_frame.test",
+            abi_version: i64::from(PIXA_PLUGIN_ABI_VERSION),
+            deployment: GeneratedPluginDeployment::BuiltInHost,
+            package_name: Some("pixa"),
+            implementation_language: Some("rust"),
+            entrypoint_symbol: None,
+            entrypoint: None,
+            capabilities: GeneratedPluginCapabilities {
+                fetcher: true,
+                decoder: false,
+                processor: false,
+                cache_store: false,
+                host_managed_runtime: true,
+                binary_messages: true,
+                owned_buffers: true,
+                stream_handles: true,
+            },
+            routes: GeneratedPluginRoutes {
+                fetcher_source_kinds: &["video-frame:platform"],
+                video_frame_output_mime_types: &["image/png"],
+                decoder_format_ids: &[],
+                decoder_mime_types: &[],
+                decoder_signatures: &[],
+                processor_operations: &[],
+                cache_store_namespaces: &[],
+            },
+        };
+
+        let runtime_module =
+            plugin_module_from_generated(&module).expect("generated module should project");
+
+        assert_eq!(
+            runtime_module.routes.video_frame_output_mime_types,
+            vec!["image/png".to_string()]
+        );
     }
 
     #[test]
@@ -2437,16 +2493,18 @@ mod tests {
         assert!(!ptr.is_null());
         let bytes = unsafe { slice::from_raw_parts(ptr, out_len) };
         assert_eq!(&bytes[0..4], b"PXM1");
-        assert_eq!(out_len, 4 + 9 * 8);
+        assert_eq!(out_len, 4 + 11 * 8);
         assert_eq!(read_le_u64(bytes, 4), 3);
         assert_eq!(read_le_u64(bytes, 12), 2);
         assert_eq!(read_le_u64(bytes, 20), 1);
         assert_eq!(read_le_u64(bytes, 28), 0);
         assert_eq!(read_le_u64(bytes, 36), 3);
         assert_eq!(read_le_u64(bytes, 44), 1);
-        assert_eq!(read_le_u64(bytes, 52), 1);
+        assert_eq!(read_le_u64(bytes, 52), 0);
         assert_eq!(read_le_u64(bytes, 60), 0);
         assert_eq!(read_le_u64(bytes, 68), 1);
+        assert_eq!(read_le_u64(bytes, 76), 0);
+        assert_eq!(read_le_u64(bytes, 84), 1);
         pixa_buffer_free(ptr, out_len);
     }
 
@@ -2582,6 +2640,7 @@ mod tests {
             },
             routes: GeneratedPluginRoutes {
                 fetcher_source_kinds: &[],
+                video_frame_output_mime_types: &[],
                 decoder_format_ids: &[],
                 decoder_mime_types: &["image/x-pixa-test"],
                 decoder_signatures: &[],
@@ -2660,6 +2719,7 @@ mod tests {
             },
             routes: GeneratedPluginRoutes {
                 fetcher_source_kinds: &[],
+                video_frame_output_mime_types: &[],
                 decoder_format_ids: &[],
                 decoder_mime_types: &[],
                 decoder_signatures: &[],
@@ -2711,6 +2771,7 @@ mod tests {
             },
             routes: GeneratedPluginRoutes {
                 fetcher_source_kinds: &[],
+                video_frame_output_mime_types: &[],
                 decoder_format_ids: &[],
                 decoder_mime_types: &[],
                 decoder_signatures: &[],

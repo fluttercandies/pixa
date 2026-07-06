@@ -161,6 +161,45 @@ void main() {
   });
 
   test(
+    'runtime plugin plan accepts built-in video-frame output MIME aliases',
+    () {
+      final PixaRuntimePluginBuildPlan plan =
+          PixaRuntimePluginBuildPlan.fromManifestMaps(<Map<String, Object?>>[
+            _manifest(<Map<String, Object?>>[
+              <String, Object?>{
+                'moduleId': 'pixa.video_frame.aliases',
+                'deployment': 'hostLinkedPluginModule',
+                'entrypointSymbol': 'pixa_video_frame_alias_plugin_init',
+                'implementationLanguage': 'rust',
+                'capabilities': <String>['fetcher'],
+                'fetcherSourceKinds': <String>['video-frame:aliases'],
+                'videoFrameOutputMimeTypes': <String>[
+                  'image/x-portable-arbitrarymap',
+                  'image/tga',
+                  'application/x-tga',
+                  'image/vnd-ms.dds',
+                  'image/x-dds',
+                  'image/x-hdr',
+                  'image/hdr',
+                ],
+                'videoFrameNearest': true,
+              },
+            ]),
+          ]);
+
+      expect(
+        plan.modules.single.videoFrameOutputMimeTypes,
+        contains('image/tga'),
+      );
+      expect(
+        plan.modules.single.videoFrameOutputMimeTypes,
+        contains('image/hdr'),
+      );
+      expect(plan.modules.single.videoFrameNearest, isTrue);
+    },
+  );
+
+  test(
     'runtime plugin plan loads official optional JPEG and WebP ROI modules',
     () {
       final PixaRuntimePluginBuildPlan plan = PixaRuntimePluginBuildPlan.load(

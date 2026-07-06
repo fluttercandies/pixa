@@ -58,6 +58,10 @@ pub(crate) fn render_generated_source(modules: &[ModulePlan]) -> String {
             render_str_slice(&module.routes.fetcher_source_kinds)
         ));
         source.push_str(&format!(
+            "            video_frame_output_mime_types: {},\n",
+            render_str_slice(&module.routes.video_frame_output_mime_types)
+        ));
+        source.push_str(&format!(
             "            decoder_format_ids: {},\n",
             render_str_slice(&module.routes.decoder_format_ids)
         ));

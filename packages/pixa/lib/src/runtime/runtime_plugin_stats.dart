@@ -12,6 +12,8 @@ final class PixaRuntimePluginRegistryStats {
     required this.assetModules,
     required this.linkableModules,
     required this.fetchers,
+    required this.videoFrameFetchers,
+    required this.videoFrameEncodedOutputFetchers,
     required this.decoders,
     required this.processors,
     required this.cacheStores,
@@ -26,6 +28,8 @@ final class PixaRuntimePluginRegistryStats {
         assetModules: 0,
         linkableModules: 0,
         fetchers: 0,
+        videoFrameFetchers: 0,
+        videoFrameEncodedOutputFetchers: 0,
         decoders: 0,
         processors: 0,
         cacheStores: 0,
@@ -44,6 +48,8 @@ final class PixaRuntimePluginRegistryStats {
       assetModules: reader.readUint64(),
       linkableModules: reader.readUint64(),
       fetchers: reader.readUint64(),
+      videoFrameFetchers: reader.readUint64(),
+      videoFrameEncodedOutputFetchers: reader.readUint64(),
       decoders: reader.readUint64(),
       processors: reader.readUint64(),
       cacheStores: reader.readUint64(),
@@ -72,6 +78,12 @@ final class PixaRuntimePluginRegistryStats {
   /// runtime fetcher capabilities.
   final int fetchers;
 
+  /// runtime video-frame fetcher capabilities.
+  final int videoFrameFetchers;
+
+  /// runtime video-frame fetchers that declare encoded image output.
+  final int videoFrameEncodedOutputFetchers;
+
   /// runtime decoder capabilities.
   final int decoders;
 
@@ -95,6 +107,8 @@ final class PixaRuntimePluginRegistryStats {
       'assetModules': assetModules,
       'linkableModules': linkableModules,
       'fetchers': fetchers,
+      'videoFrameFetchers': videoFrameFetchers,
+      'videoFrameEncodedOutputFetchers': videoFrameEncodedOutputFetchers,
       'decoders': decoders,
       'processors': processors,
       'cacheStores': cacheStores,

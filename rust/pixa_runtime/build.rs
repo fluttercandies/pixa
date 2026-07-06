@@ -14,6 +14,49 @@ const ABI_VERSION: i64 = 1;
 const DEFAULT_MANIFEST_RELATIVE_PATH: &str = "../../packages/pixa/plugins/pixa_plugins.json";
 const JPEG_TURBO_PROCESSOR_ENTRYPOINT: &str = "pixa_jpeg_turbo_processor_plugin_init";
 const WEBP_PROCESSOR_ENTRYPOINT: &str = "pixa_webp_processor_plugin_init";
+const SUPPORTED_VIDEO_FRAME_OUTPUT_MIME_TYPES: &[&str] = &[
+    "image/jpeg",
+    "image/jpg",
+    "image/pjpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+    "image/x-bmp",
+    "image/x-ms-bmp",
+    "image/vnd.wap.wbmp",
+    "image/x-icon",
+    "image/vnd.microsoft.icon",
+    "image/tiff",
+    "image/tiff-fx",
+    "image/x-portable-anymap",
+    "image/x-portable-arbitrarymap",
+    "image/x-portable-bitmap",
+    "image/x-portable-graymap",
+    "image/x-portable-pixmap",
+    "image/qoi",
+    "image/x-qoi",
+    "image/tga",
+    "image/x-tga",
+    "application/x-tga",
+    "image/vnd.ms-dds",
+    "image/vnd-ms.dds",
+    "image/x-dds",
+    "image/vnd.radiance",
+    "image/x-hdr",
+    "image/x-radiance",
+    "image/hdr",
+    "image/x-farbfeld",
+    "image/x-pcx",
+    "image/vnd.zbrush.pcx",
+    "image/sgi",
+    "image/x-sgi",
+    "image/x-rgb",
+    "image/x-xbitmap",
+    "image/x-xbm",
+    "image/x-xpixmap",
+    "image/x-xpm",
+];
 
 fn main() {
     if let Err(error) = run() {
@@ -114,6 +157,7 @@ pub(crate) struct LinkPlan {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RouteClaims {
     pub(crate) fetcher_source_kinds: Vec<String>,
+    pub(crate) video_frame_output_mime_types: Vec<String>,
     pub(crate) decoder_format_ids: Vec<String>,
     pub(crate) decoder_mime_types: Vec<String>,
     pub(crate) decoder_signatures: Vec<DecoderSignaturePlan>,
@@ -255,6 +299,10 @@ fn parse_link(object: &BTreeMap<String, JsonValue>) -> Result<LinkPlan, String> 
 fn parse_routes(object: &BTreeMap<String, JsonValue>) -> Result<RouteClaims, String> {
     Ok(RouteClaims {
         fetcher_source_kinds: optional_string_array_field(object, "fetcherSourceKinds")?,
+        video_frame_output_mime_types: optional_string_array_field(
+            object,
+            "videoFrameOutputMimeTypes",
+        )?,
         decoder_format_ids: optional_string_array_field(object, "decoderFormatIds")?,
         decoder_mime_types: optional_string_array_field(object, "decoderMimeTypes")?,
         decoder_signatures: optional_decoder_signatures(object)?,
@@ -313,6 +361,11 @@ fn validate_module(module: &ModulePlan) -> Result<(), String> {
         module.capabilities.fetcher,
         &module.routes.fetcher_source_kinds,
         "fetcherSourceKinds",
+    )?;
+    validate_video_frame_route_values(
+        module.capabilities.fetcher,
+        &module.routes.fetcher_source_kinds,
+        &module.routes.video_frame_output_mime_types,
     )?;
     validate_decoder_route_values(
         module.capabilities.decoder,
@@ -631,6 +684,52 @@ fn validate_route_values(
         ));
     }
     validate_link_values(claims, field)
+}
+
+fn validate_video_frame_route_values(
+    fetcher_enabled: bool,
+    source_kinds: &[String],
+    output_mime_types: &[String],
+) -> Result<(), String> {
+    let claims_video_frame = source_kinds
+        .iter()
+        .any(|value| is_video_frame_source_kind(value));
+    if !output_mime_types.is_empty() && (!fetcher_enabled || !claims_video_frame) {
+        return Err(
+            "runtime plugin video-frame output MIME contract requires a video-frame fetcher route"
+                .to_string(),
+        );
+    }
+    if claims_video_frame && output_mime_types.is_empty() {
+        return Err(
+            "runtime plugin video-frame fetcher routes require videoFrameOutputMimeTypes"
+                .to_string(),
+        );
+    }
+    validate_link_values(output_mime_types, "videoFrameOutputMimeTypes")?;
+    for mime_type in output_mime_types {
+        let normalized = normalize_mime_type(mime_type);
+        if !SUPPORTED_VIDEO_FRAME_OUTPUT_MIME_TYPES.contains(&normalized.as_str()) {
+            return Err(format!(
+                "runtime plugin video-frame output MIME {mime_type:?} is not in the supported display format matrix"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn is_video_frame_source_kind(source_kind: &str) -> bool {
+    let normalized = source_kind.trim().to_ascii_lowercase();
+    normalized == "video-frame" || normalized.starts_with("video-frame:")
+}
+
+fn normalize_mime_type(mime_type: &str) -> String {
+    mime_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
 }
 
 fn validate_decoder_route_values(

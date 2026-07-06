@@ -136,6 +136,8 @@ void main() {
           assetModules: 0,
           linkableModules: 2,
           fetchers: 1,
+          videoFrameFetchers: 0,
+          videoFrameEncodedOutputFetchers: 0,
           decoders: 1,
           processors: 0,
           cacheStores: 0,
@@ -818,9 +820,11 @@ void main() {
     expect(stats.assetModules, 4);
     expect(stats.linkableModules, 5);
     expect(stats.fetchers, 6);
-    expect(stats.decoders, 7);
-    expect(stats.processors, 8);
-    expect(stats.cacheStores, 9);
+    expect(stats.videoFrameFetchers, 7);
+    expect(stats.videoFrameEncodedOutputFetchers, 8);
+    expect(stats.decoders, 9);
+    expect(stats.processors, 10);
+    expect(stats.cacheStores, 11);
     expect(stats.canUseSingleHostBinary, isFalse);
   });
 
@@ -876,7 +880,7 @@ Uint8List _binaryCacheStatsPayload() {
 Uint8List _binaryPluginStatsPayload() {
   final BytesBuilder builder = BytesBuilder(copy: false);
   builder.add(<int>[0x50, 0x58, 0x4d, 0x31]);
-  for (int value = 1; value <= 9; value++) {
+  for (int value = 1; value <= 11; value++) {
     _addUint64(builder, value);
   }
   return builder.takeBytes();

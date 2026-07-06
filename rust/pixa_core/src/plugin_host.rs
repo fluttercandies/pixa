@@ -224,6 +224,7 @@ impl RuntimePluginCapabilities {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RuntimePluginRoutes {
     pub fetcher_source_kinds: Vec<String>,
+    pub video_frame_output_mime_types: Vec<String>,
     pub decoder_format_ids: Vec<String>,
     pub decoder_mime_types: Vec<String>,
     pub decoder_signatures: Vec<RuntimePluginDecoderSignature>,
@@ -303,6 +304,8 @@ pub struct RuntimePluginRegistryStats {
     pub runtime_asset_modules: usize,
     pub linkable_modules: usize,
     pub fetchers: usize,
+    pub video_frame_fetchers: usize,
+    pub video_frame_encoded_output_fetchers: usize,
     pub decoders: usize,
     pub processors: usize,
     pub cache_stores: usize,
@@ -561,6 +564,17 @@ impl RuntimePluginRegistry {
             }
             if module.capabilities.fetcher {
                 stats.fetchers += 1;
+                if module
+                    .routes
+                    .fetcher_source_kinds
+                    .iter()
+                    .any(|source_kind| is_video_frame_source_kind(source_kind))
+                {
+                    stats.video_frame_fetchers += 1;
+                }
+                if !module.routes.video_frame_output_mime_types.is_empty() {
+                    stats.video_frame_encoded_output_fetchers += 1;
+                }
             }
             if module.capabilities.decoder {
                 stats.decoders += 1;
@@ -969,6 +983,11 @@ pub fn validate_plugin_module(module: &RuntimePluginModule) -> RuntimeResult<()>
         &module.routes.fetcher_source_kinds,
         "fetcher source kind",
     )?;
+    validate_video_frame_output_routes(
+        module.capabilities.fetcher,
+        &module.routes.fetcher_source_kinds,
+        &module.routes.video_frame_output_mime_types,
+    )?;
     validate_decoder_routes(
         module.capabilities.decoder,
         &module.routes.decoder_mime_types,
@@ -986,6 +1005,45 @@ pub fn validate_plugin_module(module: &RuntimePluginModule) -> RuntimeResult<()>
         "cache store namespace",
     )?;
     Ok(())
+}
+
+fn validate_video_frame_output_routes(
+    fetcher_enabled: bool,
+    source_kinds: &[String],
+    output_mime_types: &[String],
+) -> RuntimeResult<()> {
+    let claims_video_frame = source_kinds
+        .iter()
+        .any(|source_kind| is_video_frame_source_kind(source_kind));
+    if !output_mime_types.is_empty() && (!fetcher_enabled || !claims_video_frame) {
+        return Err(RuntimeError::new(
+            "plugin",
+            false,
+            "runtime plugin video-frame output MIME contract requires a video-frame fetcher route",
+        ));
+    }
+    if claims_video_frame && output_mime_types.is_empty() {
+        return Err(RuntimeError::new(
+            "plugin",
+            false,
+            "runtime plugin video-frame fetcher route must declare output MIME contract",
+        ));
+    }
+    for mime_type in output_mime_types {
+        if normalize_route_claim(mime_type).is_empty() {
+            return Err(RuntimeError::new(
+                "plugin",
+                false,
+                "runtime plugin video-frame output MIME must not be empty",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn is_video_frame_source_kind(source_kind: &str) -> bool {
+    let normalized = normalize_route_claim(source_kind);
+    normalized == "video-frame" || normalized.starts_with("video-frame:")
 }
 
 fn validate_route_group(
@@ -1392,6 +1450,35 @@ mod tests {
             .register(second)
             .expect_err("duplicate runtime route must fail fast");
         assert_eq!(error.stage, "plugin");
+    }
+
+    #[test]
+    fn video_frame_fetcher_keeps_output_mime_contract() {
+        let mut registry = RuntimePluginRegistry::default();
+        let mut fetcher = RuntimePluginCapabilities::hot_path();
+        fetcher.fetcher = true;
+        registry
+            .register(
+                RuntimePluginModule::built_in("pixa.video_frame.test", fetcher).with_routes(
+                    RuntimePluginRoutes {
+                        fetcher_source_kinds: vec!["video-frame:platform".to_string()],
+                        video_frame_output_mime_types: vec!["image/png".to_string()],
+                        ..RuntimePluginRoutes::default()
+                    },
+                ),
+            )
+            .expect("video-frame fetcher should register");
+
+        let module = registry
+            .fetcher_for_source_kind("video-frame:platform")
+            .expect("video-frame fetcher should be discoverable");
+        assert_eq!(
+            module.routes.video_frame_output_mime_types,
+            vec!["image/png".to_string()]
+        );
+        let stats = registry.stats();
+        assert_eq!(stats.video_frame_fetchers, 1);
+        assert_eq!(stats.video_frame_encoded_output_fetchers, 1);
     }
 
     #[test]
