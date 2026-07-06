@@ -111,6 +111,55 @@ void main() {
     expect(plan.canUseSingleHostBinary, isTrue);
   });
 
+  test('runtime plugin plan requires video-frame output MIME contract', () {
+    final PixaRuntimePluginBuildPlan plan =
+        PixaRuntimePluginBuildPlan.fromManifestMaps(<Map<String, Object?>>[
+          _manifest(<Map<String, Object?>>[
+            <String, Object?>{
+              'moduleId': 'pixa.video_frame.platform',
+              'deployment': 'hostLinkedPluginModule',
+              'entrypointSymbol': 'pixa_platform_video_frame_plugin_init',
+              'implementationLanguage': 'swift/kotlin/c++',
+              'capabilities': <String>['fetcher'],
+              'fetcherSourceKinds': <String>['video-frame:platform'],
+              'videoFrameOutputMimeTypes': <String>['image/png'],
+              'videoFrameExact': true,
+            },
+          ]),
+        ]);
+
+    expect(plan.modules.single.fetcherSourceKinds, <String>{
+      'video-frame:platform',
+    });
+    expect(plan.modules.single.videoFrameOutputMimeTypes, <String>{
+      'image/png',
+    });
+    expect(plan.modules.single.videoFrameExact, isTrue);
+    expect(plan.modules.single.toJson()['videoFrameOutputMimeTypes'], <String>[
+      'image/png',
+    ]);
+
+    expect(
+      () => PixaRuntimePluginBuildPlan.fromManifestMaps(<Map<String, Object?>>[
+        _manifest(<Map<String, Object?>>[
+          <String, Object?>{
+            'moduleId': 'bad.video_frame',
+            'deployment': 'builtInHostModule',
+            'capabilities': <String>['fetcher'],
+            'fetcherSourceKinds': <String>['video-frame:bad'],
+          },
+        ]),
+      ]),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('video-frame output MIME'),
+        ),
+      ),
+    );
+  });
+
   test(
     'runtime plugin plan loads official optional JPEG and WebP ROI modules',
     () {

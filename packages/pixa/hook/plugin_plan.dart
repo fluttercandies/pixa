@@ -255,6 +255,9 @@ final class PixaRuntimePluginModulePlan {
     this.streamHandles = true,
     this.link = const PixaRuntimePluginLinkPlan.empty(),
     this.fetcherSourceKinds = const <String>{},
+    this.videoFrameOutputMimeTypes = const <String>{},
+    this.videoFrameNearest = true,
+    this.videoFrameExact = false,
     this.decoderFormatIds = const <String>{},
     this.decoderMimeTypes = const <String>{},
     this.decoderSignatures = const <PixaRuntimeDecoderSignaturePlan>[],
@@ -291,6 +294,12 @@ final class PixaRuntimePluginModulePlan {
         baseUri: baseUri,
       ),
       fetcherSourceKinds: _optionalStringSet(json, 'fetcherSourceKinds'),
+      videoFrameOutputMimeTypes: _optionalStringSet(
+        json,
+        'videoFrameOutputMimeTypes',
+      ),
+      videoFrameNearest: _optionalBool(json, 'videoFrameNearest') ?? true,
+      videoFrameExact: _optionalBool(json, 'videoFrameExact') ?? false,
       decoderFormatIds: _optionalStringSet(json, 'decoderFormatIds'),
       decoderMimeTypes: _optionalStringSet(json, 'decoderMimeTypes'),
       decoderSignatures: _optionalDecoderSignatures(json),
@@ -318,6 +327,9 @@ final class PixaRuntimePluginModulePlan {
   final bool streamHandles;
   final PixaRuntimePluginLinkPlan link;
   final Set<String> fetcherSourceKinds;
+  final Set<String> videoFrameOutputMimeTypes;
+  final bool videoFrameNearest;
+  final bool videoFrameExact;
   final Set<String> decoderFormatIds;
   final Set<String> decoderMimeTypes;
   final List<PixaRuntimeDecoderSignaturePlan> decoderSignatures;
@@ -365,6 +377,7 @@ final class PixaRuntimePluginModulePlan {
       );
     }
     _validateRouteClaim('fetcher', fetcherSourceKinds, 'fetcherSourceKinds');
+    _validateVideoFrameRoutes();
     _validateDecoderRouteClaims();
     _validateRouteClaim(
       'processor',
@@ -415,6 +428,10 @@ final class PixaRuntimePluginModulePlan {
       if (link.isNotEmpty) 'link': link.toJson(),
       if (fetcherSourceKinds.isNotEmpty)
         'fetcherSourceKinds': _sortedList(fetcherSourceKinds),
+      if (videoFrameOutputMimeTypes.isNotEmpty)
+        'videoFrameOutputMimeTypes': _sortedList(videoFrameOutputMimeTypes),
+      if (_claimsVideoFrameRoute) 'videoFrameNearest': videoFrameNearest,
+      if (_claimsVideoFrameRoute) 'videoFrameExact': videoFrameExact,
       if (decoderFormatIds.isNotEmpty)
         'decoderFormatIds': _sortedList(decoderFormatIds),
       if (decoderMimeTypes.isNotEmpty)
@@ -472,6 +489,48 @@ final class PixaRuntimePluginModulePlan {
     _validateNonEmptyRouteValues(decoderFormatIds, 'decoderFormatIds');
     if (hasDecoder) {
       decoderCapabilities.validate();
+    }
+  }
+
+  bool get _claimsVideoFrameRoute {
+    return fetcherSourceKinds.any(_isVideoFrameSourceKind);
+  }
+
+  void _validateVideoFrameRoutes() {
+    final bool hasVideoFrameRoute = _claimsVideoFrameRoute;
+    _validateNonEmptyRouteValues(
+      videoFrameOutputMimeTypes,
+      'videoFrameOutputMimeTypes',
+    );
+    if (!hasVideoFrameRoute) {
+      if (videoFrameOutputMimeTypes.isNotEmpty) {
+        throw StateError(
+          'Pixa runtime plugin video-frame output MIME contract requires a '
+          'video-frame fetcher source kind.',
+        );
+      }
+      return;
+    }
+    if (videoFrameOutputMimeTypes.isEmpty) {
+      throw StateError(
+        'Pixa runtime plugin video-frame output MIME contract is required for '
+        'video-frame fetcher routes.',
+      );
+    }
+    if (!videoFrameNearest && !videoFrameExact) {
+      throw StateError(
+        'Pixa runtime plugin video-frame route must support nearest or exact '
+        'frame selection.',
+      );
+    }
+    for (final String mimeType in videoFrameOutputMimeTypes) {
+      final String normalized = mimeType.split(';').first.trim().toLowerCase();
+      if (!_supportedVideoFrameOutputMimeTypes.contains(normalized)) {
+        throw StateError(
+          'Pixa runtime plugin video-frame output MIME "$mimeType" is not in '
+          'the supported display format matrix.',
+        );
+      }
     }
   }
 }
@@ -656,6 +715,48 @@ void _validateNonEmptyRouteValues(Set<String> claims, String field) {
     }
   }
 }
+
+bool _isVideoFrameSourceKind(String sourceKind) {
+  final String normalized = sourceKind.trim().toLowerCase();
+  return normalized == 'video-frame' || normalized.startsWith('video-frame:');
+}
+
+const Set<String> _supportedVideoFrameOutputMimeTypes = <String>{
+  'image/jpeg',
+  'image/jpg',
+  'image/pjpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/bmp',
+  'image/x-bmp',
+  'image/x-ms-bmp',
+  'image/vnd.wap.wbmp',
+  'image/x-icon',
+  'image/vnd.microsoft.icon',
+  'image/tiff',
+  'image/tiff-fx',
+  'image/x-portable-anymap',
+  'image/x-portable-bitmap',
+  'image/x-portable-graymap',
+  'image/x-portable-pixmap',
+  'image/qoi',
+  'image/x-qoi',
+  'image/x-tga',
+  'image/vnd.ms-dds',
+  'image/vnd.radiance',
+  'image/x-radiance',
+  'image/x-farbfeld',
+  'image/x-pcx',
+  'image/vnd.zbrush.pcx',
+  'image/sgi',
+  'image/x-sgi',
+  'image/x-rgb',
+  'image/x-xbitmap',
+  'image/x-xbm',
+  'image/x-xpixmap',
+  'image/x-xpm',
+};
 
 List<PixaRuntimeDecoderSignaturePlan> _optionalDecoderSignatures(
   Map<String, Object?> json,

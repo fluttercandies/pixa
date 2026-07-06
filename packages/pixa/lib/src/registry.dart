@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'contracts.dart';
+import 'image_format.dart';
 import 'observer.dart';
 
 /// Execution layer used by a plugin descriptor.
@@ -122,6 +123,9 @@ final class PixaRegistryArchitectureSnapshot {
     required this.decoders,
     required this.processors,
     required this.cacheStores,
+    required this.videoFrameBackends,
+    required this.videoFrameBackendsUseRuntimeOnly,
+    required this.videoFrameEncodedOutputBackends,
     required this.decoderSignatureRoutes,
     required this.decodersWithMetadataProbe,
     required this.decodersWithRegionDecode,
@@ -151,6 +155,15 @@ final class PixaRegistryArchitectureSnapshot {
 
   /// Cache-store descriptor count.
   final int cacheStores;
+
+  /// Video-frame backend descriptor count.
+  final int videoFrameBackends;
+
+  /// Whether all video-frame backends run through the runtime ABI.
+  final bool videoFrameBackendsUseRuntimeOnly;
+
+  /// Video-frame backends that return supported encoded image payloads.
+  final int videoFrameEncodedOutputBackends;
 
   /// Bounded-header decoder signature route count.
   final int decoderSignatureRoutes;
@@ -223,6 +236,9 @@ final class PixaRegistryArchitectureSnapshot {
       'decoders': decoders,
       'processors': processors,
       'cacheStores': cacheStores,
+      'videoFrameBackends': videoFrameBackends,
+      'videoFrameBackendsUseRuntimeOnly': videoFrameBackendsUseRuntimeOnly,
+      'videoFrameEncodedOutputBackends': videoFrameEncodedOutputBackends,
       'decoderSignatureRoutes': decoderSignatureRoutes,
       'decodersWithMetadataProbe': decodersWithMetadataProbe,
       'decodersWithRegionDecode': decodersWithRegionDecode,
@@ -414,6 +430,111 @@ abstract interface class PixaFetcherDescriptor implements PixaRegistryHandler {
 
   /// Source kinds handled by this fetcher, such as `s3` or `content`.
   Set<String> get sourceKinds;
+}
+
+/// Payload shape produced by a video-frame backend.
+enum PixaVideoFrameOutputKind {
+  /// Backend returns a regular encoded image, such as PNG or JPEG.
+  encodedImage,
+}
+
+/// Production capability contract for a video-frame backend.
+final class PixaVideoFrameBackendCapabilities {
+  /// Creates capabilities for a backend that returns encoded image bytes.
+  const PixaVideoFrameBackendCapabilities.encodedImage({
+    required this.outputMimeTypes,
+    this.nearestFrame = true,
+    this.exactFrame = false,
+    this.fileLocator = true,
+    this.networkLocator = false,
+    this.contentLocator = false,
+    this.stable = true,
+  }) : outputKind = PixaVideoFrameOutputKind.encodedImage;
+
+  /// Output payload kind.
+  final PixaVideoFrameOutputKind outputKind;
+
+  /// Supported encoded image MIME types returned by this backend.
+  final Set<String> outputMimeTypes;
+
+  /// Backend can select the nearest efficiently decodable frame.
+  final bool nearestFrame;
+
+  /// Backend can require the exact requested timestamp.
+  final bool exactFrame;
+
+  /// Backend accepts local filesystem locators.
+  final bool fileLocator;
+
+  /// Backend accepts HTTP/HTTPS locators through Pixa runtime scheduling.
+  final bool networkLocator;
+
+  /// Backend accepts platform content/library locators.
+  final bool contentLocator;
+
+  /// Backend has fixtures, limits and platform compatibility coverage.
+  final bool stable;
+
+  /// Whether output is a supported encoded image payload.
+  bool get encodedImageOutput {
+    return outputKind == PixaVideoFrameOutputKind.encodedImage;
+  }
+
+  /// True when the backend can run on production gallery hot paths.
+  bool get hotPathSafe {
+    return stable &&
+        (nearestFrame || exactFrame) &&
+        (fileLocator || networkLocator || contentLocator) &&
+        encodedImageOutput &&
+        outputMimeTypes.isNotEmpty;
+  }
+}
+
+/// Explicit video-frame fetcher descriptor.
+abstract interface class PixaVideoFrameBackendDescriptor
+    implements PixaFetcherDescriptor {
+  /// Optional backend route. `null` claims the default `video-frame` route.
+  String? get backendId;
+
+  /// Video-frame extraction capabilities.
+  PixaVideoFrameBackendCapabilities get capabilities;
+}
+
+/// Runtime ABI video-frame backend descriptor.
+final class PixaRuntimeVideoFrameBackendDescriptor
+    implements PixaVideoFrameBackendDescriptor, PixaRuntimeDescriptor {
+  /// Creates a runtime video-frame backend descriptor.
+  const PixaRuntimeVideoFrameBackendDescriptor({
+    required this.id,
+    required this.runtime,
+    this.backendId,
+    this.capabilities = const PixaVideoFrameBackendCapabilities.encodedImage(
+      outputMimeTypes: <String>{'image/png'},
+    ),
+  });
+
+  @override
+  final String id;
+
+  @override
+  final String? backendId;
+
+  @override
+  PixaPluginExecutionKind get executionKind => PixaPluginExecutionKind.runtime;
+
+  @override
+  Set<String> get sourceKinds {
+    final String? normalized = _normalizeOptionalRouteClaim(backendId);
+    return <String>{
+      normalized == null ? 'video-frame' : 'video-frame:$normalized',
+    };
+  }
+
+  @override
+  final PixaVideoFrameBackendCapabilities capabilities;
+
+  @override
+  final PixaRuntimeContract runtime;
 }
 
 /// Fetcher descriptor with an explicit Dart plugin handler.
@@ -645,6 +766,13 @@ final class PixaRegistry {
   List<PixaFetcherDescriptor> get fetchers =>
       List<PixaFetcherDescriptor>.unmodifiable(_fetchers.values);
 
+  /// Registered video-frame backends.
+  List<PixaVideoFrameBackendDescriptor> get videoFrameBackends {
+    return List<PixaVideoFrameBackendDescriptor>.unmodifiable(
+      _fetchers.values.whereType<PixaVideoFrameBackendDescriptor>(),
+    );
+  }
+
   /// Returns the fetcher descriptor registered for [sourceKind], if any.
   PixaFetcherDescriptor? fetcherForSourceKind(String sourceKind) {
     final String? ownerId =
@@ -830,6 +958,17 @@ final class PixaRegistry {
       decoders: _decoders.length,
       processors: _processors.length,
       cacheStores: _cacheStores.length,
+      videoFrameBackends: videoFrameBackends.length,
+      videoFrameBackendsUseRuntimeOnly: videoFrameBackends.every(
+        (PixaVideoFrameBackendDescriptor backend) =>
+            backend.executionKind == PixaPluginExecutionKind.runtime,
+      ),
+      videoFrameEncodedOutputBackends: videoFrameBackends
+          .where(
+            (PixaVideoFrameBackendDescriptor backend) =>
+                backend.capabilities.encodedImageOutput,
+          )
+          .length,
       decoderSignatureRoutes: _decoders.values.fold<int>(
         0,
         (int count, PixaDecoderDescriptor decoder) =>
@@ -876,6 +1015,7 @@ final class PixaRegistry {
   /// Registers a fetcher descriptor.
   void registerFetcher(PixaFetcherDescriptor fetcher) {
     _validateExecutionContract(fetcher, fetcher.executionKind, 'fetcher');
+    _validateVideoFrameFetcher(fetcher);
     _putUnique(_fetchers, fetcher, 'fetcher');
     for (final String sourceKind in fetcher.sourceKinds) {
       _claim(_fetcherSourceKinds, sourceKind, fetcher.id, 'source kind');
@@ -988,6 +1128,68 @@ void _validateDecoderCapabilities(PixaDecoderDescriptor decoder) {
       'input with owned output buffers.',
     );
   }
+}
+
+void _validateVideoFrameFetcher(PixaFetcherDescriptor fetcher) {
+  final Set<String> normalizedKinds = fetcher.sourceKinds
+      .map(_normalizeRouteClaim)
+      .where((String value) => value.isNotEmpty)
+      .toSet();
+  final bool claimsVideoFrame = normalizedKinds.any(_isVideoFrameSourceKind);
+  if (!claimsVideoFrame) {
+    return;
+  }
+  if (fetcher is! PixaVideoFrameBackendDescriptor) {
+    throw StateError(
+      'Pixa video-frame backend routes require a video-frame backend '
+      'descriptor.',
+    );
+  }
+  if (fetcher.executionKind != PixaPluginExecutionKind.runtime ||
+      fetcher is! PixaRuntimeDescriptor) {
+    throw StateError(
+      'Pixa video-frame backend "${fetcher.id}" must use the runtime ABI.',
+    );
+  }
+  if (!normalizedKinds.every(_isVideoFrameSourceKind)) {
+    throw StateError(
+      'Pixa video-frame backend "${fetcher.id}" must not mix video-frame '
+      'routes with other fetcher source kinds.',
+    );
+  }
+  final String expected = _expectedVideoFrameSourceKind(fetcher.backendId);
+  if (!normalizedKinds.contains(expected)) {
+    throw StateError(
+      'Pixa video-frame backend "${fetcher.id}" must claim source kind '
+      '"$expected".',
+    );
+  }
+  final PixaVideoFrameBackendCapabilities capabilities = fetcher.capabilities;
+  if (!capabilities.hotPathSafe) {
+    throw StateError(
+      'Pixa video-frame backend "${fetcher.id}" must be stable, support at '
+      'least one locator and frame selection mode, and declare encoded output.',
+    );
+  }
+  for (final String mimeType in capabilities.outputMimeTypes) {
+    final String normalized = _normalizeMimeType(mimeType);
+    if (normalized.isEmpty ||
+        pixaImageFormatDescriptorForMimeType(normalized) == null) {
+      throw StateError(
+        'Pixa video-frame backend "${fetcher.id}" declares unsupported '
+        'output MIME type "$mimeType".',
+      );
+    }
+  }
+}
+
+bool _isVideoFrameSourceKind(String sourceKind) {
+  return sourceKind == 'video-frame' || sourceKind.startsWith('video-frame:');
+}
+
+String _expectedVideoFrameSourceKind(String? backendId) {
+  final String? normalized = _normalizeOptionalRouteClaim(backendId);
+  return normalized == null ? 'video-frame' : 'video-frame:$normalized';
 }
 
 void _putUnique<T extends PixaRegistryHandler>(
@@ -1130,6 +1332,11 @@ String _normalizeMimeType(String mimeType) {
 
 String _normalizeRouteClaim(String value) {
   return value.trim().toLowerCase();
+}
+
+String? _normalizeOptionalRouteClaim(String? value) {
+  final String? normalized = value?.trim().toLowerCase();
+  return normalized == null || normalized.isEmpty ? null : normalized;
 }
 
 extension on String {

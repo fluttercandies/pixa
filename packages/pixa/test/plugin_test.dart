@@ -117,6 +117,63 @@ void main() {
     expect(contract.implementationLanguage, 'zig');
   });
 
+  test(
+    'PixaRegistry requires explicit runtime video-frame backend contract',
+    () {
+      final PixaRegistry registry = PixaRegistry();
+
+      expect(
+        () => registry.registerFetcher(
+          const _FetcherDescriptor(
+            id: 'generic-video-frame',
+            sourceKinds: <String>{'video-frame:platform'},
+          ),
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (StateError error) => error.message,
+            'message',
+            contains('video-frame backend'),
+          ),
+        ),
+      );
+
+      const PixaRuntimeVideoFrameBackendDescriptor descriptor =
+          PixaRuntimeVideoFrameBackendDescriptor(
+            id: 'platform-video-frame',
+            backendId: 'platform',
+            runtime: PixaRuntimeContract.hostLinkedPluginModule(
+              moduleId: 'pixa.video_frame.platform',
+              entrypointSymbol: 'pixa_platform_video_frame_plugin_init',
+              implementationLanguage: 'swift/kotlin/c++',
+            ),
+            capabilities: PixaVideoFrameBackendCapabilities.encodedImage(
+              outputMimeTypes: <String>{'image/png'},
+              exactFrame: true,
+              fileLocator: true,
+              networkLocator: true,
+            ),
+          );
+
+      registry.registerFetcher(descriptor);
+
+      expect(registry.videoFrameBackends, <PixaVideoFrameBackendDescriptor>[
+        descriptor,
+      ]);
+      expect(registry.fetcherForSourceKind('video-frame:PLATFORM'), descriptor);
+      expect(descriptor.sourceKinds, <String>{'video-frame:platform'});
+      expect(descriptor.capabilities.outputMimeTypes, <String>{'image/png'});
+      expect(descriptor.capabilities.encodedImageOutput, isTrue);
+
+      final PixaRegistryArchitectureSnapshot snapshot = registry
+          .architectureSnapshot();
+      expect(snapshot.videoFrameBackends, 1);
+      expect(snapshot.videoFrameBackendsUseRuntimeOnly, isTrue);
+      expect(snapshot.videoFrameEncodedOutputBackends, 1);
+      expect(snapshot.toJson()['videoFrameBackends'], 1);
+    },
+  );
+
   test('PixaRequest plugin execution policy is explicit variant material', () {
     final PixaRequest runtimeOnly = PixaRequest.network(
       'https://images.example.test/a.gif',
