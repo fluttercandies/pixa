@@ -176,6 +176,60 @@ void main() {
     expect(avgMicros, lessThan(maxAvgMicros));
   });
 
+  test('request cache key memoized hot path benchmark', () {
+    final int iterations = _envInt('PIXA_BENCH_REQUEST_KEY_ITERS', 200000);
+    final int maxAvgNs = _envInt('PIXA_BENCH_REQUEST_KEY_MAX_AVG_NS', 350);
+    final PixaRequest request =
+        PixaRequest.network(
+          'https://images.example.test/gallery/full.jpg?token=secret&sig=hidden',
+          headers: const <String, String>{
+            'Authorization': 'Bearer private-token',
+            'Accept': 'image/webp,image/*,*/*',
+          },
+          targetSize: const PixaTargetSize(width: 480, height: 320),
+          cachePolicy: const PixaCachePolicy.public(maxAge: Duration(days: 7)),
+          retryPolicy: const PixaRetryPolicy.exponential(maxAttempts: 3),
+          decoderOptions: const <String, Object?>{
+            'displayBackend': 'engine',
+            'formatId': 'jpeg',
+          },
+        ).copyWith(
+          processors: <String>[
+            PixaProcessors.resize(
+              width: 480,
+              height: 320,
+              mode: PixaResizeMode.exact,
+            ),
+            PixaProcessors.fastBlur(0.8),
+          ],
+        );
+
+    final Object cacheKey = request.cacheKey;
+    final Object encodedCacheKey = request.encodedCacheKey;
+    var checksum = 0;
+    final Stopwatch stopwatch = Stopwatch()..start();
+    for (var iteration = 0; iteration < iterations; iteration++) {
+      final Object current = request.cacheKey;
+      final Object encoded = request.encodedCacheKey;
+      checksum = (checksum + current.hashCode + encoded.hashCode) & 0x7fffffff;
+      if (!identical(current, cacheKey) ||
+          !identical(encoded, encodedCacheKey)) {
+        fail('PixaRequest cache keys must remain memoized per request object.');
+      }
+    }
+    stopwatch.stop();
+
+    final int reads = iterations * 2;
+    final int totalMicros = stopwatch.elapsedMicroseconds;
+    final double avgNs = totalMicros * 1000 / reads;
+    // ignore: avoid_print
+    print(
+      'request_cache_key_memoized_hot_path,$reads,$totalMicros,'
+      '${avgNs.toStringAsFixed(1)},$checksum',
+    );
+    expect(avgNs, lessThan(maxAvgNs));
+  });
+
   test('flutter engine decode benchmark', () async {
     final int iterations = _envInt('PIXA_BENCH_DECODE_ITERS', 500);
     final Uint8List bytes = _minimalGif();

@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-const List<_BenchmarkCommand> _commands = <_BenchmarkCommand>[
+List<_BenchmarkCommand> _commands() => <_BenchmarkCommand>[
   _BenchmarkCommand(
     source: 'rust-core',
     executable: 'cargo',
@@ -32,13 +32,15 @@ const List<_BenchmarkCommand> _commands = <_BenchmarkCommand>[
   ),
   _BenchmarkCommand(
     source: 'flutter',
-    executable: 'melos',
+    executable: Platform.resolvedExecutable,
     arguments: <String>[
+      'run',
+      'melos',
       'exec',
       '--scope=pixa',
       '--concurrency=1',
       '--',
-      'flutter',
+      _flutterExecutable(),
       'test',
       'benchmark/predictive_prefetch_benchmark_test.dart',
     ],
@@ -73,6 +75,7 @@ const Map<String, List<String>> _requiredCoverage = <String, List<String>>{
     'runtime_format_decode_xpm_rgba',
   ],
   'scroll prefetch': <String>['scroll_prefetch_planning'],
+  'request key hot path': <String>['request_cache_key_memoized_hot_path'],
   'animated image': <String>['flutter_animated_gif_frames'],
   'runtime ABI overhead': <String>['runtime_small_fnv1a64_32b'],
 };
@@ -104,6 +107,7 @@ const Map<String, String> _smokeEnvironment = <String, String>{
   'PIXA_BENCH_PREFETCH_ITERS': '8',
   'PIXA_BENCH_PREFETCH_VISIBLE': '120',
   'PIXA_BENCH_PREFETCH_ITEMS': '2000',
+  'PIXA_BENCH_REQUEST_KEY_ITERS': '50000',
   'PIXA_BENCH_DECODE_ITERS': '20',
   'PIXA_BENCH_ANIMATED_ITERS': '10',
 };
@@ -124,7 +128,7 @@ void main(List<String> args) {
   };
   final Map<String, List<String>> coverage = _coverageFor(options);
 
-  for (final _BenchmarkCommand command in _commands) {
+  for (final _BenchmarkCommand command in _commands()) {
     stdout.writeln('Running ${command.source} benchmark...');
     final ProcessResult result = Process.runSync(
       command.executable,
