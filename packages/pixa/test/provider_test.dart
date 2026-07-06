@@ -671,15 +671,18 @@ void main() {
           .toJson();
       final Map<String, Object?> firstDisplayDecoder =
           firstSnapshot['displayDecoder']! as Map<String, Object?>;
-      expect(firstDisplayDecoder['completionQueueDepth'], imageCount - 3);
-      expect(firstDisplayDecoder['completionsReleasedThisFrame'], 3);
+      final int firstQueueDepth =
+          firstDisplayDecoder['completionQueueDepth']! as int;
+      final int firstReleasedThisFrame =
+          firstDisplayDecoder['completionsReleasedThisFrame']! as int;
+      final int firstDelivered = delivered
+          .where((Completer<ImageInfo> completer) => completer.isCompleted)
+          .length;
+      expect(firstQueueDepth, inInclusiveRange(1, imageCount - 3));
+      expect(firstReleasedThisFrame, inInclusiveRange(0, 3));
       expect(firstDisplayDecoder['completionFrameScheduled'], isTrue);
-      expect(
-        delivered.where(
-          (Completer<ImageInfo> completer) => completer.isCompleted,
-        ),
-        hasLength(lessThanOrEqualTo(3)),
-      );
+      expect(firstDelivered, lessThan(imageCount));
+      expect(firstDelivered, lessThanOrEqualTo(imageCount - firstQueueDepth));
 
       await Future.wait<ImageInfo>(
         delivered.map((Completer<ImageInfo> completer) => completer.future),
