@@ -27,10 +27,6 @@ jobs:
           rustup default stable
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked
-      - name: Install Melos
-        run: dart pub global activate melos 8.1.0
-      - name: Add Pub cache bin
-        run: echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
       - name: Install root dependencies
         run: dart pub get
       - name: Guard

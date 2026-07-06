@@ -13,7 +13,8 @@ Future<void> main(List<String> args) async {
   }
   probe.createSync(recursive: true);
 
-  await _run(root, 'flutter', <String>[
+  final String flutter = _flutterExecutable();
+  await _run(root, flutter, <String>[
     'create',
     '--platforms=$platform',
     '--project-name',
@@ -23,12 +24,13 @@ Future<void> main(List<String> args) async {
     probe.path,
   ]);
   _writeProbeApp(root, probe, options);
-  await _run(probe, 'flutter', <String>['pub', 'get']);
-  await _run(probe, 'flutter', _buildCommand(platform));
+  await _run(probe, flutter, <String>['pub', 'get']);
+  await _run(probe, flutter, _buildCommand(platform));
   if (options.runSelfCheck) {
     final Map<String, String> environment = options.selfCheckEnvironment(root);
     await _runSelfCheck(
       probe,
+      flutter,
       _selfCheckCommand(options.deviceId),
       environment: environment,
       reportPath: environment['PIXA_PLATFORM_SELF_CHECK_REPORT'],
@@ -725,11 +727,12 @@ Future<void> _run(
 
 Future<void> _runSelfCheck(
   Directory workingDirectory,
+  String executable,
   List<String> arguments, {
   required Map<String, String> environment,
   required String? reportPath,
 }) async {
-  stdout.writeln('> flutter ${arguments.join(' ')}');
+  stdout.writeln('> $executable ${arguments.join(' ')}');
   if (reportPath != null && reportPath.trim().isNotEmpty) {
     final File staleReport = File(reportPath);
     if (staleReport.existsSync()) {
@@ -737,7 +740,7 @@ Future<void> _runSelfCheck(
     }
   }
   final Process process = await Process.start(
-    'flutter',
+    executable,
     arguments,
     workingDirectory: workingDirectory.path,
     environment: environment,
@@ -757,7 +760,7 @@ Future<void> _runSelfCheck(
   await stdoutDone;
   await stderrDone;
   if (exitCode != 0) {
-    throw ProcessException('flutter', arguments, 'command failed', exitCode);
+    throw ProcessException(executable, arguments, 'command failed', exitCode);
   }
   if (reportPath == null || reportPath.trim().isEmpty) {
     return;
@@ -783,4 +786,18 @@ String _extractSelfCheckReport(String output) {
       .substring(valueStart, valueEnd < 0 ? output.length : valueEnd)
       .trim();
   return utf8.decode(base64Url.decode(encoded));
+}
+
+String _flutterExecutable() {
+  final String? flutterRoot = Platform.environment['FLUTTER_ROOT'];
+  if (Platform.isWindows) {
+    if (flutterRoot != null && flutterRoot.trim().isNotEmpty) {
+      return '${flutterRoot.replaceAll(r'\', '/')}/bin/flutter.bat';
+    }
+    return 'flutter.bat';
+  }
+  if (flutterRoot != null && flutterRoot.trim().isNotEmpty) {
+    return '$flutterRoot/bin/flutter';
+  }
+  return 'flutter';
 }

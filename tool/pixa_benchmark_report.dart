@@ -296,7 +296,7 @@ String _commandText(String executable, List<String> arguments) {
 
 String _flutterVersion() {
   final ProcessResult result =
-      Process.runSync('flutter', <String>['--version', '--machine']);
+      Process.runSync(_flutterExecutable(), <String>['--version', '--machine']);
   if (result.exitCode != 0) {
     return 'unavailable';
   }
@@ -309,6 +309,20 @@ String _flutterVersion() {
     final String text = (result.stdout as String).trim();
     return text.isEmpty ? 'unavailable' : text.replaceAll('\n', ' ');
   }
+}
+
+String _flutterExecutable() {
+  final String? flutterRoot = Platform.environment['FLUTTER_ROOT'];
+  if (Platform.isWindows) {
+    if (flutterRoot != null && flutterRoot.trim().isNotEmpty) {
+      return '${flutterRoot.replaceAll(r'\', '/')}/bin/flutter.bat';
+    }
+    return 'flutter.bat';
+  }
+  if (flutterRoot != null && flutterRoot.trim().isNotEmpty) {
+    return '$flutterRoot/bin/flutter';
+  }
+  return 'flutter';
 }
 
 final class _Options {

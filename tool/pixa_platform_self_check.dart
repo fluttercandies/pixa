@@ -5,10 +5,11 @@ Future<void> main(List<String> args) async {
   final String platform = _platformLabel();
   final String outputPath = _outputPath(root, args, platform);
   final Directory packageDir = Directory('${root.path}/packages/pixa');
+  final String flutter = _flutterExecutable();
 
   await _run(
     packageDir,
-    'flutter',
+    flutter,
     <String>[
       'test',
       'test/platform_self_check_smoke_test.dart',
@@ -61,6 +62,20 @@ String _platformLabel() {
     return 'linux';
   }
   return Platform.operatingSystem;
+}
+
+String _flutterExecutable() {
+  final String? flutterRoot = Platform.environment['FLUTTER_ROOT'];
+  if (Platform.isWindows) {
+    if (flutterRoot != null && flutterRoot.trim().isNotEmpty) {
+      return '${flutterRoot.replaceAll(r'\', '/')}/bin/flutter.bat';
+    }
+    return 'flutter.bat';
+  }
+  if (flutterRoot != null && flutterRoot.trim().isNotEmpty) {
+    return '$flutterRoot/bin/flutter';
+  }
+  return 'flutter';
 }
 
 Future<void> _run(

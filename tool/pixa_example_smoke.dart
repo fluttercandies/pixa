@@ -13,10 +13,12 @@ Future<void> main(List<String> args) async {
     throw StateError('Missing gallery example: ${example.path}');
   }
 
-  await _run(example, 'flutter', <String>['pub', 'get']);
-  await _run(example, 'flutter', _buildCommand(options));
+  final String flutter = _flutterExecutable();
+  await _run(example, flutter, <String>['pub', 'get']);
+  await _run(example, flutter, _buildCommand(options));
   await _runSmoke(
     example,
+    flutter,
     _testCommand(options),
     environment: options.environment(root),
     reportPath: options.reportPath(root),
@@ -154,17 +156,18 @@ Future<void> _run(
 
 Future<void> _runSmoke(
   Directory workingDirectory,
+  String executable,
   List<String> arguments, {
   required Map<String, String> environment,
   required String reportPath,
 }) async {
-  stdout.writeln('> flutter ${arguments.join(' ')}');
+  stdout.writeln('> $executable ${arguments.join(' ')}');
   final File staleReport = File(reportPath);
   if (staleReport.existsSync()) {
     staleReport.deleteSync();
   }
   final Process process = await Process.start(
-    'flutter',
+    executable,
     arguments,
     workingDirectory: workingDirectory.path,
     environment: environment,
@@ -184,7 +187,7 @@ Future<void> _runSmoke(
   await stdoutDone;
   await stderrDone;
   if (exitCode != 0) {
-    throw ProcessException('flutter', arguments, 'command failed', exitCode);
+    throw ProcessException(executable, arguments, 'command failed', exitCode);
   }
   final File report = File(reportPath);
   if (report.existsSync() && report.lengthSync() > 0) {
@@ -206,6 +209,20 @@ String _extractSmokeReport(String output) {
       .substring(valueStart, valueEnd < 0 ? output.length : valueEnd)
       .trim();
   return utf8.decode(base64Url.decode(encoded));
+}
+
+String _flutterExecutable() {
+  final String? flutterRoot = Platform.environment['FLUTTER_ROOT'];
+  if (Platform.isWindows) {
+    if (flutterRoot != null && flutterRoot.trim().isNotEmpty) {
+      return '${flutterRoot.replaceAll(r'\', '/')}/bin/flutter.bat';
+    }
+    return 'flutter.bat';
+  }
+  if (flutterRoot != null && flutterRoot.trim().isNotEmpty) {
+    return '$flutterRoot/bin/flutter';
+  }
+  return 'flutter';
 }
 
 String _defaultDeviceKind(String platform) {
