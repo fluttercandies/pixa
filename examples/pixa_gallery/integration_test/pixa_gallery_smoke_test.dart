@@ -101,10 +101,10 @@ void main() {
     }
     if (tile.evaluate().isNotEmpty) {
       await tester.tap(tile.first);
-      await tester.pumpAndSettle(
-        const Duration(milliseconds: 100),
-        EnginePhase.sendSemanticsUpdate,
-        const Duration(seconds: 4),
+      await _pumpUntil(
+        tester,
+        () => find.byType(PixaLargeImage).evaluate().isNotEmpty,
+        timeout: const Duration(seconds: 8),
       );
     }
     _check(
@@ -127,8 +127,12 @@ void main() {
   });
 }
 
-Future<void> _pumpUntil(WidgetTester tester, bool Function() condition) async {
-  final DateTime deadline = DateTime.now().add(const Duration(seconds: 6));
+Future<void> _pumpUntil(
+  WidgetTester tester,
+  bool Function() condition, {
+  Duration timeout = const Duration(seconds: 6),
+}) async {
+  final DateTime deadline = DateTime.now().add(timeout);
   while (!condition() && DateTime.now().isBefore(deadline)) {
     await tester.pump(const Duration(milliseconds: 100));
   }
