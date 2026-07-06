@@ -201,19 +201,20 @@ void main() {
         'pixa-plugin-plan-',
       );
       addTearDown(() => temp.deleteSync(recursive: true));
-      final Directory userDirectory = Directory('${temp.path}/user')
-        ..createSync();
-      File('${userDirectory.path}/b.json').writeAsStringSync(
+      final Directory userDirectory = Directory.fromUri(
+        temp.uri.resolve('user/'),
+      )..createSync();
+      File.fromUri(userDirectory.uri.resolve('b.json')).writeAsStringSync(
         _manifestText(moduleId: 'third.party.b', capability: 'processor'),
       );
-      File('${userDirectory.path}/a.json').writeAsStringSync(
+      File.fromUri(userDirectory.uri.resolve('a.json')).writeAsStringSync(
         _manifestText(
           moduleId: 'third.party.a',
           capability: 'fetcher',
           linkSearchPath: 'runtime/lib',
         ),
       );
-      final File core = File('${temp.path}/core.json')
+      final File core = File.fromUri(temp.uri.resolve('core.json'))
         ..writeAsStringSync('{"schema":1,"modules":[]}');
 
       final PixaRuntimePluginBuildPlan plan = PixaRuntimePluginBuildPlan.load(
@@ -228,7 +229,7 @@ void main() {
         <String>['third.party.a', 'third.party.b'],
       );
       expect(plan.modules.first.link.searchPaths, <String>[
-        _joinPath(userDirectory.path, 'runtime', 'lib'),
+        userDirectory.uri.resolve('runtime/lib').toFilePath(),
       ]);
       expect(plan.dependencies, hasLength(3));
     },
@@ -388,10 +389,6 @@ void main() {
       ),
     );
   });
-}
-
-String _joinPath(String first, String second, String third) {
-  return <String>[first, second, third].join(Platform.pathSeparator);
 }
 
 Map<String, Object?> _manifest(List<Map<String, Object?>> modules) {

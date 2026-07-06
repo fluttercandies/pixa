@@ -57,7 +57,12 @@ Future<void> main(List<String> args) async {
     );
     environment['PIXA_PLUGIN_PLAN'] = pluginPlanOutput.toFilePath();
     _configureRustToolchainEnvironment(environment);
-    _configureNativeRoiEnvironment(environment, pluginPlan);
+    _configureNativeRoiEnvironment(
+      environment,
+      pluginPlan,
+      targetTriple: targetTriple,
+      outputDirectory: input.outputDirectory,
+    );
     _configureAppleCompileEnvironment(
       environment,
       input.config.code,
@@ -65,11 +70,7 @@ Future<void> main(List<String> args) async {
     );
     _configureCrossCompileEnvironment(environment, targetTriple);
     _configureReleaseLinkingEnvironment(environment, targetTriple);
-    _clearStaleAndroidTurboJpegCmakeCaches(
-      rustWorkspace,
-      targetTriple,
-      cargoFeatures,
-    );
+    _clearStaleTurboJpegCmakeCaches(rustWorkspace, targetTriple, cargoFeatures);
     final String cargo = _cargoExecutable(environment);
 
     final ProcessResult result = await Process.run(
@@ -185,14 +186,60 @@ Set<String> _cargoFeatures(PixaRuntimePluginBuildPlan pluginPlan) {
 
 void _configureNativeRoiEnvironment(
   Map<String, String> environment,
-  PixaRuntimePluginBuildPlan pluginPlan,
-) {
+  PixaRuntimePluginBuildPlan pluginPlan, {
+  required String? targetTriple,
+  required Uri outputDirectory,
+}) {
   final Set<String> features = _cargoFeatures(pluginPlan);
   if (features.contains('jpeg-turbo-roi')) {
     environment['TURBOJPEG_SOURCE'] = 'vendor';
     environment['TURBOJPEG_STATIC'] = '1';
     _configureWindowsNasmEnvironment(environment);
+    _configureWindowsTurboJpegCmakeEnvironment(
+      environment,
+      targetTriple,
+      outputDirectory,
+    );
   }
+}
+
+void _configureWindowsTurboJpegCmakeEnvironment(
+  Map<String, String> environment,
+  String? targetTriple,
+  Uri outputDirectory,
+) {
+  final String? processor = pixaWindowsTurboJpegCmakeSystemProcessor(
+    targetTriple,
+  );
+  if (processor == null || targetTriple == null) {
+    return;
+  }
+  final File toolchain = File.fromUri(
+    outputDirectory.resolve('pixa_windows_turbojpeg_toolchain.cmake'),
+  );
+  toolchain.parent.createSync(recursive: true);
+  toolchain.writeAsStringSync(pixaWindowsTurboJpegCmakeToolchain(processor));
+  _setTargetCmakeEnvironment(
+    environment,
+    targetTriple,
+    'CMAKE_TOOLCHAIN_FILE',
+    toolchain.path,
+  );
+}
+
+String? pixaWindowsTurboJpegCmakeSystemProcessor(String? targetTriple) {
+  return switch (targetTriple) {
+    'x86_64-pc-windows-msvc' => 'AMD64',
+    'i686-pc-windows-msvc' => 'X86',
+    'aarch64-pc-windows-msvc' => 'ARM64',
+    _ => null,
+  };
+}
+
+String pixaWindowsTurboJpegCmakeToolchain(String processor) {
+  return '''
+set(CMAKE_SYSTEM_PROCESSOR "$processor" CACHE STRING "Pixa target processor for libjpeg-turbo" FORCE)
+''';
 }
 
 void _configureWindowsNasmEnvironment(Map<String, String> environment) {
@@ -217,14 +264,12 @@ void _configureWindowsNasmEnvironment(Map<String, String> environment) {
   }
 }
 
-void _clearStaleAndroidTurboJpegCmakeCaches(
+void _clearStaleTurboJpegCmakeCaches(
   Uri rustWorkspace,
   String? targetTriple,
   Set<String> cargoFeatures,
 ) {
-  if (targetTriple == null ||
-      !targetTriple.contains('android') ||
-      !cargoFeatures.contains('jpeg-turbo-roi')) {
+  if (targetTriple == null || !cargoFeatures.contains('jpeg-turbo-roi')) {
     return;
   }
   final Directory buildRoot = Directory.fromUri(
@@ -249,11 +294,18 @@ void _clearStaleAndroidTurboJpegCmakeCaches(
     } on FileSystemException {
       cacheText = '';
     }
-    if (cacheText.contains('CMAKE_GENERATOR:INTERNAL=Ninja') &&
-        cacheText.contains('android.toolchain.cmake')) {
-      continue;
+    if (targetTriple.contains('android')) {
+      if (cacheText.contains('CMAKE_GENERATOR:INTERNAL=Ninja') &&
+          cacheText.contains('android.toolchain.cmake')) {
+        continue;
+      }
+      cmakeBuild.deleteSync(recursive: true);
+    } else if (targetTriple.contains('windows-msvc')) {
+      if (cacheText.contains('pixa_windows_turbojpeg_toolchain.cmake')) {
+        continue;
+      }
+      cmakeBuild.deleteSync(recursive: true);
     }
-    cmakeBuild.deleteSync(recursive: true);
   }
 }
 
