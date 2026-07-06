@@ -18,7 +18,8 @@ use crate::{
     runtime_decoder_for_format_id, runtime_decoder_for_mime_type,
     runtime_fetcher_executor_for_source_kind, runtime_fetcher_for_source_kind, runtime_process,
     RuntimeError, RuntimePluginDecodeRequest, RuntimePluginExecutorRef, RuntimePluginFetchRequest,
-    RuntimePluginModule, RuntimePluginProcessRequest, RuntimePluginVideoFrameSpec, RuntimeResult,
+    RuntimePluginModule, RuntimePluginOutput, RuntimePluginProcessRequest,
+    RuntimePluginVideoFrameSpec, RuntimeResult,
 };
 use image::GenericImageView;
 use std::borrow::Cow;
@@ -1912,6 +1913,9 @@ fn fetch_plugin_source(
             "runtime fetcher output exceeds max encoded byte limit",
         ));
     }
+    if video_frame.is_some() {
+        validate_video_frame_fetcher_output(&module, &output)?;
+    }
     emit_progress(
         progress_sink,
         RuntimeProgressEvent::new(RuntimeProgressStage::Fetch, "plugin.runtime.fetch.complete")
@@ -1924,6 +1928,52 @@ fn fetch_plugin_source(
         http_cache_metadata: None,
         not_modified: false,
     })
+}
+
+fn validate_video_frame_fetcher_output(
+    module: &RuntimePluginModule,
+    output: &RuntimePluginOutput,
+) -> RuntimeResult<()> {
+    let Some(mime_type) = output
+        .mime_type
+        .as_deref()
+        .map(normalize_mime_type)
+        .filter(|value| !value.is_empty())
+    else {
+        return Err(RuntimeError::new(
+            "fetch",
+            false,
+            format!(
+                "video-frame fetcher {} returned bytes without an output MIME",
+                module.module_id
+            ),
+        ));
+    };
+    let declared = module
+        .routes
+        .video_frame_output_mime_types
+        .iter()
+        .any(|declared| normalize_mime_type(declared) == mime_type);
+    if !declared {
+        return Err(RuntimeError::new(
+            "fetch",
+            false,
+            format!(
+                "video-frame fetcher output MIME {mime_type} is not declared by {}",
+                module.module_id
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_mime_type(mime_type: &str) -> String {
+    mime_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
 }
 
 fn video_frame_source_kind(backend: Option<&str>) -> Cow<'_, str> {
@@ -4573,7 +4623,7 @@ mod tests {
             RuntimePluginModule::built_in("pixa.video_frame.test", capabilities).with_routes(
                 RuntimePluginRoutes {
                     fetcher_source_kinds: vec!["video-frame:platform".to_string()],
-                    video_frame_output_mime_types: vec!["image/gif".to_string()],
+                    video_frame_output_mime_types: vec!["image/png".to_string()],
                     ..RuntimePluginRoutes::default()
                 },
             ),
@@ -4639,6 +4689,70 @@ mod tests {
         assert_eq!(observed[0].timestamp_micros, 1_500_000);
         assert!(observed[0].exact);
         assert_eq!(observed[0].backend.as_deref(), Some("platform"));
+        clear_plugin_registry_for_test();
+    }
+
+    #[test]
+    fn rejects_video_frame_output_mime_outside_contract() {
+        let _registry_guard = plugin_registry_test_guard();
+        clear_plugin_registry_for_test();
+        let mut capabilities = RuntimePluginCapabilities::hot_path();
+        capabilities.fetcher = true;
+        register_plugin_module_with_executor(
+            RuntimePluginModule::built_in("pixa.video_frame.test", capabilities).with_routes(
+                RuntimePluginRoutes {
+                    fetcher_source_kinds: vec!["video-frame:platform".to_string()],
+                    video_frame_output_mime_types: vec!["image/gif".to_string()],
+                    ..RuntimePluginRoutes::default()
+                },
+            ),
+            Arc::new(VideoFrameRuntimePluginExecutor::default()),
+        )
+        .expect("video frame runtime fetcher should register");
+
+        let mut request = video_frame_request("video-frame-bad-output-mime");
+        request.cache_mode = CacheMode::NoStore;
+
+        let error = load_image("", request, None)
+            .expect_err("video frame output outside its MIME contract must fail");
+
+        assert_eq!(error.stage, "fetch");
+        assert!(error
+            .message
+            .contains("video-frame fetcher output MIME image/png is not declared"));
+        clear_plugin_registry_for_test();
+    }
+
+    #[test]
+    fn rejects_video_frame_output_without_mime() {
+        let _registry_guard = plugin_registry_test_guard();
+        clear_plugin_registry_for_test();
+        let mut capabilities = RuntimePluginCapabilities::hot_path();
+        capabilities.fetcher = true;
+        register_plugin_module_with_executor(
+            RuntimePluginModule::built_in("pixa.video_frame.test", capabilities).with_routes(
+                RuntimePluginRoutes {
+                    fetcher_source_kinds: vec!["video-frame:platform".to_string()],
+                    video_frame_output_mime_types: vec!["image/png".to_string()],
+                    ..RuntimePluginRoutes::default()
+                },
+            ),
+            Arc::new(VideoFrameRuntimePluginExecutor {
+                output_mime: None,
+                ..VideoFrameRuntimePluginExecutor::default()
+            }),
+        )
+        .expect("video frame runtime fetcher should register");
+
+        let mut request = video_frame_request("video-frame-missing-output-mime");
+        request.cache_mode = CacheMode::NoStore;
+
+        let error = load_image("", request, None).expect_err("video frame output MIME is required");
+
+        assert_eq!(error.stage, "fetch");
+        assert!(error
+            .message
+            .contains("returned bytes without an output MIME"));
         clear_plugin_registry_for_test();
     }
 
@@ -6515,10 +6629,20 @@ mod tests {
         backend: Option<String>,
     }
 
-    #[derive(Default)]
     struct VideoFrameRuntimePluginExecutor {
         fetch_count: AtomicUsize,
         observed: Mutex<Vec<ObservedVideoFrameFetch>>,
+        output_mime: Option<&'static str>,
+    }
+
+    impl Default for VideoFrameRuntimePluginExecutor {
+        fn default() -> Self {
+            Self {
+                fetch_count: AtomicUsize::default(),
+                observed: Mutex::default(),
+                output_mime: Some("image/png"),
+            }
+        }
     }
 
     impl VideoFrameRuntimePluginExecutor {
@@ -6560,7 +6684,7 @@ mod tests {
             thread::sleep(Duration::from_millis(150));
             Ok(Some(RuntimePluginOutput::from_vec(
                 minimal_png(4, 4),
-                Some("image/png"),
+                self.output_mime,
             )))
         }
     }
