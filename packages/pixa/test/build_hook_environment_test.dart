@@ -32,6 +32,6 @@ void main() {
         '"Pixa target processor for libjpeg-turbo" FORCE)',
       ),
     );
-    expect(toolchain, isNot(contains('CMAKE_SYSTEM_NAME')));
+    expect(toolchain, contains('set(CMAKE_SYSTEM_NAME Windows)'));
   });
 }

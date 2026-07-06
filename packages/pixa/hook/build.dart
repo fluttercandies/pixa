@@ -238,6 +238,7 @@ String? pixaWindowsTurboJpegCmakeSystemProcessor(String? targetTriple) {
 
 String pixaWindowsTurboJpegCmakeToolchain(String processor) {
   return '''
+set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_SYSTEM_PROCESSOR "$processor" CACHE STRING "Pixa target processor for libjpeg-turbo" FORCE)
 ''';
 }
