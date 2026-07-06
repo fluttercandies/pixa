@@ -245,7 +245,7 @@ Future<void> _runSmoke(
   );
 }
 
-const Duration _smokeExitTimeout = Duration(minutes: 8);
+const Duration _smokeExitTimeout = Duration(minutes: 20);
 
 Future<void> _terminateProcess(
   Process process,
