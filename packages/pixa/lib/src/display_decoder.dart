@@ -1108,7 +1108,7 @@ final class _ImageCompletionGate {
     _frameFallbackTimer = null;
     _releasedThisFrame = 0;
     _pump();
-    if (_queue.isNotEmpty) {
+    if (_queue.isNotEmpty || _releasedThisFrame > 0) {
       _scheduleFrameReset();
     }
   }

@@ -467,6 +467,7 @@ void main() {
         maxImageCompletionsPerFrame: 1,
       ),
     );
+    await _waitForCompletionGateIdle();
 
     final Completer<void> firstDecodeReturned = Completer<void>();
     final Completer<void> secondDecodeReturned = Completer<void>();
@@ -537,9 +538,17 @@ void main() {
         image.dispose();
       }
     });
+    var listenersAttached = false;
+    addTearDown(() {
+      if (listenersAttached) {
+        firstCompleter.removeListener(firstListener);
+        secondCompleter.removeListener(secondListener);
+      }
+    });
 
     firstCompleter.addListener(firstListener);
     secondCompleter.addListener(secondListener);
+    listenersAttached = true;
     await Future.wait<void>(<Future<void>>[
       firstDecodeReturned.future,
       secondDecodeReturned.future,
@@ -565,7 +574,122 @@ void main() {
     addTearDown(secondInfo.dispose);
     firstCompleter.removeListener(firstListener);
     secondCompleter.removeListener(secondListener);
+    listenersAttached = false;
   });
+
+  test(
+    'PixaProvider gates burst image completions behind frame budget',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-completion-burst-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      await Pixa.configure(
+        PixaConfig(
+          cacheRootPath: cacheRoot.path,
+          decodeConcurrency: 12,
+          maxImageCompletionsPerFrame: 3,
+        ),
+      );
+      await _waitForCompletionGateIdle();
+
+      const int imageCount = 12;
+      final List<Completer<void>> decodeReturned =
+          List<Completer<void>>.generate(imageCount, (_) => Completer<void>());
+      final List<Completer<ImageInfo>> delivered =
+          List<Completer<ImageInfo>>.generate(
+            imageCount,
+            (_) => Completer<ImageInfo>(),
+          );
+      final List<ImageInfo> retainedImages = <ImageInfo>[];
+      addTearDown(() {
+        for (final ImageInfo image in retainedImages) {
+          image.dispose();
+        }
+      });
+
+      Future<ui.Codec> decodeAt(
+        int index,
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        final ui.Codec codec = await ui.instantiateImageCodec(_minimalGif());
+        decodeReturned[index].complete();
+        return codec;
+      }
+
+      final List<PixaProvider> providers = List<PixaProvider>.generate(
+        imageCount,
+        (int index) => PixaProvider(
+          request: PixaRequest(
+            source: PixaSource.custom(
+              'completion-burst-$index',
+              () async => _minimalGif(),
+            ),
+            cachePolicy: const PixaCachePolicy.noStore(),
+          ),
+        ),
+      );
+      final List<ImageStreamCompleter> completers =
+          List<ImageStreamCompleter>.generate(
+            imageCount,
+            (int index) => providers[index].loadImage(
+              providers[index],
+              (
+                ui.ImmutableBuffer buffer, {
+                ui.TargetImageSizeCallback? getTargetSize,
+              }) => decodeAt(index, buffer, getTargetSize: getTargetSize),
+            ),
+          );
+      final List<ImageStreamListener> listeners =
+          List<ImageStreamListener>.generate(imageCount, (int index) {
+            return ImageStreamListener((ImageInfo image, bool synchronousCall) {
+              if (!delivered[index].isCompleted) {
+                retainedImages.add(image);
+                delivered[index].complete(image);
+              } else {
+                image.dispose();
+              }
+            });
+          });
+      addTearDown(() {
+        for (var index = 0; index < imageCount; index += 1) {
+          completers[index].removeListener(listeners[index]);
+        }
+      });
+
+      for (var index = 0; index < imageCount; index += 1) {
+        completers[index].addListener(listeners[index]);
+      }
+      await Future.wait<void>(
+        decodeReturned.map((Completer<void> completer) => completer.future),
+      ).timeout(const Duration(seconds: 5));
+      await Future<void>.delayed(Duration.zero);
+
+      final Map<String, Object?> firstSnapshot = PixaDebugInspector.snapshot()
+          .toJson();
+      final Map<String, Object?> firstDisplayDecoder =
+          firstSnapshot['displayDecoder']! as Map<String, Object?>;
+      expect(firstDisplayDecoder['completionQueueDepth'], imageCount - 3);
+      expect(firstDisplayDecoder['completionsReleasedThisFrame'], 3);
+      expect(firstDisplayDecoder['completionFrameScheduled'], isTrue);
+      expect(
+        delivered.where(
+          (Completer<ImageInfo> completer) => completer.isCompleted,
+        ),
+        hasLength(lessThanOrEqualTo(3)),
+      );
+
+      await Future.wait<ImageInfo>(
+        delivered.map((Completer<ImageInfo> completer) => completer.future),
+      ).timeout(const Duration(seconds: 5));
+      final Map<String, Object?> drainedSnapshot = PixaDebugInspector.snapshot()
+          .toJson();
+      final Map<String, Object?> drainedDisplayDecoder =
+          drainedSnapshot['displayDecoder']! as Map<String, Object?>;
+      expect(drainedDisplayDecoder['completionQueueDepth'], 0);
+    },
+  );
 
   test(
     'PixaProvider rejects decode work when queued decode budget is full',
@@ -1345,6 +1469,22 @@ void main() {
 
     expect(image.request.lowRes, same(explicit));
   });
+}
+
+Future<void> _waitForCompletionGateIdle() async {
+  for (var attempt = 0; attempt < 12; attempt += 1) {
+    final Map<String, Object?> snapshot = PixaDebugInspector.snapshot()
+        .toJson();
+    final Map<String, Object?> displayDecoder =
+        snapshot['displayDecoder']! as Map<String, Object?>;
+    if (displayDecoder['completionQueueDepth'] == 0 &&
+        displayDecoder['completionFrameScheduled'] == false) {
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+  final Map<String, Object?> snapshot = PixaDebugInspector.snapshot().toJson();
+  throw StateError('Pixa completion gate did not become idle: $snapshot');
 }
 
 Uint8List _minimalGif() {
