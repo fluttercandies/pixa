@@ -132,6 +132,29 @@ void _configureNativeRoiEnvironment(
   if (features.contains('jpeg-turbo-roi')) {
     environment['TURBOJPEG_SOURCE'] = 'vendor';
     environment['TURBOJPEG_STATIC'] = '1';
+    _configureWindowsNasmEnvironment(environment);
+  }
+}
+
+void _configureWindowsNasmEnvironment(Map<String, String> environment) {
+  if (!Platform.isWindows) {
+    return;
+  }
+  final List<String> roots = <String>[
+    if (!_isUnset(environment['ProgramFiles'])) environment['ProgramFiles']!,
+    if (!_isUnset(environment['ProgramFiles(x86)']))
+      environment['ProgramFiles(x86)']!,
+  ];
+  final List<String> candidates = <String>[
+    for (final String root in roots) '$root\\NASM',
+    if (!_isUnset(environment['ChocolateyInstall']))
+      '${environment['ChocolateyInstall']}\\bin',
+    r'C:\ProgramData\chocolatey\bin',
+  ];
+  for (final String path in candidates) {
+    if (File('$path\\nasm.exe').existsSync()) {
+      _prependPath(environment, path);
+    }
   }
 }
 
