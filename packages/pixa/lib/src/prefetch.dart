@@ -17,6 +17,59 @@ typedef PixaPrefetchRunner =
       required PixaPrefetchTarget target,
     });
 
+/// Queue snapshot for predictive prefetch debug surfaces and benchmarks.
+final class PixaPredictivePrefetcherSnapshot {
+  /// Creates a predictive prefetch snapshot.
+  const PixaPredictivePrefetcherSnapshot({
+    required this.generation,
+    required this.active,
+    required this.inFlight,
+    required this.pending,
+    required this.currentPending,
+    required this.stalePending,
+    required this.recent,
+    required this.skippedPending,
+  });
+
+  /// Current viewport generation.
+  final int generation;
+
+  /// Active prefetch operations.
+  final int active;
+
+  /// In-flight dedupe keys.
+  final int inFlight;
+
+  /// Pending queued operations.
+  final int pending;
+
+  /// Pending operations that belong to the current generation.
+  final int currentPending;
+
+  /// Pending operations retained from older generations.
+  final int stalePending;
+
+  /// Recently completed dedupe keys.
+  final int recent;
+
+  /// Pending operations skipped because a newer viewport superseded them.
+  final int skippedPending;
+
+  /// JSON-like representation for debug UIs.
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'generation': generation,
+      'active': active,
+      'inFlight': inFlight,
+      'pending': pending,
+      'currentPending': currentPending,
+      'stalePending': stalePending,
+      'recent': recent,
+      'skippedPending': skippedPending,
+    };
+  }
+}
+
 /// Component-agnostic predictive prefetcher for scrollable galleries.
 final class PixaPredictivePrefetcher {
   /// Creates a predictive prefetcher.
@@ -58,8 +111,24 @@ final class PixaPredictivePrefetcher {
   final Set<String> _recent = <String>{};
   final List<String> _recentOrder = <String>[];
   final ListQueue<_QueuedPrefetch> _pending = ListQueue<_QueuedPrefetch>();
+  _PrefetchBatch? _pendingBatch;
   int _active = 0;
   int _generation = 0;
+  int _skippedPending = 0;
+
+  /// Captures current queue state for debug surfaces and benchmarks.
+  PixaPredictivePrefetcherSnapshot snapshot() {
+    return PixaPredictivePrefetcherSnapshot(
+      generation: _generation,
+      active: _active,
+      inFlight: _inFlight.length,
+      pending: _pending.length,
+      currentPending: _pending.length,
+      stalePending: 0,
+      recent: _recent.length,
+      skippedPending: _skippedPending,
+    );
+  }
 
   /// Prefetches around a visible index range.
   Future<void> prefetchAround({
@@ -88,7 +157,7 @@ final class PixaPredictivePrefetcher {
     final int first = firstVisibleIndex.clamp(0, itemCount - 1).toInt();
     final int last = lastVisibleIndex.clamp(0, itemCount - 1).toInt();
     final int generation = ++_generation;
-    _dropPendingFromPreviousGenerations(generation);
+    _discardPendingFromPreviousGeneration();
     final PixaPrefetchTarget effectiveTarget = target ?? this.target;
     final List<PixaRequest> requests = _plannedRequests(
       first,
@@ -155,6 +224,7 @@ final class PixaPredictivePrefetcher {
     int generation,
   ) {
     final _PrefetchBatch batch = _PrefetchBatch(requests.length);
+    _pendingBatch = batch;
     for (final PixaRequest request in requests) {
       final String key = _dedupeKeyFor(request, target);
       _pendingKeys.add(key);
@@ -177,9 +247,8 @@ final class PixaPredictivePrefetcher {
     while (_active < maxConcurrent && _pending.isNotEmpty) {
       final _QueuedPrefetch work = _pending.removeFirst();
       _pendingKeys.remove(work.key);
-      if (work.generation != _generation) {
-        work.batch.completeSkipped();
-        continue;
+      if (_pending.isEmpty) {
+        _pendingBatch = null;
       }
       _active++;
       _inFlight.add(work.key);
@@ -198,7 +267,7 @@ final class PixaPredictivePrefetcher {
       if (work.generation == _generation) {
         work.batch.completeOne(error: error, stackTrace: stackTrace);
       } else {
-        work.batch.completeSkipped();
+        work.batch.completeSkipped(1);
       }
     } finally {
       _inFlight.remove(work.key);
@@ -211,21 +280,16 @@ final class PixaPredictivePrefetcher {
     }
   }
 
-  void _dropPendingFromPreviousGenerations(int generation) {
+  void _discardPendingFromPreviousGeneration() {
     if (_pending.isEmpty) {
       return;
     }
-    final ListQueue<_QueuedPrefetch> retained = ListQueue<_QueuedPrefetch>();
-    while (_pending.isNotEmpty) {
-      final _QueuedPrefetch work = _pending.removeFirst();
-      if (work.generation == generation) {
-        retained.add(work);
-        continue;
-      }
-      _pendingKeys.remove(work.key);
-      work.batch.completeSkipped();
-    }
-    _pending.addAll(retained);
+    final int skipped = _pending.length;
+    _pendingBatch?.completeSkipped(skipped);
+    _skippedPending += skipped;
+    _pending.clear();
+    _pendingKeys.clear();
+    _pendingBatch = null;
   }
 
   Future<void> _run(
@@ -290,8 +354,12 @@ final class _PrefetchBatch {
 
   Future<void> get future => _completer.future;
 
-  void completeSkipped() {
-    _complete();
+  void completeSkipped(int count) {
+    if (count <= 0 || _completer.isCompleted) {
+      return;
+    }
+    _remaining -= count;
+    _finishIfComplete();
   }
 
   void completeOne({Object? error, StackTrace? stackTrace}) {
@@ -305,6 +373,10 @@ final class _PrefetchBatch {
       return;
     }
     _remaining--;
+    _finishIfComplete();
+  }
+
+  void _finishIfComplete() {
     if (_remaining > 0) {
       return;
     }

@@ -175,6 +175,69 @@ void main() {
   );
 
   test(
+    'predictive prefetcher discards stale pending generations without blocking current work',
+    () async {
+      final List<int> started = <int>[];
+      final Map<int, Completer<void>> completions = <int, Completer<void>>{};
+      final PixaPredictivePrefetcher prefetcher = PixaPredictivePrefetcher(
+        requestBuilder: _requestForIndex,
+        forwardItemCount: 4,
+        backwardItemCount: 0,
+        maxConcurrent: 1,
+        runPrefetch:
+            (PixaRequest request, {required PixaPrefetchTarget target}) {
+              final int index = _indexFromRequest(request);
+              started.add(index);
+              final Completer<void> completer = Completer<void>();
+              completions[index] = completer;
+              return completer.future;
+            },
+      );
+
+      final Future<void> first = prefetcher.prefetchAround(
+        firstVisibleIndex: 0,
+        lastVisibleIndex: 0,
+        itemCount: 80,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(started, <int>[1]);
+
+      final List<Future<void>> staleBatches = <Future<void>>[];
+      for (var firstVisible = 10; firstVisible < 30; firstVisible += 1) {
+        staleBatches.add(
+          prefetcher.prefetchAround(
+            firstVisibleIndex: firstVisible,
+            lastVisibleIndex: firstVisible,
+            itemCount: 80,
+          ),
+        );
+      }
+
+      final PixaPredictivePrefetcherSnapshot snapshot = prefetcher.snapshot();
+      expect(snapshot.active, 1);
+      expect(snapshot.currentPending, lessThanOrEqualTo(4));
+      expect(snapshot.stalePending, 0);
+      expect(snapshot.skippedPending, greaterThan(0));
+      expect(snapshot.pending, snapshot.currentPending);
+
+      completions.remove(1)!.complete();
+      await first;
+      await Future<void>.delayed(Duration.zero);
+
+      expect(started, isNot(contains(2)));
+      expect(started, contains(30));
+      while (completions.isNotEmpty) {
+        final List<int> activeIndexes = List<int>.of(completions.keys);
+        for (final int index in activeIndexes) {
+          completions.remove(index)!.complete();
+        }
+        await Future<void>.delayed(Duration.zero);
+      }
+      await Future.wait(staleBatches);
+    },
+  );
+
+  test(
     'predictive prefetcher skips in-flight and recently completed keys',
     () async {
       final List<int> started = <int>[];

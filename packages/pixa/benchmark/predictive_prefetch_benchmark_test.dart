@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -52,6 +53,76 @@ void main() {
       '${avgMicros.toStringAsFixed(1)},$scheduled',
     );
     expect(scheduled, greaterThan(0));
+  });
+
+  test('predictive scroll rapid-overlap planning benchmark', () async {
+    final int iterations = _envInt('PIXA_BENCH_PREFETCH_RAPID_ITERS', 240);
+    final int visibleCount = _envInt('PIXA_BENCH_PREFETCH_VISIBLE', 1000);
+    final int itemCount = _envInt('PIXA_BENCH_PREFETCH_ITEMS', 50_000);
+    final int maxAvgMicros = _envInt(
+      'PIXA_BENCH_PREFETCH_RAPID_MAX_AVG_MICROS',
+      8000,
+    );
+    final Completer<void> firstCompletion = Completer<void>();
+    final List<Future<void>> batches = <Future<void>>[];
+    var scheduled = 0;
+    final PixaPredictivePrefetcher prefetcher = PixaPredictivePrefetcher(
+      requestBuilder: (int index) => PixaRequest.network(
+        'https://images.example.test/gallery/$index.jpg',
+        targetSize: const PixaTargetSize(width: 160, height: 160),
+      ),
+      target: PixaPrefetchTarget.diskOnly,
+      forwardItemCount: 256,
+      backwardItemCount: 64,
+      maxConcurrent: 1,
+      recentCapacity: 4096,
+      runPrefetch: (PixaRequest request, {required PixaPrefetchTarget target}) {
+        scheduled += 1;
+        if (scheduled == 1) {
+          return firstCompletion.future;
+        }
+        return Future<void>.value();
+      },
+    );
+
+    batches.add(
+      prefetcher.prefetchAround(
+        firstVisibleIndex: 0,
+        lastVisibleIndex: visibleCount - 1,
+        itemCount: itemCount,
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    final Stopwatch stopwatch = Stopwatch()..start();
+    for (var iteration = 1; iteration <= iterations; iteration++) {
+      final int firstVisible = iteration * 37;
+      final int lastVisible = firstVisible + visibleCount - 1;
+      batches.add(
+        prefetcher.prefetchAround(
+          firstVisibleIndex: firstVisible,
+          lastVisibleIndex: lastVisible,
+          itemCount: itemCount,
+        ),
+      );
+    }
+    stopwatch.stop();
+
+    final PixaPredictivePrefetcherSnapshot snapshot = prefetcher.snapshot();
+    firstCompletion.complete();
+    await Future.wait(batches);
+
+    final int totalMicros = stopwatch.elapsedMicroseconds;
+    final double avgMicros = totalMicros / iterations;
+    // ignore: avoid_print
+    print(
+      'scroll_prefetch_rapid_overlap,$iterations,$totalMicros,'
+      '${avgMicros.toStringAsFixed(1)},$scheduled,'
+      '${snapshot.skippedPending},${snapshot.currentPending}',
+    );
+    expect(snapshot.skippedPending, greaterThan(0));
+    expect(snapshot.stalePending, 0);
+    expect(avgMicros, lessThan(maxAvgMicros));
   });
 
   test('flutter engine decode benchmark', () async {
