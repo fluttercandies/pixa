@@ -228,7 +228,7 @@ void main() {
         <String>['third.party.a', 'third.party.b'],
       );
       expect(plan.modules.first.link.searchPaths, <String>[
-        '${userDirectory.path}/runtime/lib',
+        _joinPath(userDirectory.path, 'runtime', 'lib'),
       ]);
       expect(plan.dependencies, hasLength(3));
     },
@@ -388,6 +388,10 @@ void main() {
       ),
     );
   });
+}
+
+String _joinPath(String first, String second, String third) {
+  return <String>[first, second, third].join(Platform.pathSeparator);
 }
 
 Map<String, Object?> _manifest(List<Map<String, Object?>> modules) {

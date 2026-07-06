@@ -28,8 +28,9 @@ use std::time::Duration;
 use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 use tower_service::Service;
 
-type DirectConnector = hyper_rustls::HttpsConnector<HttpConnector>;
-type DirectClient = Client<DirectConnector, Empty<Bytes>>;
+type DirectHttpClient = Client<HttpConnector, Empty<Bytes>>;
+type DirectHttpsConnector = hyper_rustls::HttpsConnector<HttpConnector>;
+type DirectHttpsClient = Client<DirectHttpsConnector, Empty<Bytes>>;
 type HttpProxyClient = Client<ProxiedHttpConnector, Empty<Bytes>>;
 type HttpsProxyConnector = hyper_rustls::HttpsConnector<Tunnel<HttpConnector>>;
 type HttpsProxyClient = Client<HttpsProxyConnector, Empty<Bytes>>;
@@ -38,7 +39,8 @@ static HTTP_TRANSPORT: OnceLock<Box<dyn RuntimeHttpTransport>> = OnceLock::new()
 
 #[derive(Clone)]
 enum HyperClient {
-    Direct(DirectClient),
+    DirectHttp(DirectHttpClient),
+    DirectHttps(DirectHttpsClient),
     HttpProxy(HttpProxyClient),
     HttpsProxy(HttpsProxyClient),
 }
@@ -49,7 +51,8 @@ impl HyperClient {
         request: Request<Empty<Bytes>>,
     ) -> Result<http::Response<hyper::body::Incoming>, hyper_util::client::legacy::Error> {
         match self {
-            Self::Direct(client) => client.request(request).await,
+            Self::DirectHttp(client) => client.request(request).await,
+            Self::DirectHttps(client) => client.request(request).await,
             Self::HttpProxy(client) => client.request(request).await,
             Self::HttpsProxy(client) => client.request(request).await,
         }
@@ -72,7 +75,8 @@ struct ProxyPolicy {
 
 #[derive(Clone, Debug)]
 enum ProxyRoute {
-    Direct,
+    DirectHttp,
+    DirectHttps,
     HttpProxy { uri: Uri, auth: Option<HeaderValue> },
     HttpsProxy { uri: Uri, auth: Option<HeaderValue> },
 }
@@ -103,7 +107,10 @@ impl ProxyPolicy {
 
     fn route(&self, uri: &Uri) -> RuntimeResult<ProxyRoute> {
         let Some(intercept) = self.matcher.intercept(uri) else {
-            return Ok(ProxyRoute::Direct);
+            return match uri.scheme_str() {
+                Some("https") => Ok(ProxyRoute::DirectHttps),
+                _ => Ok(ProxyRoute::DirectHttp),
+            };
         };
         let proxy_uri = validate_http_proxy_uri(intercept.uri())?;
         let auth = intercept.basic_auth().cloned();
@@ -116,7 +123,7 @@ impl ProxyPolicy {
                 uri: proxy_uri,
                 auth,
             }),
-            _ => Ok(ProxyRoute::Direct),
+            _ => Ok(ProxyRoute::DirectHttp),
         }
     }
 }
@@ -124,7 +131,8 @@ impl ProxyPolicy {
 impl ProxyRoute {
     fn cache_key(&self, connect_timeout_ms: u64) -> String {
         match self {
-            Self::Direct => format!("direct:{connect_timeout_ms}"),
+            Self::DirectHttp => format!("direct-http:{connect_timeout_ms}"),
+            Self::DirectHttps => format!("direct-https:{connect_timeout_ms}"),
             Self::HttpProxy { uri, auth } => format!(
                 "http-proxy:{connect_timeout_ms}:{uri}:{}",
                 auth_cache_key(auth)
@@ -666,7 +674,10 @@ fn transport(network_concurrency: usize) -> RuntimeResult<&'static dyn RuntimeHt
 
 fn build_client(connect_timeout_ms: u64, route: &ProxyRoute) -> RuntimeResult<HyperClient> {
     match route {
-        ProxyRoute::Direct => Ok(HyperClient::Direct(
+        ProxyRoute::DirectHttp => Ok(HyperClient::DirectHttp(
+            Client::builder(TokioExecutor::new()).build(build_http_connector(connect_timeout_ms)),
+        )),
+        ProxyRoute::DirectHttps => Ok(HyperClient::DirectHttps(
             Client::builder(TokioExecutor::new()).build(build_https_connector(
                 build_http_connector(connect_timeout_ms),
             )?),
@@ -1614,10 +1625,33 @@ mod tests {
             )
             .expect("remote route should resolve");
 
-        assert!(matches!(localhost, ProxyRoute::Direct));
-        assert!(matches!(ipv4, ProxyRoute::Direct));
-        assert!(matches!(ipv6, ProxyRoute::Direct));
+        assert!(matches!(localhost, ProxyRoute::DirectHttp));
+        assert!(matches!(ipv4, ProxyRoute::DirectHttp));
+        assert!(matches!(ipv6, ProxyRoute::DirectHttp));
         assert!(matches!(remote, ProxyRoute::HttpProxy { .. }));
+    }
+
+    #[test]
+    fn direct_http_and_https_routes_use_separate_clients() {
+        let policy = ProxyPolicy::from_values("", "", "", "*");
+        let http = policy
+            .route(
+                &"http://images.example.test/image.jpg"
+                    .parse::<Uri>()
+                    .unwrap(),
+            )
+            .expect("HTTP route should resolve");
+        let https = policy
+            .route(
+                &"https://images.example.test/image.jpg"
+                    .parse::<Uri>()
+                    .unwrap(),
+            )
+            .expect("HTTPS route should resolve");
+
+        assert!(matches!(http, ProxyRoute::DirectHttp));
+        assert!(matches!(https, ProxyRoute::DirectHttps));
+        assert_ne!(http.cache_key(500), https.cache_key(500));
     }
 
     fn test_request(uri: String) -> RuntimeRequest {

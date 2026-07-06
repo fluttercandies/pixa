@@ -26,7 +26,7 @@ Future<void> main(List<String> args) async {
   _configureProbePlatformPermissions(platform, probe);
   _writeProbeApp(root, probe, options);
   await _run(probe, flutter, <String>['pub', 'get']);
-  await _run(probe, flutter, _buildCommand(platform));
+  await _run(probe, flutter, _buildCommand(platform), diagnosticRoot: probe);
   if (options.runSelfCheck) {
     final Map<String, String> environment = options.selfCheckEnvironment(root);
     await _runSelfCheck(
@@ -786,6 +786,7 @@ Future<void> _run(
   String executable,
   List<String> arguments, {
   Map<String, String>? environment,
+  Directory? diagnosticRoot,
 }) async {
   stdout.writeln('> $executable ${arguments.join(' ')}');
   final Process process = await Process.start(
@@ -797,8 +798,34 @@ Future<void> _run(
   );
   final int exitCode = await process.exitCode;
   if (exitCode != 0) {
+    _printRustBuildDiagnostics(diagnosticRoot ?? workingDirectory);
     throw ProcessException(executable, arguments, 'command failed', exitCode);
   }
+}
+
+void _printRustBuildDiagnostics(Directory root) {
+  if (!root.existsSync()) {
+    return;
+  }
+  final List<File> logs = <File>[];
+  for (final FileSystemEntity entity in root.listSync(recursive: true)) {
+    if (entity is File &&
+        entity.uri.pathSegments.last == 'pixa_rust_build_failure.log') {
+      logs.add(entity);
+    }
+  }
+  logs.sort((File left, File right) => left.path.compareTo(right.path));
+  for (final File log in logs) {
+    stderr.writeln('=== ${log.path} ===');
+    stderr.writeln(_tailText(log.readAsStringSync(), 24000));
+  }
+}
+
+String _tailText(String value, int maxChars) {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return value.substring(value.length - maxChars);
 }
 
 Future<void> _runSelfCheck(

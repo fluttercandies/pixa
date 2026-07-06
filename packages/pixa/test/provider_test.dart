@@ -233,18 +233,25 @@ void main() {
 
       final Completer<void> firstEntered = Completer<void>();
       final Completer<void> releaseFirst = Completer<void>();
-      var decodeCalls = 0;
+      var firstDecodeCalls = 0;
+      var secondDecodeCalls = 0;
 
-      Future<ui.Codec> decode(
+      Future<ui.Codec> firstDecode(
         ui.ImmutableBuffer buffer, {
         ui.TargetImageSizeCallback? getTargetSize,
       }) async {
-        decodeCalls += 1;
-        if (decodeCalls == 1) {
-          firstEntered.complete();
-          await releaseFirst.future;
-        }
+        firstDecodeCalls += 1;
+        firstEntered.complete();
+        await releaseFirst.future;
         throw StateError('stop decode after queue assertion');
+      }
+
+      Future<ui.Codec> secondDecode(
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        secondDecodeCalls += 1;
+        throw StateError('second decode should be rejected before decode');
       }
 
       final PixaProvider first = PixaProvider(
@@ -258,20 +265,20 @@ void main() {
       );
       final PixaProvider second = PixaProvider(
         request: PixaRequest(
-          source: PixaSource.custom(
-            'decode-queue-b',
-            () async => _minimalGif(),
-          ),
+          source: PixaSource.custom('decode-queue-b', () async {
+            await firstEntered.future;
+            return _minimalGif();
+          }),
           cachePolicy: const PixaCachePolicy.noStore(),
         ),
       );
       final ImageStreamCompleter firstCompleter = first.loadImage(
         first,
-        decode,
+        firstDecode,
       );
       final ImageStreamCompleter secondCompleter = second.loadImage(
         second,
-        decode,
+        secondDecode,
       );
       final Completer<Object> firstError = Completer<Object>();
       final Completer<Object> secondError = Completer<Object>();
@@ -313,7 +320,8 @@ void main() {
       final PixaFailure failure = secondFailure as PixaFailure;
       expect(failure.stage, PixaStage.decode);
       expect(failure.safeMessage, contains('decode queue is full'));
-      expect(decodeCalls, 1);
+      expect(firstDecodeCalls, 1);
+      expect(secondDecodeCalls, 0);
 
       releaseFirst.complete();
       await firstError.future.timeout(const Duration(seconds: 5));
