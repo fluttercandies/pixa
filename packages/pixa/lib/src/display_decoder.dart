@@ -428,13 +428,13 @@ _DisplayDecoderBackend _effectiveBackendForPayload(
   if (!selected.usesFlutterEngine) {
     return selected;
   }
-  final PixaImageFormatRoute? route =
-      formatCatalog.routeForPayload(bytes, mimeType: outputMimeType) ??
-      formatCatalog.routeForPayload(
-        bytes,
-        formatId: request.decoderOptions['formatId'],
-        mimeType: request.decoderOptions['mimeType'],
-      );
+  final PixaImageFormatRoute? route = _routeForDisplayPayload(
+    request,
+    bytes,
+    outputMimeType: outputMimeType,
+    requestId: requestId,
+    formatCatalog: formatCatalog,
+  );
   if (route == null) {
     throw PixaFailure(
       requestId: requestId,
@@ -459,6 +459,39 @@ _DisplayDecoderBackend _effectiveBackendForPayload(
     );
   }
   return selected;
+}
+
+PixaImageFormatRoute? _routeForDisplayPayload(
+  PixaRequest request,
+  Uint8List bytes, {
+  required String? outputMimeType,
+  required int requestId,
+  required PixaImageFormatCatalog formatCatalog,
+}) {
+  final PixaImageFormatRoute? actualRoute = formatCatalog.routeForPayload(
+    bytes,
+  );
+  if (actualRoute != null) {
+    return actualRoute;
+  }
+  final PixaImageFormatRoute? outputRoute = outputMimeType == null
+      ? null
+      : formatCatalog.routeForMimeType(outputMimeType);
+  if (outputRoute?.capabilities.engineDisplay == true) {
+    throw PixaFailure(
+      requestId: requestId,
+      stage: PixaStage.decode,
+      safeMessage:
+          'Encoded bytes do not match a supported image signature for declared output MIME $outputMimeType.',
+      retryability: PixaRetryability.notRetryable,
+    );
+  }
+  return outputRoute ??
+      formatCatalog.routeForPayload(
+        bytes,
+        formatId: request.decoderOptions['formatId'],
+        mimeType: request.decoderOptions['mimeType'],
+      );
 }
 
 final class _RuntimeDisplayDecoderBackend implements _DisplayDecoderBackend {
