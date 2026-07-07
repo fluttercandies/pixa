@@ -402,8 +402,8 @@ final class PixaPipeline {
 
   Future<void> _runInflight(_InflightRuntimeLoad inflight) async {
     try {
-      final _ByteOwner result = await _runPipelineLoad(inflight);
-      final _SharedByteBuffer sharedBuffer = _SharedByteBuffer(result);
+      final _PipelineOutput result = await _runPipelineLoad(inflight);
+      final _SharedByteBuffer sharedBuffer = _SharedByteBuffer(result.owner);
       try {
         for (final _PipelineListener listener in List<_PipelineListener>.of(
           inflight.listeners,
@@ -415,6 +415,7 @@ final class PixaPipeline {
             PixaPipelineLoad._(
               _ByteBufferLease(sharedBuffer),
               requestId: listener.requestId,
+              mimeType: result.mimeType,
               memoryPin: _EncodedMemoryPin.tryPin(
                 inflight.memoryPinKey ?? _pinKeyFor(inflight.request),
               ),
@@ -479,7 +480,9 @@ final class PixaPipeline {
     }
   }
 
-  Future<_ByteOwner> _runPipelineLoad(_InflightRuntimeLoad inflight) async {
+  Future<_PipelineOutput> _runPipelineLoad(
+    _InflightRuntimeLoad inflight,
+  ) async {
     final PixaRequest request = inflight.request;
     final _PluginProcessorPlan? pluginPlan = _pluginProcessorPlanFor(
       request,
@@ -493,7 +496,7 @@ final class PixaPipeline {
         eventPrefix: pluginPlan == null ? 'decoder' : 'processed',
       );
       if (cached != null) {
-        return cached;
+        return _PipelineOutput(cached);
       }
     }
 
@@ -524,7 +527,7 @@ final class PixaPipeline {
         );
         if (cached != null) {
           retainedRuntime.dispose();
-          return cached;
+          return _PipelineOutput(cached);
         }
         payload = await _runPluginDecoder(inflight, request, decoder, payload);
         transformed = true;
@@ -540,7 +543,7 @@ final class PixaPipeline {
         transformed = true;
       }
       if (!transformed) {
-        return retainedRuntime;
+        return _PipelineOutput(retainedRuntime);
       }
       _validatePluginOutput(inflight, request, payload);
       _writePluginFinalCache(
@@ -549,7 +552,10 @@ final class PixaPipeline {
         eventPrefix: pluginPlan == null ? 'decoder' : 'processed',
       );
       inflight.memoryPinKey = request.cacheKey;
-      return _DartByteOwner(payload.bytes, retainedOwner: retainedRuntime);
+      return _PipelineOutput(
+        _DartByteOwner(payload.bytes, retainedOwner: retainedRuntime),
+        mimeType: payload.mimeType,
+      );
     } on Object {
       retainedRuntime.dispose();
       rethrow;
@@ -1682,6 +1688,7 @@ final class PixaPipelineLoad {
   const PixaPipelineLoad._(
     this._buffer, {
     required this.requestId,
+    required this.mimeType,
     required _EncodedMemoryPin? memoryPin,
   }) : _memoryPin = memoryPin;
 
@@ -1693,6 +1700,9 @@ final class PixaPipelineLoad {
 
   /// Request id.
   final int requestId;
+
+  /// Best-known MIME type for the actual encoded bytes returned by pipeline.
+  final String? mimeType;
 
   /// Decodes runtime-owned encoded bytes into a runtime-owned RGBA buffer.
   PixaRuntimeRgbaImage decodeRuntimeRgba({
@@ -1711,6 +1721,13 @@ final class PixaPipelineLoad {
     _memoryPin?.dispose();
     _buffer.dispose();
   }
+}
+
+final class _PipelineOutput {
+  const _PipelineOutput(this.owner, {this.mimeType});
+
+  final _ByteOwner owner;
+  final String? mimeType;
 }
 
 abstract interface class _ByteOwner {

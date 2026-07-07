@@ -184,6 +184,61 @@ void main() {
   );
 
   test(
+    'PixaProvider rejects mismatched built-in MIME before Flutter engine decode',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-mismatched-format-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      await Pixa.configure(PixaConfig(cacheRootPath: cacheRoot.path));
+      var engineDecodeCalls = 0;
+      final PixaProvider provider = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.custom(
+            'mismatched-format',
+            () async => Uint8List.fromList('not a png'.codeUnits),
+          ),
+          cachePolicy: const PixaCachePolicy.noStore(),
+          decoderOptions: const <String, Object?>{'mimeType': 'image/png'},
+        ),
+      );
+      final ImageStreamCompleter completer = provider.loadImage(provider, (
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        engineDecodeCalls += 1;
+        throw StateError(
+          'mismatched built-in MIME must not reach Flutter engine decode',
+        );
+      });
+      final Completer<Object> errorCompleter = Completer<Object>();
+      final ImageStreamListener listener = ImageStreamListener(
+        (ImageInfo image, bool synchronousCall) {
+          fail('mismatched built-in MIME should not produce an ImageInfo');
+        },
+        onError: (Object error, StackTrace? stackTrace) {
+          if (!errorCompleter.isCompleted) {
+            errorCompleter.complete(error);
+          }
+        },
+      );
+
+      completer.addListener(listener);
+      final Object error = await errorCompleter.future.timeout(
+        const Duration(seconds: 5),
+      );
+      completer.removeListener(listener);
+
+      expect(engineDecodeCalls, 0);
+      expect(error, isA<PixaFailure>());
+      final PixaFailure failure = error as PixaFailure;
+      expect(failure.stage, PixaStage.decode);
+      expect(failure.retryability, PixaRetryability.notRetryable);
+      expect(failure.safeMessage, contains('supported image signature'));
+    },
+  );
+
+  test(
     'PixaProvider rejects plugin output with no display backend before engine',
     () async {
       final Directory cacheRoot = await Directory.systemTemp.createTemp(
@@ -253,6 +308,78 @@ void main() {
       expect(event.failure, same(failure));
       expect(event.attributes['backend'], 'engine');
       expect(event.attributes['execution'], 'flutter');
+    },
+  );
+
+  test(
+    'PixaProvider displays plugin decoder output using output MIME route',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-plugin-gif-output-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      final List<PixaEvent> events = <PixaEvent>[];
+      await Pixa.configure(
+        PixaConfig(
+          cacheRootPath: cacheRoot.path,
+          plugins: const <PixaPlugin>[_GifTranscodePlugin()],
+          observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+        ),
+      );
+      var engineDecodeCalls = 0;
+      final PixaProvider provider = PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.custom(
+            'plugin-gif-output',
+            () async => _minimalGif(),
+          ),
+          cachePolicy: const PixaCachePolicy.noStore(),
+          decoderOptions: const <String, Object?>{
+            'mimeType': 'image/pixa-gif-transcode',
+          },
+          pluginExecutionPolicy:
+              const PixaPluginExecutionPolicy.runtimeFirstWithDart(),
+        ),
+      );
+      final ImageStreamCompleter completer = provider.loadImage(provider, (
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        engineDecodeCalls += 1;
+        return ui.instantiateImageCodec(_minimalGif());
+      });
+      final Completer<ImageInfo> imageCompleter = Completer<ImageInfo>();
+      final Completer<Object> errorCompleter = Completer<Object>();
+      final ImageStreamListener listener = ImageStreamListener(
+        (ImageInfo image, bool synchronousCall) {
+          if (!imageCompleter.isCompleted) {
+            imageCompleter.complete(image);
+          }
+        },
+        onError: (Object error, StackTrace? stackTrace) {
+          if (!errorCompleter.isCompleted) {
+            errorCompleter.complete(error);
+          }
+        },
+      );
+
+      completer.addListener(listener);
+      final Object result = await Future.any<Object>(<Future<Object>>[
+        imageCompleter.future,
+        errorCompleter.future,
+      ]).timeout(const Duration(seconds: 5));
+      completer.removeListener(listener);
+      if (result is ImageInfo) {
+        result.dispose();
+      }
+
+      expect(result, isA<ImageInfo>());
+      expect(engineDecodeCalls, 1);
+      final PixaEvent start = events.singleWhere(
+        (PixaEvent event) => event.name == 'decode.start',
+      );
+      expect(start.attributes['backend'], 'engine');
+      expect(start.attributes['execution'], 'flutter');
     },
   );
 
@@ -1968,5 +2095,60 @@ final class _UnknownTranscodeDecoder implements PixaDecoder {
       bytes: Uint8List.fromList('not an image'.codeUnits),
       mimeType: 'image/pixa-unknown-output',
     );
+  }
+}
+
+final class _GifTranscodePlugin implements PixaPlugin {
+  const _GifTranscodePlugin();
+
+  @override
+  String get id => 'gif-transcode';
+
+  @override
+  PixaVersionConstraint get compatiblePixaVersions =>
+      const PixaVersionConstraint.any();
+
+  @override
+  void register(PixaRegistry registry) {
+    registry.registerDecoder(const _GifTranscodeDecoderDescriptor());
+  }
+}
+
+final class _GifTranscodeDecoderDescriptor
+    implements PixaDartDecoderDescriptor {
+  const _GifTranscodeDecoderDescriptor();
+
+  @override
+  String get id => 'gif-transcode-decoder';
+
+  @override
+  PixaPluginExecutionKind get executionKind => PixaPluginExecutionKind.dart;
+
+  @override
+  Set<String> get mimeTypes => const <String>{'image/pixa-gif-transcode'};
+
+  @override
+  Set<String> get formatIds => const <String>{};
+
+  @override
+  List<PixaDecoderSignature> get signatures => const <PixaDecoderSignature>[];
+
+  @override
+  PixaDecoderCapabilities get capabilities =>
+      const PixaDecoderCapabilities.dartBytes();
+
+  @override
+  int get priority => 1;
+
+  @override
+  PixaDecoder get decoder => const _GifTranscodeDecoder();
+}
+
+final class _GifTranscodeDecoder implements PixaDecoder {
+  const _GifTranscodeDecoder();
+
+  @override
+  PixaBytePayload decode(PixaBytePayload input, PixaExecutionContext context) {
+    return PixaBytePayload(bytes: _minimalGif(), mimeType: 'image/gif');
   }
 }

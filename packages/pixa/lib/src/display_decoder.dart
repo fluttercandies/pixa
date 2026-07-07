@@ -126,6 +126,7 @@ final class PixaDisplayDecoder {
         backend,
         request,
         load.bytes,
+        outputMimeType: load.mimeType,
         requestId: load.requestId,
         formatCatalog: formatCatalog,
       );
@@ -420,17 +421,20 @@ _DisplayDecoderBackend _effectiveBackendForPayload(
   _DisplayDecoderBackend selected,
   PixaRequest request,
   Uint8List bytes, {
+  required String? outputMimeType,
   required int requestId,
   required PixaImageFormatCatalog formatCatalog,
 }) {
   if (!selected.usesFlutterEngine) {
     return selected;
   }
-  final PixaImageFormatRoute? route = formatCatalog.routeForPayload(
-    bytes,
-    formatId: request.decoderOptions['formatId'],
-    mimeType: request.decoderOptions['mimeType'],
-  );
+  final PixaImageFormatRoute? route =
+      formatCatalog.routeForPayload(bytes, mimeType: outputMimeType) ??
+      formatCatalog.routeForPayload(
+        bytes,
+        formatId: request.decoderOptions['formatId'],
+        mimeType: request.decoderOptions['mimeType'],
+      );
   if (route == null) {
     throw PixaFailure(
       requestId: requestId,
