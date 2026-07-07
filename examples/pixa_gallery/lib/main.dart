@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flexbox_layout/flexbox_layout.dart';
 import 'package:flutter/material.dart';
@@ -58,10 +60,7 @@ final class PixaGalleryApp extends StatelessWidget {
     return MaterialApp(
       title: 'Pixa Gallery',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: const Color(0xFF126B5B),
-      ),
+      theme: _pixaGalleryTheme(),
       home: PixaGalleryHome(
         initialPosts: initialPosts,
         loadOnStart: loadOnStart,
@@ -69,6 +68,119 @@ final class PixaGalleryApp extends StatelessWidget {
       ),
     );
   }
+}
+
+ThemeData _pixaGalleryTheme() {
+  final ColorScheme colors = ColorScheme.fromSeed(
+    seedColor: const Color(0xFF126B5B),
+    dynamicSchemeVariant: DynamicSchemeVariant.expressive,
+  );
+  final TextTheme textTheme = ThemeData(useMaterial3: true).textTheme.apply(
+    bodyColor: colors.onSurface,
+    displayColor: colors.onSurface,
+  );
+  return ThemeData(
+    useMaterial3: true,
+    colorScheme: colors,
+    scaffoldBackgroundColor: colors.surface,
+    textTheme: textTheme,
+    appBarTheme: AppBarTheme(
+      centerTitle: false,
+      elevation: 0,
+      scrolledUnderElevation: 2,
+      backgroundColor: colors.surfaceContainer,
+      foregroundColor: colors.onSurface,
+      surfaceTintColor: colors.surfaceTint,
+      titleTextStyle: textTheme.titleLarge?.copyWith(
+        color: colors.onSurface,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 0,
+      ),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      height: 76,
+      backgroundColor: colors.surfaceContainer,
+      indicatorColor: colors.tertiaryContainer,
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      iconTheme: WidgetStateProperty.resolveWith<IconThemeData>((
+        Set<WidgetState> states,
+      ) {
+        return IconThemeData(
+          color: states.contains(WidgetState.selected)
+              ? colors.onTertiaryContainer
+              : colors.onSurfaceVariant,
+        );
+      }),
+      labelTextStyle: WidgetStateProperty.resolveWith<TextStyle?>((
+        Set<WidgetState> states,
+      ) {
+        return textTheme.labelMedium?.copyWith(
+          color: states.contains(WidgetState.selected)
+              ? colors.onSurface
+              : colors.onSurfaceVariant,
+          fontWeight: states.contains(WidgetState.selected)
+              ? FontWeight.w800
+              : FontWeight.w600,
+          letterSpacing: 0,
+        );
+      }),
+    ),
+    segmentedButtonTheme: SegmentedButtonThemeData(
+      style: ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        padding: const WidgetStatePropertyAll<EdgeInsetsGeometry>(
+          EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        ),
+        shape: WidgetStatePropertyAll<OutlinedBorder>(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        side: WidgetStateProperty.resolveWith<BorderSide>((
+          Set<WidgetState> states,
+        ) {
+          return BorderSide(
+            color: states.contains(WidgetState.selected)
+                ? colors.primary
+                : colors.outlineVariant,
+          );
+        }),
+      ),
+    ),
+    chipTheme: ChipThemeData(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      selectedColor: colors.secondaryContainer,
+      backgroundColor: colors.surfaceContainerHighest,
+      labelStyle: textTheme.labelMedium?.copyWith(
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0,
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: ButtonStyle(
+        shape: WidgetStatePropertyAll<OutlinedBorder>(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: ButtonStyle(
+        shape: WidgetStatePropertyAll<OutlinedBorder>(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      ),
+    ),
+    iconButtonTheme: IconButtonThemeData(
+      style: ButtonStyle(
+        shape: WidgetStatePropertyAll<OutlinedBorder>(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      ),
+    ),
+    cardTheme: CardThemeData(
+      color: colors.surfaceContainer,
+      surfaceTintColor: colors.surfaceTint,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    ),
+  );
 }
 
 /// Network gallery adapted from the flexbox example for Pixa.
@@ -177,15 +289,33 @@ final class _PixaGalleryHomeState extends State<PixaGalleryHome> {
           ),
         ],
       ),
-      body: switch (_selectedTab) {
-        PixaGalleryTab.gallery => _buildGalleryBody(),
-        PixaGalleryTab.scenarios => _ScenarioSection(posts: _posts),
-        PixaGalleryTab.diagnostics => _DiagnosticsPage(
-          onPrefetchVisible: _prefetchVisible,
-          onTrimMemory: _trimMemory,
-          onShowCacheStats: _showCacheStats,
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 180),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (Widget child, Animation<double> animation) {
+          final Animation<Offset> offset = Tween<Offset>(
+            begin: const Offset(0, 0.015),
+            end: Offset.zero,
+          ).animate(animation);
+          return FadeTransition(
+            opacity: animation,
+            child: SlideTransition(position: offset, child: child),
+          );
+        },
+        child: KeyedSubtree(
+          key: ValueKey<PixaGalleryTab>(_selectedTab),
+          child: switch (_selectedTab) {
+            PixaGalleryTab.gallery => _buildGalleryBody(),
+            PixaGalleryTab.scenarios => _ScenarioSection(posts: _posts),
+            PixaGalleryTab.diagnostics => _DiagnosticsPage(
+              onPrefetchVisible: _prefetchVisible,
+              onTrimMemory: _trimMemory,
+              onShowCacheStats: _showCacheStats,
+            ),
+          },
         ),
-      },
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedTab.index,
         onDestinationSelected: (int index) {
@@ -505,90 +635,130 @@ final class _GalleryHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerLow,
+        border: Border(bottom: BorderSide(color: colors.outlineVariant)),
+      ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(
-            'Network image gallery',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            status,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: colors.onSurfaceVariant,
-              letterSpacing: 0,
-            ),
-          ),
-          const SizedBox(height: 14),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SegmentedButton<_GalleryLayout>(
-              segments: const <ButtonSegment<_GalleryLayout>>[
-                ButtonSegment<_GalleryLayout>(
-                  value: _GalleryLayout.flexRows,
-                  icon: Icon(Icons.view_stream),
-                  label: Text('Flex rows'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: colors.tertiaryContainer,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Icon(
+                          Icons.photo_library,
+                          color: colors.onTertiaryContainer,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            'Network image gallery',
+                            style: Theme.of(context).textTheme.titleLarge
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0,
+                                ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            status,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                                  color: colors.onSurfaceVariant,
+                                  letterSpacing: 0,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                ButtonSegment<_GalleryLayout>(
-                  value: _GalleryLayout.masonry,
-                  icon: Icon(Icons.dashboard_customize),
-                  label: Text('Masonry'),
+                const SizedBox(height: 14),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SegmentedButton<_GalleryLayout>(
+                    segments: const <ButtonSegment<_GalleryLayout>>[
+                      ButtonSegment<_GalleryLayout>(
+                        value: _GalleryLayout.flexRows,
+                        icon: Icon(Icons.view_stream),
+                        label: Text('Flex rows'),
+                      ),
+                      ButtonSegment<_GalleryLayout>(
+                        value: _GalleryLayout.masonry,
+                        icon: Icon(Icons.dashboard_customize),
+                        label: Text('Masonry'),
+                      ),
+                      ButtonSegment<_GalleryLayout>(
+                        value: _GalleryLayout.denseGrid,
+                        icon: Icon(Icons.grid_view),
+                        label: Text('Grid'),
+                      ),
+                    ],
+                    selected: <_GalleryLayout>{layout},
+                    showSelectedIcon: false,
+                    onSelectionChanged: (Set<_GalleryLayout> value) {
+                      onLayoutChanged(value.single);
+                    },
+                  ),
                 ),
-                ButtonSegment<_GalleryLayout>(
-                  value: _GalleryLayout.denseGrid,
-                  icon: Icon(Icons.grid_view),
-                  label: Text('Grid'),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: <Widget>[
+                    for (final SourceType source in SourceType.values)
+                      ChoiceChip(
+                        label: Text(source.name),
+                        selected: source == selectedSource,
+                        onSelected: (_) => onSourceChanged(source),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: <Widget>[
+                    const Icon(Icons.height, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Slider(
+                        min: 120,
+                        max: 320,
+                        value: targetRowHeight,
+                        label: '${targetRowHeight.round()} px',
+                        onChanged: onRowHeightChanged,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 56,
+                      child: Text(
+                        '${targetRowHeight.round()} px',
+                        textAlign: TextAlign.end,
+                        style: Theme.of(context).textTheme.labelMedium,
+                      ),
+                    ),
+                  ],
                 ),
               ],
-              selected: <_GalleryLayout>{layout},
-              showSelectedIcon: false,
-              onSelectionChanged: (Set<_GalleryLayout> value) {
-                onLayoutChanged(value.single);
-              },
             ),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              for (final SourceType source in SourceType.values)
-                ChoiceChip(
-                  label: Text(source.name),
-                  selected: source == selectedSource,
-                  onSelected: (_) => onSourceChanged(source),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: <Widget>[
-              const Icon(Icons.view_stream, size: 18),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Slider(
-                  min: 120,
-                  max: 320,
-                  value: targetRowHeight,
-                  label: '${targetRowHeight.round()} px',
-                  onChanged: onRowHeightChanged,
-                ),
-              ),
-              SizedBox(
-                width: 56,
-                child: Text(
-                  '${targetRowHeight.round()} px',
-                  textAlign: TextAlign.end,
-                  style: Theme.of(context).textTheme.labelMedium,
-                ),
-              ),
-            ],
           ),
         ],
       ),
@@ -1389,175 +1559,211 @@ final class _ScenarioSection extends StatelessWidget {
     final bool hasVideoFrameBackend =
         snapshot.registryArchitecture.videoFrameBackends > 0 &&
         snapshot.registryArchitecture.videoFrameEncodedOutputBackends > 0;
-    final List<_Scenario> scenarios = <_Scenario>[
-      if (first != null)
-        _Scenario(
-          title: 'Provider',
-          subtitle: 'ImageProvider compatibility',
-          icon: Icons.image_outlined,
-          child: _ProviderPreview(post: first),
-        ),
-      if (first != null)
-        _Scenario(
-          title: 'Large viewer',
-          subtitle: 'Tiled pan and zoom',
-          icon: Icons.open_in_full,
-          child: _LargeImagePreview(post: first),
-        ),
-      if (first != null)
-        _Scenario(
-          title: 'Low-res chain',
-          subtitle: 'Preview swaps to full request',
-          icon: Icons.swap_horiz,
-          child: PixaImage(
-            request: _requestForPost(
-              first,
-              targetPixels: 720,
-            ).copyWith(lowRes: _thumbnailRequestForPost(first)),
-            fit: BoxFit.cover,
-            placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
-            progressBuilder: _progressBuilder,
-            errorBuilder: _errorBuilder,
-            borderRadius: BorderRadius.circular(8),
-          ),
-        ),
-      if (first != null)
-        _Scenario(
-          title: 'Processors',
-          subtitle: 'Resize, sharpen, watermark',
-          icon: Icons.auto_fix_high,
-          child: PixaImage(
-            request: _requestForPost(
-              first,
-              targetPixels: 360,
-              processors: <String>[
-                PixaProcessors.resizeToFill(360, 360),
-                PixaProcessors.unsharpen(sigma: 1.0, threshold: 2),
-                'watermark(text=Pixa,position=bottomRight,padding=14,scale=2)',
+    final List<_ScenarioGroup> groups = first == null
+        ? const <_ScenarioGroup>[]
+        : <_ScenarioGroup>[
+            _ScenarioGroup(
+              title: 'Display APIs',
+              scenarios: <_Scenario>[
+                _Scenario(
+                  title: 'PixaImage',
+                  subtitle: 'Widget surface with fit and progress',
+                  icon: Icons.photo_outlined,
+                  child: PixaImage(
+                    request: _requestForPost(first, targetPixels: 480),
+                    fit: BoxFit.cover,
+                    placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+                    progressBuilder: _progressBuilder,
+                    errorBuilder: _errorBuilder,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                _Scenario(
+                  title: 'Provider',
+                  subtitle: 'ImageProvider compatibility',
+                  icon: Icons.image_outlined,
+                  child: _ProviderPreview(post: first),
+                ),
+                _Scenario(
+                  title: 'Controller',
+                  subtitle: 'Reload, cancel, pause, resume',
+                  icon: Icons.tune,
+                  child: _ControllerPreview(post: first),
+                ),
               ],
             ),
-            fit: BoxFit.cover,
-            placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
-            progressBuilder: _progressBuilder,
-            errorBuilder: _errorBuilder,
-            borderRadius: BorderRadius.circular(8),
-          ),
-        ),
-      if (first != null)
-        _Scenario(
-          title: 'Thumbnail',
-          subtitle: 'No-upscale runtime transform',
-          icon: Icons.photo_size_select_small,
-          child: PixaImage(
-            request: _requestForPost(
-              first,
-              targetPixels: 320,
-              processors: <String>[PixaProcessors.thumbnail(320, 240)],
+            _ScenarioGroup(
+              title: 'Sources',
+              scenarios: <_Scenario>[
+                _Scenario(
+                  title: 'Source bundle',
+                  subtitle: 'Network, file, memory, bytes, custom',
+                  icon: Icons.account_tree_outlined,
+                  child: _SourceBundlePreview(post: first),
+                ),
+              ],
             ),
-            fit: BoxFit.contain,
-            background: const ColoredBox(color: Color(0xFFE8ECEF)),
-            placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
-            progressBuilder: _progressBuilder,
-            errorBuilder: _errorBuilder,
-            borderRadius: BorderRadius.circular(8),
-          ),
-        ),
-      if (first != null)
-        _Scenario(
-          title: 'Cache only',
-          subtitle: 'Typed miss or cached hit',
-          icon: Icons.offline_bolt_outlined,
-          child: PixaImage(
-            request: _requestForPost(
-              first,
-              targetPixels: 360,
-            ).copyWith(cachePolicy: const PixaCachePolicy.cacheOnly()),
-            fit: BoxFit.cover,
-            placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
-            errorBuilder: _errorBuilder,
-            borderRadius: BorderRadius.circular(8),
-          ),
-        ),
-      if (first != null)
-        _Scenario(
-          title: 'Decoded prewarm',
-          subtitle: 'Flutter ImageCache integration',
-          icon: Icons.memory,
-          child: _PrewarmPreview(post: first),
-        ),
-      _Scenario(
-        title: 'Progressive JPEG',
-        subtitle: 'Streaming preview event',
-        icon: Icons.downloading,
-        child: PixaImage.network(
-          'https://raw.githubusercontent.com/sindresorhus/is-progressive/main/fixture/progressive.jpg',
-          fit: BoxFit.cover,
-          placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
-          progressBuilder: _progressBuilder,
-          errorBuilder: _errorBuilder,
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
-      _Scenario(
-        title: 'Animated GIF',
-        subtitle: 'Controlled animated display',
-        icon: Icons.movie_filter_outlined,
-        child: PixaImage.network(
-          'https://media.giphy.com/media/3oEjI6SIIHBdRxXI40/giphy.gif',
-          fit: BoxFit.cover,
-          placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
-          progressBuilder: _progressBuilder,
-          errorBuilder: _errorBuilder,
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
-      _Scenario(
-        title: 'Animated WebP',
-        subtitle: 'Engine-backed animation path',
-        icon: Icons.motion_photos_on_outlined,
-        child: PixaImage.network(
-          'https://www.gstatic.com/webp/animated/1.webp',
-          fit: BoxFit.cover,
-          placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
-          progressBuilder: _progressBuilder,
-          errorBuilder: _errorBuilder,
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
-      _Scenario(
-        title: 'Retry',
-        subtitle: 'Failure surface and retry',
-        icon: Icons.refresh,
-        child: PixaImage.network(
-          'https://images.example.invalid/missing.jpg',
-          fit: BoxFit.cover,
-          placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
-          errorBuilder: _errorBuilder,
-          retryPolicy: const PixaRetryPolicy.exponential(maxAttempts: 2),
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
-      _Scenario(
-        title: 'Video frame',
-        subtitle: hasVideoFrameBackend
-            ? 'Runtime backend available'
-            : 'No backend in this binary',
-        icon: Icons.video_file_outlined,
-        child: hasVideoFrameBackend
-            ? PixaImage.videoFrame(
-                'https://flutter.github.io/assets-for-api-docs/assets/videos/bee.mp4',
-                timestamp: const Duration(seconds: 1),
-                fit: BoxFit.cover,
-                placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
-                errorBuilder: _errorBuilder,
-                borderRadius: BorderRadius.circular(8),
-              )
-            : const _DisabledScenarioPreview(
-                icon: Icons.video_file_outlined,
-                label: 'video-frame backend unavailable',
-              ),
-      ),
-    ];
+            _ScenarioGroup(
+              title: 'Cache and Prefetch',
+              scenarios: <_Scenario>[
+                _Scenario(
+                  title: 'Low-res chain',
+                  subtitle: 'Preview swaps to full request',
+                  icon: Icons.swap_horiz,
+                  child: PixaImage(
+                    request: _requestForPost(
+                      first,
+                      targetPixels: 720,
+                    ).copyWith(lowRes: _thumbnailRequestForPost(first)),
+                    fit: BoxFit.cover,
+                    placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+                    progressBuilder: _progressBuilder,
+                    errorBuilder: _errorBuilder,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                _Scenario(
+                  title: 'Cache policy',
+                  subtitle: 'Mode switch, prefetch, evict',
+                  icon: Icons.offline_bolt_outlined,
+                  child: _CachePolicyPreview(post: first),
+                ),
+                _Scenario(
+                  title: 'Decoded prewarm',
+                  subtitle: 'Flutter ImageCache integration',
+                  icon: Icons.memory,
+                  child: _PrewarmPreview(post: first),
+                ),
+              ],
+            ),
+            _ScenarioGroup(
+              title: 'Processing and Metadata',
+              scenarios: <_Scenario>[
+                _Scenario(
+                  title: 'Processor lab',
+                  subtitle: 'All public Rust helpers',
+                  icon: Icons.auto_fix_high,
+                  child: _ProcessorLabPreview(post: first),
+                ),
+                _Scenario(
+                  title: 'Thumbnail',
+                  subtitle: 'No-upscale runtime transform',
+                  icon: Icons.photo_size_select_small,
+                  child: PixaImage(
+                    request: _requestForPost(
+                      first,
+                      targetPixels: 320,
+                      processors: <String>[PixaProcessors.thumbnail(320, 240)],
+                    ),
+                    fit: BoxFit.contain,
+                    background: const ColoredBox(color: Color(0xFFE8ECEF)),
+                    placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+                    progressBuilder: _progressBuilder,
+                    errorBuilder: _errorBuilder,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                _Scenario(
+                  title: 'Metadata',
+                  subtitle: 'Header probe without full decode',
+                  icon: Icons.info_outline,
+                  child: _MetadataPreview(post: first),
+                ),
+              ],
+            ),
+            _ScenarioGroup(
+              title: 'Large, Animated, Video',
+              scenarios: <_Scenario>[
+                _Scenario(
+                  title: 'Large viewer',
+                  subtitle: 'Tiled pan and zoom',
+                  icon: Icons.open_in_full,
+                  child: _LargeImagePreview(post: first),
+                ),
+                _Scenario(
+                  title: 'Progressive JPEG',
+                  subtitle: 'Streaming preview event',
+                  icon: Icons.downloading,
+                  child: PixaImage.network(
+                    'https://raw.githubusercontent.com/sindresorhus/is-progressive/main/fixture/progressive.jpg',
+                    fit: BoxFit.cover,
+                    placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+                    progressBuilder: _progressBuilder,
+                    errorBuilder: _errorBuilder,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                _Scenario(
+                  title: 'Animated GIF',
+                  subtitle: 'Playback controller',
+                  icon: Icons.movie_filter_outlined,
+                  child: const _AnimatedPreview(
+                    url:
+                        'https://media.giphy.com/media/3oEjI6SIIHBdRxXI40/giphy.gif',
+                  ),
+                ),
+                _Scenario(
+                  title: 'Animated WebP',
+                  subtitle: 'Engine-backed animation path',
+                  icon: Icons.motion_photos_on_outlined,
+                  child: PixaImage.network(
+                    'https://www.gstatic.com/webp/animated/1.webp',
+                    fit: BoxFit.cover,
+                    placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+                    progressBuilder: _progressBuilder,
+                    errorBuilder: _errorBuilder,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                _Scenario(
+                  title: 'Video frame',
+                  subtitle: hasVideoFrameBackend
+                      ? 'Runtime backend available'
+                      : 'No backend in this binary',
+                  icon: Icons.video_file_outlined,
+                  child: hasVideoFrameBackend
+                      ? PixaImage.videoFrame(
+                          'https://flutter.github.io/assets-for-api-docs/assets/videos/bee.mp4',
+                          timestamp: const Duration(seconds: 1),
+                          fit: BoxFit.cover,
+                          placeholder: const PixaPlaceholder.color(
+                            Color(0xFFE8ECEF),
+                          ),
+                          errorBuilder: _errorBuilder,
+                          borderRadius: BorderRadius.circular(8),
+                        )
+                      : const _DisabledScenarioPreview(
+                          icon: Icons.video_file_outlined,
+                          label: 'video-frame backend unavailable',
+                        ),
+                ),
+              ],
+            ),
+            _ScenarioGroup(
+              title: 'Failure Handling',
+              scenarios: <_Scenario>[
+                _Scenario(
+                  title: 'Retry',
+                  subtitle: 'Failure surface and retry',
+                  icon: Icons.refresh,
+                  child: PixaImage.network(
+                    'https://images.example.invalid/missing.jpg',
+                    fit: BoxFit.cover,
+                    placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+                    errorBuilder: _errorBuilder,
+                    retryPolicy: const PixaRetryPolicy.exponential(
+                      maxAttempts: 2,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ],
+            ),
+          ];
+    final int scenarioCount = groups.fold<int>(
+      0,
+      (int total, _ScenarioGroup group) => total + group.scenarios.length,
+    );
     return CustomScrollView(
       key: const ValueKey<String>('pixa-scenarios-scroll'),
       slivers: <Widget>[
@@ -1578,7 +1784,7 @@ final class _ScenarioSection extends StatelessWidget {
                 Text(
                   first == null
                       ? 'Load the gallery to enable source-dependent scenarios.'
-                      : '${scenarios.length} scenarios using ${first.source.name} #${first.id}',
+                      : '$scenarioCount scenarios using ${first.source.name} #${first.id}',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                     letterSpacing: 0,
@@ -1588,27 +1794,51 @@ final class _ScenarioSection extends StatelessWidget {
             ),
           ),
         ),
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-          sliver: SliverGrid(
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 320,
-              mainAxisExtent: 276,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-            ),
-            delegate: SliverChildBuilderDelegate(
-              (BuildContext context, int index) {
-                return _ScenarioTile(scenario: scenarios[index]);
-              },
-              childCount: scenarios.length,
-              addAutomaticKeepAlives: false,
-              addRepaintBoundaries: true,
-              addSemanticIndexes: false,
+        for (final _ScenarioGroup group in groups) ...<Widget>[
+          SliverToBoxAdapter(child: _ScenarioGroupHeader(title: group.title)),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 320,
+                mainAxisExtent: 326,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (BuildContext context, int index) {
+                  return _ScenarioTile(scenario: group.scenarios[index]);
+                },
+                childCount: group.scenarios.length,
+                addAutomaticKeepAlives: false,
+                addRepaintBoundaries: true,
+                addSemanticIndexes: false,
+              ),
             ),
           ),
-        ),
+        ],
+        const SliverToBoxAdapter(child: SizedBox(height: 6)),
       ],
+    );
+  }
+}
+
+final class _ScenarioGroupHeader extends StatelessWidget {
+  const _ScenarioGroupHeader({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: Text(
+        title,
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0,
+        ),
+      ),
     );
   }
 }
@@ -1621,13 +1851,17 @@ final class _ScenarioTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.surfaceContainer,
+    return Material(
+      color: colors.surfaceContainer,
+      surfaceTintColor: colors.surfaceTint,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: colors.outlineVariant),
+        side: BorderSide(color: colors.outlineVariant),
       ),
-      child: Padding(
+      clipBehavior: Clip.antiAlias,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
         padding: const EdgeInsets.all(8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1645,8 +1879,21 @@ final class _ScenarioTile extends StatelessWidget {
             const SizedBox(height: 8),
             Row(
               children: <Widget>[
-                Icon(scenario.icon, size: 18, color: colors.primary),
-                const SizedBox(width: 6),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: colors.primaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(5),
+                    child: Icon(
+                      scenario.icon,
+                      size: 16,
+                      color: colors.onPrimaryContainer,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     scenario.title,
@@ -1705,6 +1952,705 @@ final class _ProviderPreview extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+final class _ControllerPreview extends StatefulWidget {
+  const _ControllerPreview({required this.post});
+
+  final ImagePost post;
+
+  @override
+  State<_ControllerPreview> createState() => _ControllerPreviewState();
+}
+
+final class _ControllerPreviewState extends State<_ControllerPreview> {
+  late final PixaController _controller = PixaController()
+    ..addListener(_handleControllerChanged);
+  String _status = 'ready';
+  bool _statusUpdateScheduled = false;
+
+  @override
+  void dispose() {
+    _controller
+      ..removeListener(_handleControllerChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        PixaImage(
+          controller: _controller,
+          request: _requestForPost(widget.post, targetPixels: 360),
+          fit: BoxFit.cover,
+          placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+          progressBuilder: _progressBuilder,
+          errorBuilder: _errorBuilder,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        Positioned(
+          left: 8,
+          right: 8,
+          bottom: 8,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.58),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    _status,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Colors.white,
+                      letterSpacing: 0,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      _SmallIconButton(
+                        tooltip: 'Reload',
+                        icon: Icons.refresh,
+                        onPressed: _controller.reload,
+                      ),
+                      _SmallIconButton(
+                        tooltip: 'Cancel',
+                        icon: Icons.close,
+                        onPressed: _controller.cancel,
+                      ),
+                      _SmallIconButton(
+                        tooltip: 'Pause',
+                        icon: Icons.pause,
+                        onPressed: _controller.pause,
+                      ),
+                      _SmallIconButton(
+                        tooltip: 'Resume',
+                        icon: Icons.play_arrow,
+                        onPressed: _controller.resume,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _handleControllerChanged() {
+    if (!mounted || _statusUpdateScheduled) {
+      return;
+    }
+    _statusUpdateScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _statusUpdateScheduled = false;
+      if (!mounted) {
+        return;
+      }
+      final String visibility = _controller.isVisible ? 'visible' : 'paused';
+      setState(() {
+        _status =
+            '${_controller.state.runtimeType} · '
+            'gen ${_controller.generation} · $visibility';
+      });
+    });
+  }
+}
+
+final class _SourceBundlePreview extends StatefulWidget {
+  const _SourceBundlePreview({required this.post});
+
+  final ImagePost post;
+
+  @override
+  State<_SourceBundlePreview> createState() => _SourceBundlePreviewState();
+}
+
+final class _SourceBundlePreviewState extends State<_SourceBundlePreview> {
+  Uint8List? _bytes;
+  File? _file;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadEncodedBytes());
+  }
+
+  @override
+  void didUpdateWidget(_SourceBundlePreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.post.imageUrl != widget.post.imageUrl) {
+      _deleteFile();
+      setState(() {
+        _bytes = null;
+        _file = null;
+        _error = null;
+      });
+      unawaited(_loadEncodedBytes());
+    }
+  }
+
+  @override
+  void dispose() {
+    _deleteFile();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Uint8List? bytes = _bytes;
+    final File? file = _file;
+    if (_error != null) {
+      return _DisabledScenarioPreview(
+        icon: Icons.error_outline,
+        label: 'source bundle failed',
+      );
+    }
+    if (bytes == null || file == null) {
+      return const _MiniLoadingPreview(label: 'loading source bytes');
+    }
+    return Padding(
+      padding: const EdgeInsets.all(6),
+      child: Column(
+        children: <Widget>[
+          Expanded(
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: _SourceMini(
+                    label: 'network',
+                    child: PixaImage(
+                      request: _requestForPost(widget.post, targetPixels: 160),
+                      fit: BoxFit.cover,
+                      placeholder: const PixaPlaceholder.color(
+                        Color(0xFFE8ECEF),
+                      ),
+                      errorBuilder: _errorBuilder,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: _SourceMini(
+                    label: 'file',
+                    child: PixaImage.file(
+                      file.path,
+                      fit: BoxFit.cover,
+                      exifThumbnailFirst: false,
+                      placeholder: const PixaPlaceholder.color(
+                        Color(0xFFE8ECEF),
+                      ),
+                      errorBuilder: _errorBuilder,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: _SourceMini(
+                    label: 'memory',
+                    child: PixaImage.memory(
+                      'source-memory-${widget.post.id}',
+                      bytes,
+                      fit: BoxFit.cover,
+                      placeholder: const PixaPlaceholder.color(
+                        Color(0xFFE8ECEF),
+                      ),
+                      errorBuilder: _errorBuilder,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Expanded(
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: _SourceMini(
+                    label: 'bytes',
+                    child: PixaImage.bytes(
+                      bytes,
+                      id: 'source-bytes-${widget.post.id}',
+                      fit: BoxFit.cover,
+                      placeholder: const PixaPlaceholder.color(
+                        Color(0xFFE8ECEF),
+                      ),
+                      errorBuilder: _errorBuilder,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: _SourceMini(
+                    label: 'custom',
+                    child: PixaImage(
+                      request: PixaRequest(
+                        source: PixaSource.custom(
+                          'source-custom-${widget.post.id}',
+                          () async => bytes,
+                        ),
+                        targetSize: const PixaTargetSize(
+                          width: 160,
+                          height: 160,
+                        ),
+                        fit: BoxFit.cover,
+                        cachePolicy: const PixaCachePolicy.noStore(),
+                      ),
+                      fit: BoxFit.cover,
+                      placeholder: const PixaPlaceholder.color(
+                        Color(0xFFE8ECEF),
+                      ),
+                      errorBuilder: _errorBuilder,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Expanded(child: SizedBox.expand()),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _loadEncodedBytes() async {
+    try {
+      final PixaPipelineLoad load = await Pixa.pipeline.load(
+        _requestForPost(
+          widget.post,
+          targetPixels: 320,
+        ).copyWith(cachePolicy: const PixaCachePolicy.noStore()),
+      );
+      final Uint8List bytes;
+      try {
+        bytes = Uint8List.fromList(load.bytes);
+      } finally {
+        load.dispose();
+      }
+      final File file = File(
+        '${Directory.systemTemp.path}/pixa-gallery-source-'
+        '${widget.post.id}-${DateTime.now().microsecondsSinceEpoch}.img',
+      );
+      await file.writeAsBytes(bytes, flush: false);
+      if (!mounted) {
+        unawaited(file.delete());
+        return;
+      }
+      setState(() {
+        _bytes = bytes;
+        _file = file;
+      });
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error;
+      });
+    }
+  }
+
+  void _deleteFile() {
+    final File? file = _file;
+    _file = null;
+    if (file != null && file.existsSync()) {
+      try {
+        file.deleteSync();
+      } on FileSystemException {
+        // Best-effort cleanup for native-only example temp files.
+      }
+    }
+  }
+}
+
+final class _SourceMini extends StatelessWidget {
+  const _SourceMini({required this.label, required this.child});
+
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          child,
+          Positioned(
+            left: 4,
+            right: 4,
+            bottom: 4,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.58),
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Colors.white,
+                    letterSpacing: 0,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+final class _CachePolicyPreview extends StatefulWidget {
+  const _CachePolicyPreview({required this.post});
+
+  final ImagePost post;
+
+  @override
+  State<_CachePolicyPreview> createState() => _CachePolicyPreviewState();
+}
+
+final class _CachePolicyPreviewState extends State<_CachePolicyPreview> {
+  PixaCacheMode _mode = PixaCacheMode.memoryAndDisk;
+  String _status = 'memory + disk';
+
+  @override
+  Widget build(BuildContext context) {
+    final PixaRequest request = _requestForPost(
+      widget.post,
+      targetPixels: 360,
+    ).copyWith(cachePolicy: PixaCachePolicy(mode: _mode));
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        PixaImage(
+          request: request,
+          fit: BoxFit.cover,
+          placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+          progressBuilder: _progressBuilder,
+          errorBuilder: _errorBuilder,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        Positioned(
+          left: 8,
+          right: 8,
+          bottom: 8,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.58),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          _status,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(color: Colors.white, letterSpacing: 0),
+                        ),
+                      ),
+                      PopupMenuButton<PixaCacheMode>(
+                        tooltip: 'Cache mode',
+                        icon: const Icon(
+                          Icons.storage,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                        onSelected: _selectMode,
+                        itemBuilder: (BuildContext context) =>
+                            <PopupMenuEntry<PixaCacheMode>>[
+                              for (final PixaCacheMode mode
+                                  in PixaCacheMode.values)
+                                PopupMenuItem<PixaCacheMode>(
+                                  value: mode,
+                                  child: Text(_cacheModeLabel(mode)),
+                                ),
+                            ],
+                      ),
+                    ],
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      _SmallIconButton(
+                        tooltip: 'Prefetch encoded memory',
+                        icon: Icons.download_for_offline,
+                        onPressed: () => unawaited(_prefetch(request)),
+                      ),
+                      _SmallIconButton(
+                        tooltip: 'Evict encoded and decoded',
+                        icon: Icons.delete_sweep,
+                        onPressed: () => unawaited(_evict(request)),
+                      ),
+                      _SmallIconButton(
+                        tooltip: 'Show cache stats',
+                        icon: Icons.query_stats,
+                        onPressed: _showStats,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _selectMode(PixaCacheMode mode) {
+    setState(() {
+      _mode = mode;
+      _status = _cacheModeLabel(mode);
+    });
+  }
+
+  Future<void> _prefetch(PixaRequest request) async {
+    try {
+      await Pixa.prefetch(request, target: PixaPrefetchTarget.encodedMemory);
+      if (mounted) {
+        setState(() {
+          _status = 'encoded prefetch complete';
+        });
+      }
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _status = 'prefetch failed';
+        });
+      }
+      debugPrint('Pixa cache scenario prefetch failed: $error');
+    }
+  }
+
+  Future<void> _evict(PixaRequest request) async {
+    await Pixa.evict(request);
+    if (mounted) {
+      setState(() {
+        _status = 'evicted request caches';
+      });
+    }
+  }
+
+  void _showStats() {
+    final PixaCacheStats stats = Pixa.cacheStats();
+    setState(() {
+      _status =
+          '${_formatBytes(stats.memoryBytes)} · '
+          '${(stats.hitRate * 100).toStringAsFixed(1)}% hit';
+    });
+  }
+}
+
+final class _ProcessorLabPreview extends StatefulWidget {
+  const _ProcessorLabPreview({required this.post});
+
+  final ImagePost post;
+
+  @override
+  State<_ProcessorLabPreview> createState() => _ProcessorLabPreviewState();
+}
+
+final class _ProcessorLabPreviewState extends State<_ProcessorLabPreview> {
+  late final List<_ProcessorDemo> _demos = _processorDemos();
+  int _index = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final _ProcessorDemo demo = _demos[_index];
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        PixaImage(
+          request: _requestForPost(
+            widget.post,
+            targetPixels: 360,
+            processors: demo.processors,
+          ),
+          fit: BoxFit.cover,
+          placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+          progressBuilder: _progressBuilder,
+          errorBuilder: _errorBuilder,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        Positioned(
+          left: 8,
+          right: 8,
+          bottom: 8,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.58),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      demo.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Colors.white,
+                        letterSpacing: 0,
+                      ),
+                    ),
+                  ),
+                  PopupMenuButton<int>(
+                    tooltip: 'Processor',
+                    icon: const Icon(
+                      Icons.auto_fix_high,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                    onSelected: (int value) => setState(() {
+                      _index = value;
+                    }),
+                    itemBuilder: (BuildContext context) =>
+                        <PopupMenuEntry<int>>[
+                          for (var i = 0; i < _demos.length; i += 1)
+                            PopupMenuItem<int>(
+                              value: i,
+                              child: Text(_demos[i].label),
+                            ),
+                        ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+final class _MetadataPreview extends StatefulWidget {
+  const _MetadataPreview({required this.post});
+
+  final ImagePost post;
+
+  @override
+  State<_MetadataPreview> createState() => _MetadataPreviewState();
+}
+
+final class _MetadataPreviewState extends State<_MetadataPreview> {
+  PixaImageMetadata? _metadata;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_probe());
+  }
+
+  @override
+  void didUpdateWidget(_MetadataPreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.post.imageUrl != widget.post.imageUrl) {
+      setState(() {
+        _metadata = null;
+        _error = null;
+      });
+      unawaited(_probe());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final PixaImageMetadata? metadata = _metadata;
+    if (_error != null) {
+      return const _DisabledScenarioPreview(
+        icon: Icons.error_outline,
+        label: 'metadata probe failed',
+      );
+    }
+    if (metadata == null) {
+      return const _MiniLoadingPreview(label: 'probing metadata');
+    }
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            _MetadataLine(label: 'format', value: metadata.format.name),
+            _MetadataLine(
+              label: 'size',
+              value: '${metadata.width} x ${metadata.height}',
+            ),
+            _MetadataLine(
+              label: 'animated',
+              value: metadata.isAnimated ? 'yes' : 'no',
+            ),
+            _MetadataLine(
+              label: 'progressive',
+              value: metadata.isProgressive ? 'yes' : 'no',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _probe() async {
+    try {
+      final PixaPipelineLoad load = await Pixa.pipeline.load(
+        _requestForPost(
+          widget.post,
+          targetPixels: 320,
+        ).copyWith(cachePolicy: const PixaCachePolicy.noStore()),
+      );
+      final PixaImageMetadata metadata;
+      try {
+        metadata = PixaImageMetadata.parseEncoded(load.bytes);
+      } finally {
+        load.dispose();
+      }
+      if (mounted) {
+        setState(() {
+          _metadata = metadata;
+        });
+      }
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = error;
+        });
+      }
+    }
   }
 }
 
@@ -1826,6 +2772,199 @@ final class _LargeImagePreview extends StatelessWidget {
   }
 }
 
+final class _AnimatedPreview extends StatefulWidget {
+  const _AnimatedPreview({required this.url});
+
+  final String url;
+
+  @override
+  State<_AnimatedPreview> createState() => _AnimatedPreviewState();
+}
+
+final class _AnimatedPreviewState extends State<_AnimatedPreview> {
+  late final PixaAnimationController _controller = PixaAnimationController()
+    ..addListener(_handleChanged);
+  String _status = 'playing';
+
+  @override
+  void dispose() {
+    _controller
+      ..removeListener(_handleChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        PixaImage.network(
+          widget.url,
+          fit: BoxFit.cover,
+          animationController: _controller,
+          placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+          progressBuilder: _progressBuilder,
+          errorBuilder: _errorBuilder,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        Positioned(
+          left: 8,
+          right: 8,
+          bottom: 8,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.58),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      _status,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Colors.white,
+                        letterSpacing: 0,
+                      ),
+                    ),
+                  ),
+                  _SmallIconButton(
+                    tooltip: 'Play',
+                    icon: Icons.play_arrow,
+                    onPressed: _controller.play,
+                  ),
+                  _SmallIconButton(
+                    tooltip: 'Pause',
+                    icon: Icons.pause,
+                    onPressed: _controller.pause,
+                  ),
+                  _SmallIconButton(
+                    tooltip: 'Stop',
+                    icon: Icons.stop,
+                    onPressed: _controller.stop,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _handleChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _status = _controller.state.name;
+    });
+  }
+}
+
+final class _SmallIconButton extends StatelessWidget {
+  const _SmallIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      icon: Icon(icon, size: 18),
+      color: Colors.white,
+      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+      padding: EdgeInsets.zero,
+      onPressed: onPressed,
+    );
+  }
+}
+
+final class _MiniLoadingPreview extends StatelessWidget {
+  const _MiniLoadingPreview({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return ColoredBox(
+      color: colors.surfaceContainerHighest,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const SizedBox.square(
+              dimension: 22,
+              child: CircularProgressIndicator(strokeWidth: 2.2),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.onSurfaceVariant,
+                letterSpacing: 0,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+final class _MetadataLine extends StatelessWidget {
+  const _MetadataLine({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: <Widget>[
+          SizedBox(
+            width: 82,
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: colors.onSurfaceVariant,
+                letterSpacing: 0,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 final class _DisabledScenarioPreview extends StatelessWidget {
   const _DisabledScenarioPreview({required this.icon, required this.label});
 
@@ -1873,6 +3012,133 @@ final class _Scenario {
   final String subtitle;
   final IconData icon;
   final Widget child;
+}
+
+final class _ScenarioGroup {
+  const _ScenarioGroup({required this.title, required this.scenarios});
+
+  final String title;
+  final List<_Scenario> scenarios;
+}
+
+final class _ProcessorDemo {
+  const _ProcessorDemo({required this.label, required this.processors});
+
+  final String label;
+  final List<String> processors;
+}
+
+List<_ProcessorDemo> _processorDemos() {
+  return <_ProcessorDemo>[
+    _ProcessorDemo(
+      label: 'resize fit',
+      processors: <String>[PixaProcessors.resize(width: 320)],
+    ),
+    _ProcessorDemo(
+      label: 'resize exact',
+      processors: <String>[PixaProcessors.resizeExact(240, 160)],
+    ),
+    _ProcessorDemo(
+      label: 'resize to fill',
+      processors: <String>[PixaProcessors.resizeToFill(320, 240)],
+    ),
+    _ProcessorDemo(
+      label: 'thumbnail',
+      processors: <String>[PixaProcessors.thumbnail(320, 240)],
+    ),
+    _ProcessorDemo(
+      label: 'thumbnail exact',
+      processors: <String>[PixaProcessors.thumbnailExact(160, 160)],
+    ),
+    _ProcessorDemo(
+      label: 'crop',
+      processors: <String>[
+        PixaProcessors.crop(x: 0, y: 0, width: 1, height: 1),
+      ],
+    ),
+    _ProcessorDemo(
+      label: 'tile crop resize',
+      processors: <String>[
+        PixaProcessors.tileCropResize(
+          x: 0,
+          y: 0,
+          width: 1,
+          height: 1,
+          decodedWidth: 160,
+          decodedHeight: 160,
+        ),
+      ],
+    ),
+    _ProcessorDemo(
+      label: 'rotate',
+      processors: <String>[PixaProcessors.rotate(90)],
+    ),
+    _ProcessorDemo(
+      label: 'blur',
+      processors: <String>[PixaProcessors.blur(2.0)],
+    ),
+    _ProcessorDemo(
+      label: 'fast blur',
+      processors: <String>[PixaProcessors.fastBlur(2.0)],
+    ),
+    _ProcessorDemo(
+      label: 'filter 3x3',
+      processors: <String>[
+        PixaProcessors.filter3x3(const <double>[0, -1, 0, -1, 5, -1, 0, -1, 0]),
+      ],
+    ),
+    _ProcessorDemo(
+      label: 'flip horizontal',
+      processors: <String>[PixaProcessors.flipHorizontal()],
+    ),
+    _ProcessorDemo(
+      label: 'flip vertical',
+      processors: <String>[PixaProcessors.flipVertical()],
+    ),
+    _ProcessorDemo(
+      label: 'grayscale',
+      processors: <String>[PixaProcessors.grayscale()],
+    ),
+    _ProcessorDemo(
+      label: 'invert',
+      processors: <String>[PixaProcessors.invert()],
+    ),
+    _ProcessorDemo(
+      label: 'brighten',
+      processors: <String>[PixaProcessors.brighten(24)],
+    ),
+    _ProcessorDemo(
+      label: 'contrast',
+      processors: <String>[PixaProcessors.contrast(28)],
+    ),
+    _ProcessorDemo(
+      label: 'hue rotate',
+      processors: <String>[PixaProcessors.hueRotate(45)],
+    ),
+    _ProcessorDemo(
+      label: 'unsharpen',
+      processors: <String>[PixaProcessors.unsharpen(sigma: 1.0, threshold: 2)],
+    ),
+    const _ProcessorDemo(
+      label: 'watermark',
+      processors: <String>[
+        'watermark(text=Pixa,position=bottomRight,padding=14,scale=2)',
+      ],
+    ),
+  ];
+}
+
+String _cacheModeLabel(PixaCacheMode mode) {
+  return switch (mode) {
+    PixaCacheMode.noStore => 'no store',
+    PixaCacheMode.memoryOnly => 'memory only',
+    PixaCacheMode.diskOnly => 'disk only',
+    PixaCacheMode.memoryAndDisk => 'memory + disk',
+    PixaCacheMode.cacheOnly => 'cache only',
+    PixaCacheMode.networkOnly => 'network only',
+    PixaCacheMode.refresh => 'refresh',
+    PixaCacheMode.staleWhileRevalidate => 'stale while revalidate',
+  };
 }
 
 PixaRequest _requestForPost(

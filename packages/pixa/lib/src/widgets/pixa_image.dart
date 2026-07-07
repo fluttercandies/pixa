@@ -1127,7 +1127,12 @@ final class _PixaImageState extends State<PixaImage> {
   }
 
   bool _isVisibleInViewport() {
-    final RenderObject? renderObject = context.findRenderObject();
+    final RenderObject? renderObject;
+    try {
+      renderObject = context.findRenderObject();
+    } on Object {
+      return true;
+    }
     if (renderObject is! RenderBox ||
         !renderObject.attached ||
         !renderObject.hasSize ||
@@ -1140,8 +1145,13 @@ final class _PixaImageState extends State<PixaImage> {
       return false;
     }
 
-    final BuildContext? scrollContext = Scrollable.maybeOf(context)?.context;
-    final RenderObject? viewportObject = scrollContext?.findRenderObject();
+    final RenderObject? viewportObject;
+    try {
+      final BuildContext? scrollContext = Scrollable.maybeOf(context)?.context;
+      viewportObject = scrollContext?.findRenderObject();
+    } on Object {
+      return true;
+    }
     if (viewportObject is! RenderBox ||
         !viewportObject.attached ||
         !viewportObject.hasSize ||

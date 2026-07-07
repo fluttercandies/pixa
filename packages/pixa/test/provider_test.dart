@@ -594,6 +594,112 @@ void main() {
     },
   );
 
+  test(
+    'PixaProvider keeps shared in-flight load alive while duplicate consumer remains',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-shared-inflight-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      final List<PixaEvent> events = <PixaEvent>[];
+      await Pixa.configure(
+        PixaConfig(
+          cacheRootPath: cacheRoot.path,
+          observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+        ),
+      );
+
+      final Completer<void> fetchStarted = Completer<void>();
+      final Completer<Uint8List> pendingBytes = Completer<Uint8List>();
+      var loaderCalls = 0;
+      var decodeCalls = 0;
+      final PixaRequest request = PixaRequest(
+        source: PixaSource.custom('shared-visible-image', () async {
+          loaderCalls += 1;
+          if (!fetchStarted.isCompleted) {
+            fetchStarted.complete();
+          }
+          return pendingBytes.future;
+        }),
+        cachePolicy: const PixaCachePolicy.noStore(),
+      );
+
+      Future<ui.Codec> decode(
+        ui.ImmutableBuffer buffer, {
+        ui.TargetImageSizeCallback? getTargetSize,
+      }) async {
+        decodeCalls += 1;
+        return ui.instantiateImageCodec(_minimalGif());
+      }
+
+      final PixaProvider firstProvider = PixaProvider(request: request);
+      final PixaProvider secondProvider = PixaProvider(request: request);
+      final ImageStreamCompleter firstCompleter = firstProvider.loadImage(
+        firstProvider,
+        decode,
+      );
+      final ImageStreamCompleter secondCompleter = secondProvider.loadImage(
+        secondProvider,
+        decode,
+      );
+      final List<Object> firstErrors = <Object>[];
+      final List<Object> secondErrors = <Object>[];
+      final Completer<ImageInfo> secondImage = Completer<ImageInfo>();
+      final ImageStreamListener firstListener = ImageStreamListener(
+        (ImageInfo image, bool synchronousCall) {
+          image.dispose();
+          fail('cancelled duplicate consumer should not receive an image');
+        },
+        onError: (Object error, StackTrace? stackTrace) {
+          firstErrors.add(error);
+        },
+      );
+      final ImageStreamListener secondListener = ImageStreamListener(
+        (ImageInfo image, bool synchronousCall) {
+          if (!secondImage.isCompleted) {
+            secondImage.complete(image);
+          } else {
+            image.dispose();
+          }
+        },
+        onError: (Object error, StackTrace? stackTrace) {
+          secondErrors.add(error);
+        },
+      );
+
+      firstCompleter.addListener(firstListener);
+      secondCompleter.addListener(secondListener);
+      await fetchStarted.future.timeout(const Duration(seconds: 5));
+      firstCompleter.removeListener(firstListener);
+      await Future<void>.delayed(Duration.zero);
+      pendingBytes.complete(_minimalGif());
+      final ImageInfo image = await secondImage.future.timeout(
+        const Duration(seconds: 5),
+      );
+      secondCompleter.removeListener(secondListener);
+      image.dispose();
+
+      expect(loaderCalls, 1);
+      expect(decodeCalls, 1);
+      expect(firstErrors, isEmpty);
+      expect(secondErrors, isEmpty);
+      expect(
+        events.where((PixaEvent event) => event.name == 'scheduler.coalesced'),
+        hasLength(1),
+      );
+      final PixaEvent cancel = events.singleWhere(
+        (PixaEvent event) =>
+            event.name == 'request.cancel' &&
+            event.attributes['remainingListeners'] == 1,
+      );
+      expect(cancel.attributes['started'], isTrue);
+      expect(
+        events.where((PixaEvent event) => event.name == 'runtime.cancel'),
+        isEmpty,
+      );
+    },
+  );
+
   test('PixaProvider limits concurrent Flutter decode callbacks', () async {
     final Directory cacheRoot = await Directory.systemTemp.createTemp(
       'pixa-provider-decode-limit-',

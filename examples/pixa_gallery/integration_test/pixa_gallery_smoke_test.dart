@@ -108,7 +108,45 @@ void main() {
     );
     final bool scenarioInitialVisible =
         find.text('Pixa scenarios').evaluate().isNotEmpty &&
-        find.text('Provider').evaluate().isNotEmpty;
+        find.text('Display APIs').evaluate().isNotEmpty &&
+        find.text('Provider').evaluate().isNotEmpty &&
+        find.text('Controller').evaluate().isNotEmpty;
+    await _dragUntilVisible(
+      tester,
+      scrollable: find.byKey(const ValueKey<String>('pixa-scenarios-scroll')),
+      target: find.text('Source bundle'),
+    );
+    final bool sourceScenarioVisible = find
+        .text('Source bundle')
+        .evaluate()
+        .isNotEmpty;
+    await _dragUntilVisible(
+      tester,
+      scrollable: find.byKey(const ValueKey<String>('pixa-scenarios-scroll')),
+      target: find.text('Cache policy'),
+    );
+    final bool cacheScenarioVisible = find
+        .text('Cache policy')
+        .evaluate()
+        .isNotEmpty;
+    await _dragUntilVisible(
+      tester,
+      scrollable: find.byKey(const ValueKey<String>('pixa-scenarios-scroll')),
+      target: find.text('Processor lab'),
+    );
+    final bool processorScenarioVisible = find
+        .text('Processor lab')
+        .evaluate()
+        .isNotEmpty;
+    await _dragUntilVisible(
+      tester,
+      scrollable: find.byKey(const ValueKey<String>('pixa-scenarios-scroll')),
+      target: find.text('Metadata'),
+    );
+    final bool metadataScenarioVisible = find
+        .text('Metadata')
+        .evaluate()
+        .isNotEmpty;
     await _dragUntilVisible(
       tester,
       scrollable: find.byKey(const ValueKey<String>('pixa-scenarios-scroll')),
@@ -117,7 +155,12 @@ void main() {
     _check(
       checks,
       'scenarioCatalog',
-      scenarioInitialVisible && find.text('Video frame').evaluate().isNotEmpty,
+      scenarioInitialVisible &&
+          sourceScenarioVisible &&
+          cacheScenarioVisible &&
+          processorScenarioVisible &&
+          metadataScenarioVisible &&
+          find.text('Video frame').evaluate().isNotEmpty,
     );
 
     await tester.pumpWidget(

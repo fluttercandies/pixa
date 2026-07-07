@@ -371,6 +371,50 @@ void main() {
     },
   );
 
+  testWidgets('PixaImage ignores stale visibility callbacks after disposal', (
+    WidgetTester tester,
+  ) async {
+    await _configure('pixa-widget-stale-visibility-');
+    final ScrollController scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
+    final PixaController controller = PixaController();
+    addTearDown(controller.dispose);
+    final PixaRequest request = PixaRequest(
+      source: PixaSource.custom('stale-visibility', () async {
+        throw StateError('decoded cache should satisfy this widget test');
+      }),
+      cachePolicy: const PixaCachePolicy.noStore(),
+    );
+    await _seedDecodedCache(tester, request);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SizedBox(
+          height: 100,
+          child: SingleChildScrollView(
+            controller: scrollController,
+            child: Column(
+              children: <Widget>[
+                SizedBox(
+                  height: 60,
+                  child: PixaImage(controller: controller, request: request),
+                ),
+                const SizedBox(height: 600),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    scrollController.jumpTo(200);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(controller.isAttached, isFalse);
+  });
+
   testWidgets('PixaImage forwards gapless playback to Flutter Image', (
     WidgetTester tester,
   ) async {
