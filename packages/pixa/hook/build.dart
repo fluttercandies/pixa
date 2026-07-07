@@ -331,6 +331,11 @@ List<Uri> _officialOptionalManifests(BuildInput input) {
       input.packageRoot.resolve('plugins/optional/pixa_webp_processor.json'),
     );
   }
+  if (_boolUserDefine(input, 'enable_mjpeg_video_frame', defaultValue: false)) {
+    manifests.add(
+      input.packageRoot.resolve('plugins/optional/pixa_mjpeg_video_frame.json'),
+    );
+  }
   return List<Uri>.unmodifiable(manifests);
 }
 

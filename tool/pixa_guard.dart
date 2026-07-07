@@ -433,6 +433,7 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
     'packages/pixa/plugins/pixa_plugins.json',
     'packages/pixa/plugins/optional/pixa_jpeg_turbo_processor.json',
     'packages/pixa/plugins/optional/pixa_webp_processor.json',
+    'packages/pixa/plugins/optional/pixa_mjpeg_video_frame.json',
   ]) {
     final File file = File('${root.path}/$path');
     if (!file.existsSync()) {
@@ -441,7 +442,7 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
     }
     sources[path] = file.readAsStringSync();
   }
-  if (sources.length < 8) {
+  if (sources.length < 9) {
     return;
   }
 
@@ -529,8 +530,10 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
     'enable_native_roi',
     'enable_jpeg_turbo_roi',
     'enable_webp_roi',
+    'enable_mjpeg_video_frame',
     'plugins/optional/pixa_jpeg_turbo_processor.json',
     'plugins/optional/pixa_webp_processor.json',
+    'plugins/optional/pixa_mjpeg_video_frame.json',
     'link-arg=-Wl,-dead_strip',
     'link-arg=-Wl,--gc-sections',
     'link-arg=-Wl,--as-needed',
@@ -549,6 +552,7 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
   for (final String token in <String>[
     'pixa_jpeg_turbo_processor_plugin_init',
     'pixa_webp_processor_plugin_init',
+    'pixa_mjpeg_video_frame_plugin_init',
     'require_cargo_feature',
     'jpeg-turbo-roi',
     'webp-roi',
@@ -582,6 +586,15 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
     expectedModuleId: 'pixa.processor.webp',
     expectedEntrypoint: 'pixa_webp_processor_plugin_init',
     expectedRoute: 'tile:webp',
+  );
+  _checkOptionalVideoFrameManifest(
+    root,
+    failures,
+    path: 'packages/pixa/plugins/optional/pixa_mjpeg_video_frame.json',
+    expectedModuleId: 'pixa.video_frame.mjpeg',
+    expectedEntrypoint: 'pixa_mjpeg_video_frame_plugin_init',
+    expectedRoute: 'video-frame:mjpeg',
+    expectedOutputMime: 'image/jpeg',
   );
 }
 
@@ -628,10 +641,12 @@ void _checkDefaultManifestExcludesOptionalNativeRoi(
   const Set<String> optionalModuleIds = <String>{
     'pixa.processor.jpeg_turbo',
     'pixa.processor.webp',
+    'pixa.video_frame.mjpeg',
   };
   const Set<String> optionalEntrypoints = <String>{
     'pixa_jpeg_turbo_processor_plugin_init',
     'pixa_webp_processor_plugin_init',
+    'pixa_mjpeg_video_frame_plugin_init',
   };
   for (final Object? rawModule in modules) {
     if (rawModule is! Map<String, Object?>) {
@@ -705,6 +720,62 @@ void _checkOptionalNativeRoiManifest(
     failures.add(
       'runtime packaging discipline: $path module $expectedModuleId must '
       'declare processor route $expectedRoute',
+    );
+  }
+}
+
+void _checkOptionalVideoFrameManifest(
+  Directory root,
+  List<String> failures, {
+  required String path,
+  required String expectedModuleId,
+  required String expectedEntrypoint,
+  required String expectedRoute,
+  required String expectedOutputMime,
+}) {
+  final File file = File('${root.path}/$path');
+  final List<Object?> modules = _manifestModules(
+    root,
+    failures,
+    path,
+    file.readAsStringSync(),
+  );
+  final Map<String, Object?>? module = modules
+      .whereType<Map<String, Object?>>()
+      .cast<Map<String, Object?>?>()
+      .firstWhere(
+        (Map<String, Object?>? item) => item?['moduleId'] == expectedModuleId,
+        orElse: () => null,
+      );
+  if (module == null) {
+    failures.add(
+      'runtime packaging discipline: $path missing module $expectedModuleId',
+    );
+    return;
+  }
+  if (module['deployment'] != 'hostLinkedPluginModule' ||
+      module['entrypointSymbol'] != expectedEntrypoint ||
+      module['hostManagedRuntime'] != true ||
+      module['binaryMessages'] != true ||
+      module['ownedBuffers'] != true ||
+      module['streamHandles'] != true) {
+    failures.add(
+      'runtime packaging discipline: $path module $expectedModuleId must use '
+      'host-linked single-runtime binary message ABI',
+    );
+  }
+  final Object? capabilities = module['capabilities'];
+  final Object? sourceKinds = module['fetcherSourceKinds'];
+  final Object? outputMimeTypes = module['videoFrameOutputMimeTypes'];
+  if (capabilities is! List<Object?> ||
+      !capabilities.contains('fetcher') ||
+      sourceKinds is! List<Object?> ||
+      !sourceKinds.contains(expectedRoute) ||
+      outputMimeTypes is! List<Object?> ||
+      !outputMimeTypes.contains(expectedOutputMime)) {
+    failures.add(
+      'runtime packaging discipline: $path module $expectedModuleId must '
+      'declare fetcher route $expectedRoute and output $expectedOutputMime',
     );
   }
 }

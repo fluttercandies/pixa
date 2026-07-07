@@ -41,6 +41,8 @@ use turbojpeg_sys as _;
 
 #[cfg(pixa_jpeg_turbo_processor)]
 mod jpeg_turbo_processor;
+#[cfg(pixa_mjpeg_video_frame)]
+mod mjpeg_video_frame;
 #[cfg(pixa_webp_processor)]
 mod webp_processor;
 

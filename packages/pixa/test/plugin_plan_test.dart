@@ -199,46 +199,56 @@ void main() {
     },
   );
 
-  test(
-    'runtime plugin plan loads official optional JPEG and WebP ROI modules',
-    () {
-      final PixaRuntimePluginBuildPlan plan = PixaRuntimePluginBuildPlan.load(
-        coreManifest: Directory.current.uri.resolve(
-          'plugins/pixa_plugins.json',
+  test('runtime plugin plan loads official optional native modules', () {
+    final PixaRuntimePluginBuildPlan plan = PixaRuntimePluginBuildPlan.load(
+      coreManifest: Directory.current.uri.resolve('plugins/pixa_plugins.json'),
+      additionalManifests: <Uri>[
+        Directory.current.uri.resolve(
+          'plugins/optional/pixa_jpeg_turbo_processor.json',
         ),
-        additionalManifests: <Uri>[
-          Directory.current.uri.resolve(
-            'plugins/optional/pixa_jpeg_turbo_processor.json',
-          ),
-          Directory.current.uri.resolve(
-            'plugins/optional/pixa_webp_processor.json',
-          ),
-        ],
-      );
+        Directory.current.uri.resolve(
+          'plugins/optional/pixa_webp_processor.json',
+        ),
+        Directory.current.uri.resolve(
+          'plugins/optional/pixa_mjpeg_video_frame.json',
+        ),
+      ],
+    );
 
-      expect(plan.modules, hasLength(5));
-      expect(plan.hostLinkedPluginModules, 3);
-      expect(plan.canUseSingleHostBinary, isTrue);
+    expect(plan.modules, hasLength(6));
+    expect(plan.hostLinkedPluginModules, 4);
+    expect(plan.canUseSingleHostBinary, isTrue);
 
-      final PixaRuntimePluginModulePlan jpeg = plan.modules.singleWhere(
-        (PixaRuntimePluginModulePlan module) =>
-            module.moduleId == 'pixa.processor.jpeg_turbo',
-      );
-      expect(jpeg.entrypointSymbol, 'pixa_jpeg_turbo_processor_plugin_init');
-      expect(jpeg.processorOperations, <String>{'tile:jpeg'});
-      expect(jpeg.capabilities, <String>{'processor'});
-      expect(jpeg.link.isNotEmpty, isFalse);
+    final PixaRuntimePluginModulePlan jpeg = plan.modules.singleWhere(
+      (PixaRuntimePluginModulePlan module) =>
+          module.moduleId == 'pixa.processor.jpeg_turbo',
+    );
+    expect(jpeg.entrypointSymbol, 'pixa_jpeg_turbo_processor_plugin_init');
+    expect(jpeg.processorOperations, <String>{'tile:jpeg'});
+    expect(jpeg.capabilities, <String>{'processor'});
+    expect(jpeg.link.isNotEmpty, isFalse);
 
-      final PixaRuntimePluginModulePlan webp = plan.modules.singleWhere(
-        (PixaRuntimePluginModulePlan module) =>
-            module.moduleId == 'pixa.processor.webp',
-      );
-      expect(webp.entrypointSymbol, 'pixa_webp_processor_plugin_init');
-      expect(webp.processorOperations, <String>{'tile:webp'});
-      expect(webp.capabilities, <String>{'processor'});
-      expect(webp.link.isNotEmpty, isFalse);
-    },
-  );
+    final PixaRuntimePluginModulePlan webp = plan.modules.singleWhere(
+      (PixaRuntimePluginModulePlan module) =>
+          module.moduleId == 'pixa.processor.webp',
+    );
+    expect(webp.entrypointSymbol, 'pixa_webp_processor_plugin_init');
+    expect(webp.processorOperations, <String>{'tile:webp'});
+    expect(webp.capabilities, <String>{'processor'});
+    expect(webp.link.isNotEmpty, isFalse);
+
+    final PixaRuntimePluginModulePlan mjpeg = plan.modules.singleWhere(
+      (PixaRuntimePluginModulePlan module) =>
+          module.moduleId == 'pixa.video_frame.mjpeg',
+    );
+    expect(mjpeg.entrypointSymbol, 'pixa_mjpeg_video_frame_plugin_init');
+    expect(mjpeg.fetcherSourceKinds, <String>{'video-frame:mjpeg'});
+    expect(mjpeg.videoFrameOutputMimeTypes, <String>{'image/jpeg'});
+    expect(mjpeg.videoFrameNearest, isTrue);
+    expect(mjpeg.videoFrameExact, isFalse);
+    expect(mjpeg.capabilities, <String>{'fetcher'});
+    expect(mjpeg.link.isNotEmpty, isFalse);
+  });
 
   test('runtime plugin plan accepts decoder signature routes', () {
     final PixaRuntimePluginBuildPlan plan =

@@ -14,6 +14,7 @@ const ABI_VERSION: i64 = 1;
 const DEFAULT_MANIFEST_RELATIVE_PATH: &str = "../../packages/pixa/plugins/pixa_plugins.json";
 const JPEG_TURBO_PROCESSOR_ENTRYPOINT: &str = "pixa_jpeg_turbo_processor_plugin_init";
 const WEBP_PROCESSOR_ENTRYPOINT: &str = "pixa_webp_processor_plugin_init";
+const MJPEG_VIDEO_FRAME_ENTRYPOINT: &str = "pixa_mjpeg_video_frame_plugin_init";
 const SUPPORTED_VIDEO_FRAME_OUTPUT_MIME_TYPES: &[&str] = &[
     "image/jpeg",
     "image/jpg",
@@ -415,6 +416,7 @@ fn emit_link_directives(modules: &[ModulePlan]) {
 fn emit_official_module_cfgs(modules: &[ModulePlan]) -> Result<(), String> {
     println!("cargo:rustc-check-cfg=cfg(pixa_jpeg_turbo_processor)");
     println!("cargo:rustc-check-cfg=cfg(pixa_webp_processor)");
+    println!("cargo:rustc-check-cfg=cfg(pixa_mjpeg_video_frame)");
     for module in modules {
         match module.entrypoint_symbol.as_deref() {
             Some(JPEG_TURBO_PROCESSOR_ENTRYPOINT) => {
@@ -436,6 +438,10 @@ fn emit_official_module_cfgs(modules: &[ModulePlan]) -> Result<(), String> {
                 {
                     require_cargo_feature(&module.module_id, "WebP ROI", "webp-roi")?;
                 }
+            }
+            Some(MJPEG_VIDEO_FRAME_ENTRYPOINT) => {
+                validate_official_mjpeg_video_frame_module(module)?;
+                println!("cargo:rustc-cfg=pixa_mjpeg_video_frame");
             }
             _ => {}
         }
@@ -477,6 +483,38 @@ fn validate_official_processor_module(
     {
         return Err(format!(
             "official {label} module {} must claim processor operation {operation}",
+            module.module_id
+        ));
+    }
+    Ok(())
+}
+
+fn validate_official_mjpeg_video_frame_module(module: &ModulePlan) -> Result<(), String> {
+    if !module.capabilities.fetcher {
+        return Err(format!(
+            "official MJPEG video-frame module {} must declare fetcher capability",
+            module.module_id
+        ));
+    }
+    if !module
+        .routes
+        .fetcher_source_kinds
+        .iter()
+        .any(|value| value.eq_ignore_ascii_case("video-frame:mjpeg"))
+    {
+        return Err(format!(
+            "official MJPEG video-frame module {} must claim video-frame:mjpeg",
+            module.module_id
+        ));
+    }
+    if !module
+        .routes
+        .video_frame_output_mime_types
+        .iter()
+        .any(|value| normalize_mime_type(value) == "image/jpeg")
+    {
+        return Err(format!(
+            "official MJPEG video-frame module {} must declare image/jpeg output",
             module.module_id
         ));
     }

@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "modules": [
+    {
+      "moduleId": "pixa.video_frame.mjpeg",
+      "packageName": "pixa",
+      "deployment": "hostLinkedPluginModule",
+      "abiVersion": 1,
+      "implementationLanguage": "rust",
+      "entrypointSymbol": "pixa_mjpeg_video_frame_plugin_init",
+      "capabilities": ["fetcher"],
+      "fetcherSourceKinds": ["video-frame:mjpeg"],
+      "videoFrameOutputMimeTypes": ["image/jpeg"],
+      "videoFrameNearest": true,
+      "videoFrameExact": false,
+      "hostManagedRuntime": true,
+      "binaryMessages": true,
+      "ownedBuffers": true,
+      "streamHandles": true
+    }
+  ]
+}
