@@ -73,7 +73,10 @@ self-check, example smoke, and benchmark smoke.
 
 ## User Documentation
 
-See [packages/pixa/README.md](packages/pixa/README.md) for quick start,
-advanced requests, cache policy, privacy behavior, plugin contracts, supported
-formats, runtime platform support, stability policy, migration policy, and the
-example gallery.
+See [packages/pixa/README.md](packages/pixa/README.md) for English user
+documentation covering quick start, gallery performance strategy, advanced
+requests, cache policy, privacy behavior, plugin contracts, supported formats,
+runtime platform support, release preflight, stability policy, migration policy,
+and the example gallery.
+
+中文文档见 [packages/pixa/README_ZH.md](packages/pixa/README_ZH.md)。

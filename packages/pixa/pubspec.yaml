@@ -30,4 +30,10 @@ dev_dependencies:
   flutter_lints: ">=5.0.0 <7.0.0"
 
 flutter:
+  plugin:
+    platforms:
+      ios:
+        pluginClass: PixaPlugin
+      macos:
+        pluginClass: PixaPlugin
   assets: []

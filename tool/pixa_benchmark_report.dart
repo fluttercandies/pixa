@@ -75,6 +75,9 @@ const Map<String, List<String>> _requiredCoverage = <String, List<String>>{
     'runtime_format_decode_xpm_rgba',
   ],
   'scroll prefetch': <String>['scroll_prefetch_planning'],
+  'rapid scroll prefetch': <String>['scroll_prefetch_rapid_overlap'],
+  'prefetch recent eviction': <String>['scroll_prefetch_recent_eviction'],
+  'image completion pacing': <String>['image_completion_frame_gate_burst'],
   'request key hot path': <String>['request_cache_key_memoized_hot_path'],
   'format route hot path': <String>['format_route_capability_lookup'],
   'animated image': <String>['flutter_animated_gif_frames'],
@@ -109,6 +112,8 @@ const Map<String, String> _smokeEnvironment = <String, String>{
   'PIXA_BENCH_PREFETCH_VISIBLE': '120',
   'PIXA_BENCH_PREFETCH_ITEMS': '2000',
   'PIXA_BENCH_REQUEST_KEY_ITERS': '50000',
+  'PIXA_BENCH_COMPLETION_BURST_IMAGES': '8',
+  'PIXA_BENCH_COMPLETION_FRAME_BUDGET': '2',
   'PIXA_BENCH_DECODE_ITERS': '20',
   'PIXA_BENCH_ANIMATED_ITERS': '10',
 };
@@ -170,6 +175,12 @@ void main(List<String> args) {
   stdout.writeln('Benchmark report written to ${output.path}');
 }
 
+List<String> requiredBenchmarkCoverageNames() {
+  return _requiredCoverage.values
+      .expand((List<String> names) => names)
+      .toList(growable: false);
+}
+
 String get _usage => '''
 Usage: dart run tool/pixa_benchmark_report.dart [--smoke] [--include-jpeg-turbo] [--include-webp-roi] [--output=<path>]
 
@@ -193,7 +204,7 @@ Iterable<_BenchmarkRow> _parseRows(String output, String source) sync* {
       continue;
     }
     final List<String> parts = line.split(',');
-    if (parts.length != 5) {
+    if (parts.length < 5) {
       continue;
     }
     final int? iterations = int.tryParse(parts[1]);

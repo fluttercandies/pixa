@@ -5,7 +5,6 @@ import 'dart:typed_data';
 
 import 'package:flexbox_layout/flexbox_layout.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:pixa/pixa.dart';
 import 'package:pixa/pixa_debug.dart';
 
@@ -433,7 +432,7 @@ final class _PixaGalleryHomeState extends State<PixaGalleryHome> {
         child: CustomScrollView(
           key: const ValueKey<String>('pixa-gallery-scroll'),
           controller: _scrollController,
-          scrollCacheExtent: const ScrollCacheExtent.pixels(320),
+          cacheExtent: 320,
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: <Widget>[
             SliverToBoxAdapter(

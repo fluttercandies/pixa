@@ -206,6 +206,9 @@ jobs:
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
       - name: Install root dependencies
         run: dart pub get
+      - name: Enable Swift Package Manager
+        if: matrix.platform == 'ios' || matrix.platform == 'macos'
+        run: flutter config --enable-swift-package-manager
       - name: Build and run Android platform probe
         if: matrix.platform == 'android'
         uses: reactivecircus/android-emulator-runner@v2
@@ -319,6 +322,9 @@ jobs:
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
       - name: Install root dependencies
         run: dart pub get
+      - name: Enable Swift Package Manager
+        if: matrix.platform == 'ios' || matrix.platform == 'macos'
+        run: flutter config --enable-swift-package-manager
       - name: Build and run Android example smoke
         if: matrix.platform == 'android'
         uses: reactivecircus/android-emulator-runner@v2

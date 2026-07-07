@@ -76,6 +76,10 @@ List<_Step> _releaseSteps() {
       'run',
       'tool/pixa_example_smoke_self_test.dart',
     ]),
+    _Step('Run benchmark report self-test', 'dart', <String>[
+      'run',
+      'tool/pixa_benchmark_report_self_test.dart',
+    ]),
     _Step('Run example smoke check', 'melos', <String>['run', 'example']),
     _Step('Generate smoke benchmark report', 'dart', <String>[
       'run',

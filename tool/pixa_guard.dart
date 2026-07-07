@@ -44,6 +44,7 @@ void main() {
   );
   _checkStableRasterFormatMatrix(root, failures);
   _checkRuntimePackagingDiscipline(root, failures);
+  _checkSwiftPackageManagerSupport(root, failures);
   _checkPublicExports(root, failures);
   _checkUnsafeBoundary(root, failures);
   _checkRustResolvedLicenses(root, failures);
@@ -596,6 +597,149 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
     expectedRoute: 'video-frame:mjpeg',
     expectedOutputMime: 'image/jpeg',
   );
+}
+
+void _checkSwiftPackageManagerSupport(Directory root, List<String> failures) {
+  final Map<String, String> sources = <String, String>{};
+  for (final String path in <String>[
+    'packages/pixa/pubspec.yaml',
+    'packages/pixa/ios/pixa/Package.swift',
+    'packages/pixa/macos/pixa/Package.swift',
+    'packages/pixa/ios/pixa/Sources/pixa/PixaPlugin.swift',
+    'packages/pixa/macos/pixa/Sources/pixa/PixaPlugin.swift',
+    'packages/pixa/ios/pixa.podspec',
+    'packages/pixa/macos/pixa.podspec',
+    '.github/workflows/ci.yml',
+  ]) {
+    final File file = File('${root.path}/$path');
+    if (!file.existsSync()) {
+      failures.add('SwiftPM support: $path is missing');
+      continue;
+    }
+    sources[path] = file.readAsStringSync();
+  }
+  if (sources.length < 8) {
+    return;
+  }
+
+  for (final String token in <String>[
+    'plugin:',
+    'platforms:',
+    'ios:',
+    'macos:',
+    'pluginClass: PixaPlugin',
+  ]) {
+    _requireRawToken(
+      sources,
+      failures,
+      'SwiftPM support',
+      'packages/pixa/pubspec.yaml',
+      token,
+    );
+  }
+
+  _checkSwiftPackageManifest(
+    sources,
+    failures,
+    path: 'packages/pixa/ios/pixa/Package.swift',
+    platformToken: '.iOS("13.0")',
+  );
+  _checkSwiftPackageManifest(
+    sources,
+    failures,
+    path: 'packages/pixa/macos/pixa/Package.swift',
+    platformToken: '.macOS("10.15")',
+  );
+  _checkDarwinPluginSource(
+    sources,
+    failures,
+    path: 'packages/pixa/ios/pixa/Sources/pixa/PixaPlugin.swift',
+    flutterImport: 'import Flutter',
+  );
+  _checkDarwinPluginSource(
+    sources,
+    failures,
+    path: 'packages/pixa/macos/pixa/Sources/pixa/PixaPlugin.swift',
+    flutterImport: 'import FlutterMacOS',
+  );
+  _checkPodspec(
+    sources,
+    failures,
+    path: 'packages/pixa/ios/pixa.podspec',
+    flutterDependency: "s.dependency 'Flutter'",
+    platformToken: "s.platform = :ios, '13.0'",
+  );
+  _checkPodspec(
+    sources,
+    failures,
+    path: 'packages/pixa/macos/pixa.podspec',
+    flutterDependency: "s.dependency 'FlutterMacOS'",
+    platformToken: "s.platform = :osx, '10.15'",
+  );
+  _requireRawToken(
+    sources,
+    failures,
+    'SwiftPM support',
+    '.github/workflows/ci.yml',
+    'flutter config --enable-swift-package-manager',
+  );
+}
+
+void _checkSwiftPackageManifest(
+  Map<String, String> sources,
+  List<String> failures, {
+  required String path,
+  required String platformToken,
+}) {
+  for (final String token in <String>[
+    '// swift-tools-version: 5.9',
+    'name: "pixa"',
+    platformToken,
+    '.library(name: "pixa", targets: ["pixa"])',
+    '.package(name: "FlutterFramework", path: "../FlutterFramework")',
+    '.product(name: "FlutterFramework", package: "FlutterFramework")',
+  ]) {
+    _requireRawToken(sources, failures, 'SwiftPM support', path, token);
+  }
+}
+
+void _checkDarwinPluginSource(
+  Map<String, String> sources,
+  List<String> failures, {
+  required String path,
+  required String flutterImport,
+}) {
+  for (final String token in <String>[
+    flutterImport,
+    'public class PixaPlugin: NSObject, FlutterPlugin',
+    'public static func register(with registrar: FlutterPluginRegistrar)',
+  ]) {
+    _requireRawToken(sources, failures, 'SwiftPM support', path, token);
+  }
+  if (sources[path]?.contains('FlutterMethodChannel') == true) {
+    failures.add(
+      'SwiftPM support: $path must stay registration-only and avoid a method channel',
+    );
+  }
+}
+
+void _checkPodspec(
+  Map<String, String> sources,
+  List<String> failures, {
+  required String path,
+  required String flutterDependency,
+  required String platformToken,
+}) {
+  for (final String token in <String>[
+    "s.name             = 'pixa'",
+    "s.version          = '0.1.0-dev.1'",
+    "s.source_files     = 'pixa/Sources/pixa/**/*'",
+    flutterDependency,
+    platformToken,
+    "s.swift_version = '5.0'",
+  ]) {
+    _requireRawToken(sources, failures, 'SwiftPM support', path, token);
+  }
 }
 
 void _requireRawToken(

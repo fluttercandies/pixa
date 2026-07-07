@@ -5,8 +5,10 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pixa/pixa.dart';
+import 'package:pixa/pixa_debug.dart';
 import 'package:pixa/src/image_format_catalog.dart';
 
 void main() {
@@ -271,6 +273,145 @@ void main() {
     expect(avgNs, lessThan(maxAvgNs));
   });
 
+  test('image completion frame gate burst benchmark', () async {
+    final int imageCount = _envInt('PIXA_BENCH_COMPLETION_BURST_IMAGES', 12);
+    final int frameBudget = _envInt('PIXA_BENCH_COMPLETION_FRAME_BUDGET', 3);
+    final Directory cacheRoot = await Directory.systemTemp.createTemp(
+      'pixa-bench-completion-burst-',
+    );
+    addTearDown(() => cacheRoot.delete(recursive: true));
+    await Pixa.configure(
+      PixaConfig(
+        cacheRootPath: cacheRoot.path,
+        decodeConcurrency: imageCount,
+        maxImageCompletionsPerFrame: frameBudget,
+      ),
+    );
+    await _waitForCompletionGateIdle();
+
+    final Uint8List bytes = _minimalGif();
+    final List<Completer<void>> decodeReturned = List<Completer<void>>.generate(
+      imageCount,
+      (_) => Completer<void>(),
+    );
+    final List<Completer<ImageInfo>> delivered =
+        List<Completer<ImageInfo>>.generate(
+          imageCount,
+          (_) => Completer<ImageInfo>(),
+        );
+    final List<ImageInfo> retainedImages = <ImageInfo>[];
+    addTearDown(() {
+      for (final ImageInfo image in retainedImages) {
+        image.dispose();
+      }
+    });
+
+    Future<ui.Codec> decodeAt(
+      int index,
+      ui.ImmutableBuffer buffer, {
+      ui.TargetImageSizeCallback? getTargetSize,
+    }) async {
+      final ui.Codec codec = await ui.instantiateImageCodec(bytes);
+      decodeReturned[index].complete();
+      return codec;
+    }
+
+    final List<PixaProvider> providers = List<PixaProvider>.generate(
+      imageCount,
+      (int index) => PixaProvider(
+        request: PixaRequest(
+          source: PixaSource.custom(
+            'completion-burst-bench-$index',
+            () async => bytes,
+          ),
+          cachePolicy: const PixaCachePolicy.noStore(),
+        ),
+      ),
+    );
+    final List<ImageStreamCompleter> completers =
+        List<ImageStreamCompleter>.generate(
+          imageCount,
+          (int index) => providers[index].loadImage(
+            providers[index],
+            (
+              ui.ImmutableBuffer buffer, {
+              ui.TargetImageSizeCallback? getTargetSize,
+            }) => decodeAt(index, buffer, getTargetSize: getTargetSize),
+          ),
+        );
+    final List<ImageStreamListener> listeners =
+        List<ImageStreamListener>.generate(imageCount, (int index) {
+          return ImageStreamListener((ImageInfo image, bool synchronousCall) {
+            if (!delivered[index].isCompleted) {
+              retainedImages.add(image);
+              delivered[index].complete(image);
+            } else {
+              image.dispose();
+            }
+          });
+        });
+    addTearDown(() {
+      for (var index = 0; index < imageCount; index += 1) {
+        completers[index].removeListener(listeners[index]);
+      }
+    });
+
+    final Stopwatch stopwatch = Stopwatch()..start();
+    for (var index = 0; index < imageCount; index += 1) {
+      completers[index].addListener(listeners[index]);
+    }
+    await Future.wait<void>(
+      decodeReturned.map((Completer<void> completer) => completer.future),
+    ).timeout(const Duration(seconds: 5));
+    await Future<void>.delayed(Duration.zero);
+
+    final Map<String, Object?> firstSnapshot = PixaDebugInspector.snapshot()
+        .toJson();
+    final Map<String, Object?> firstDisplayDecoder =
+        firstSnapshot['displayDecoder']! as Map<String, Object?>;
+    final int firstQueueDepth =
+        firstDisplayDecoder['completionQueueDepth']! as int;
+    final int firstReleasedThisFrame =
+        firstDisplayDecoder['completionsReleasedThisFrame']! as int;
+    final int firstDelivered = delivered
+        .where((Completer<ImageInfo> completer) => completer.isCompleted)
+        .length;
+
+    expect(firstQueueDepth, greaterThan(0));
+    expect(firstReleasedThisFrame, lessThanOrEqualTo(frameBudget));
+    expect(firstDisplayDecoder['completionFrameScheduled'], isTrue);
+    expect(firstDelivered, lessThan(imageCount));
+
+    for (var attempt = 0; attempt < imageCount + 4; attempt += 1) {
+      if (delivered.every(
+        (Completer<ImageInfo> completer) => completer.isCompleted,
+      )) {
+        break;
+      }
+      _pumpFlutterFrame();
+      await Future<void>.delayed(Duration.zero);
+    }
+    await Future.wait<ImageInfo>(
+      delivered.map((Completer<ImageInfo> completer) => completer.future),
+    ).timeout(const Duration(seconds: 5));
+    stopwatch.stop();
+
+    final Map<String, Object?> drainedSnapshot = PixaDebugInspector.snapshot()
+        .toJson();
+    final Map<String, Object?> drainedDisplayDecoder =
+        drainedSnapshot['displayDecoder']! as Map<String, Object?>;
+    expect(drainedDisplayDecoder['completionQueueDepth'], 0);
+
+    final int totalMicros = stopwatch.elapsedMicroseconds;
+    final double avgMicros = totalMicros / imageCount;
+    // ignore: avoid_print
+    print(
+      'image_completion_frame_gate_burst,$imageCount,$totalMicros,'
+      '${avgMicros.toStringAsFixed(1)},$firstQueueDepth,'
+      '$firstReleasedThisFrame,$firstDelivered,$frameBudget',
+    );
+  });
+
   test('flutter engine decode benchmark', () async {
     final int iterations = _envInt('PIXA_BENCH_DECODE_ITERS', 500);
     final Uint8List bytes = _minimalGif();
@@ -326,6 +467,31 @@ void main() {
     );
     expect(decodedFrames, iterations * 2);
   });
+}
+
+Duration _testFrameTimestamp = Duration.zero;
+
+void _pumpFlutterFrame() {
+  final SchedulerBinding binding = SchedulerBinding.instance;
+  _testFrameTimestamp += const Duration(milliseconds: 1);
+  binding.handleBeginFrame(_testFrameTimestamp);
+  binding.handleDrawFrame();
+}
+
+Future<void> _waitForCompletionGateIdle() async {
+  for (var attempt = 0; attempt < 12; attempt += 1) {
+    final Map<String, Object?> snapshot = PixaDebugInspector.snapshot()
+        .toJson();
+    final Map<String, Object?> displayDecoder =
+        snapshot['displayDecoder']! as Map<String, Object?>;
+    if (displayDecoder['completionQueueDepth'] == 0 &&
+        displayDecoder['completionFrameScheduled'] == false) {
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+  final Map<String, Object?> snapshot = PixaDebugInspector.snapshot().toJson();
+  throw StateError('Pixa completion gate did not become idle: $snapshot');
 }
 
 int _envInt(String name, int fallback) {
