@@ -296,7 +296,7 @@ impl RuntimePluginModule {
 }
 
 /// Counts describing the runtime plugin host registry.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RuntimePluginRegistryStats {
     pub modules: usize,
     pub built_in_modules: usize,
@@ -306,6 +306,8 @@ pub struct RuntimePluginRegistryStats {
     pub fetchers: usize,
     pub video_frame_fetchers: usize,
     pub video_frame_encoded_output_fetchers: usize,
+    pub video_frame_source_kinds: Vec<String>,
+    pub video_frame_output_mime_types: Vec<String>,
     pub decoders: usize,
     pub processors: usize,
     pub cache_stores: usize,
@@ -546,6 +548,8 @@ impl RuntimePluginRegistry {
             modules: self.modules.len(),
             ..RuntimePluginRegistryStats::default()
         };
+        let mut video_frame_source_kinds = BTreeSet::<String>::new();
+        let mut video_frame_output_mime_types = BTreeSet::<String>::new();
         for module in self.modules.values() {
             match module.deployment {
                 RuntimePluginDeployment::BuiltInHostModule => {
@@ -564,16 +568,21 @@ impl RuntimePluginRegistry {
             }
             if module.capabilities.fetcher {
                 stats.fetchers += 1;
-                if module
-                    .routes
-                    .fetcher_source_kinds
-                    .iter()
-                    .any(|source_kind| is_video_frame_source_kind(source_kind))
-                {
+                let mut claims_video_frame = false;
+                for source_kind in &module.routes.fetcher_source_kinds {
+                    if is_video_frame_source_kind(source_kind) {
+                        claims_video_frame = true;
+                        video_frame_source_kinds.insert(source_kind.trim().to_ascii_lowercase());
+                    }
+                }
+                if claims_video_frame {
                     stats.video_frame_fetchers += 1;
                 }
                 if !module.routes.video_frame_output_mime_types.is_empty() {
                     stats.video_frame_encoded_output_fetchers += 1;
+                    for mime_type in &module.routes.video_frame_output_mime_types {
+                        video_frame_output_mime_types.insert(mime_type.trim().to_ascii_lowercase());
+                    }
                 }
             }
             if module.capabilities.decoder {
@@ -586,6 +595,8 @@ impl RuntimePluginRegistry {
                 stats.cache_stores += 1;
             }
         }
+        stats.video_frame_source_kinds = video_frame_source_kinds.into_iter().collect();
+        stats.video_frame_output_mime_types = video_frame_output_mime_types.into_iter().collect();
         stats
     }
 }

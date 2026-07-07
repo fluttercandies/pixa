@@ -14,6 +14,8 @@ final class PixaRuntimePluginRegistryStats {
     required this.fetchers,
     required this.videoFrameFetchers,
     required this.videoFrameEncodedOutputFetchers,
+    required this.videoFrameSourceKinds,
+    required this.videoFrameOutputMimeTypes,
     required this.decoders,
     required this.processors,
     required this.cacheStores,
@@ -30,6 +32,8 @@ final class PixaRuntimePluginRegistryStats {
         fetchers: 0,
         videoFrameFetchers: 0,
         videoFrameEncodedOutputFetchers: 0,
+        videoFrameSourceKinds: const <String>[],
+        videoFrameOutputMimeTypes: const <String>[],
         decoders: 0,
         processors: 0,
         cacheStores: 0,
@@ -53,6 +57,8 @@ final class PixaRuntimePluginRegistryStats {
       decoders: reader.readUint64(),
       processors: reader.readUint64(),
       cacheStores: reader.readUint64(),
+      videoFrameSourceKinds: _readStringList(reader),
+      videoFrameOutputMimeTypes: _readStringList(reader),
     );
     if (!reader.isComplete) {
       throw const FormatException('Trailing runtime plugin stats bytes.');
@@ -84,6 +90,12 @@ final class PixaRuntimePluginRegistryStats {
   /// runtime video-frame fetchers that declare encoded image output.
   final int videoFrameEncodedOutputFetchers;
 
+  /// Runtime video-frame source kinds registered in the host.
+  final List<String> videoFrameSourceKinds;
+
+  /// Encoded image MIME types that runtime video-frame backends may output.
+  final List<String> videoFrameOutputMimeTypes;
+
   /// runtime decoder capabilities.
   final int decoders;
 
@@ -109,10 +121,19 @@ final class PixaRuntimePluginRegistryStats {
       'fetchers': fetchers,
       'videoFrameFetchers': videoFrameFetchers,
       'videoFrameEncodedOutputFetchers': videoFrameEncodedOutputFetchers,
+      'videoFrameSourceKinds': videoFrameSourceKinds,
+      'videoFrameOutputMimeTypes': videoFrameOutputMimeTypes,
       'decoders': decoders,
       'processors': processors,
       'cacheStores': cacheStores,
       'canUseSingleHostBinary': canUseSingleHostBinary,
     };
   }
+}
+
+List<String> _readStringList(PixaRuntimeBinaryReader reader) {
+  final int count = reader.readUint32();
+  return List<String>.unmodifiable(<String>[
+    for (int index = 0; index < count; index++) reader.readString(),
+  ]);
 }

@@ -381,6 +381,8 @@ mod tests {
         let stats = plugin_registry_stats().expect("plugin stats should be available");
         assert_eq!(stats.video_frame_fetchers, 1);
         assert_eq!(stats.video_frame_encoded_output_fetchers, 1);
+        assert_eq!(stats.video_frame_source_kinds, vec!["video-frame:mjpeg"]);
+        assert_eq!(stats.video_frame_output_mime_types, vec!["image/jpeg"]);
     }
 
     fn jpeg_rgb(pixel: [u8; 3]) -> Vec<u8> {

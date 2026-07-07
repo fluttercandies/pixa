@@ -1570,6 +1570,34 @@ final class _DiagnosticsPageState extends State<_DiagnosticsPage> {
                 snapshot.registryArchitecture.videoFrameBackends.toString(),
               ),
               _DiagnosticRow(
+                'Runtime video routes',
+                snapshot
+                        .capabilities
+                        .runtimePluginRegistryStats
+                        .videoFrameSourceKinds
+                        .isEmpty
+                    ? 'none'
+                    : snapshot
+                          .capabilities
+                          .runtimePluginRegistryStats
+                          .videoFrameSourceKinds
+                          .join(', '),
+              ),
+              _DiagnosticRow(
+                'Video output MIME',
+                snapshot
+                        .capabilities
+                        .runtimePluginRegistryStats
+                        .videoFrameOutputMimeTypes
+                        .isEmpty
+                    ? 'none'
+                    : snapshot
+                          .capabilities
+                          .runtimePluginRegistryStats
+                          .videoFrameOutputMimeTypes
+                          .join(', '),
+              ),
+              _DiagnosticRow(
                 'Runtime modules',
                 snapshot.registryArchitecture.runtimeModules.toString(),
               ),
@@ -1707,6 +1735,13 @@ final class _ScenarioSection extends StatelessWidget {
     final ImagePost first = scenarioPosts.first;
     final bool usingLearningPosts = posts.isEmpty;
     final PixaDebugSnapshot snapshot = PixaDebugInspector.snapshot();
+    final PixaRuntimePluginRegistryStats runtimePluginStats =
+        snapshot.capabilities.runtimePluginRegistryStats;
+    final bool hasMjpegVideoFrameBackend =
+        runtimePluginStats.videoFrameSourceKinds.contains(
+          'video-frame:mjpeg',
+        ) &&
+        runtimePluginStats.videoFrameOutputMimeTypes.contains('image/jpeg');
     final bool hasVideoFrameBackend =
         snapshot.registryArchitecture.videoFrameBackends > 0 &&
         snapshot.registryArchitecture.videoFrameEncodedOutputBackends > 0;
@@ -1872,10 +1907,14 @@ final class _ScenarioSection extends StatelessWidget {
           _Scenario(
             title: 'Video frame',
             subtitle: hasVideoFrameBackend
-                ? 'Runtime backend available'
+                ? 'Platform backend available'
+                : hasMjpegVideoFrameBackend
+                ? 'MJPEG backend available'
                 : 'No backend in this binary',
             icon: Icons.video_file_outlined,
-            child: hasVideoFrameBackend
+            child: hasMjpegVideoFrameBackend
+                ? const _MjpegVideoFramePreview()
+                : hasVideoFrameBackend
                 ? PixaImage.videoFrame(
                     'https://flutter.github.io/assets-for-api-docs/assets/videos/bee.mp4',
                     timestamp: const Duration(seconds: 1),
@@ -3174,6 +3213,160 @@ final class _AnimatedPreviewState extends State<_AnimatedPreview> {
     setState(() {
       _status = _controller.state.name;
     });
+  }
+}
+
+final class _MjpegVideoFramePreview extends StatefulWidget {
+  const _MjpegVideoFramePreview();
+
+  @override
+  State<_MjpegVideoFramePreview> createState() =>
+      _MjpegVideoFramePreviewState();
+}
+
+final class _MjpegVideoFramePreviewState
+    extends State<_MjpegVideoFramePreview> {
+  File? _videoFile;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_prepareVideo());
+  }
+
+  @override
+  void dispose() {
+    _deleteVideoFile();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final File? videoFile = _videoFile;
+    if (_error != null) {
+      return const _DisabledScenarioPreview(
+        icon: Icons.video_file_outlined,
+        label: 'mjpeg frame unavailable',
+      );
+    }
+    if (videoFile == null) {
+      return const _MiniLoadingPreview(label: 'preparing mjpeg frame');
+    }
+    return PixaImage.videoFrame(
+      videoFile.path,
+      timestamp: const Duration(seconds: 1),
+      backend: 'mjpeg',
+      fit: BoxFit.cover,
+      placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+      errorBuilder: _errorBuilder,
+      borderRadius: BorderRadius.circular(8),
+    );
+  }
+
+  Future<void> _prepareVideo() async {
+    try {
+      final PixaPipelineLoad load = await Pixa.pipeline.load(
+        PixaRequest.network(
+          'https://www.gstatic.com/webp/gallery/1.jpg',
+          cachePolicy: const PixaCachePolicy.noStore(),
+        ),
+      );
+      final Uint8List jpeg;
+      try {
+        jpeg = Uint8List.fromList(load.bytes);
+      } finally {
+        load.dispose();
+      }
+      if (!_isJpeg(jpeg)) {
+        throw StateError('MJPEG preview source did not return JPEG bytes.');
+      }
+      final File file = File(
+        '${Directory.systemTemp.path}/pixa-gallery-mjpeg-'
+        '${DateTime.now().microsecondsSinceEpoch}.avi',
+      );
+      await file.writeAsBytes(_mjpegAviFromJpeg(jpeg), flush: false);
+      if (!mounted) {
+        unawaited(file.delete());
+        return;
+      }
+      setState(() {
+        _videoFile = file;
+      });
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error;
+      });
+    }
+  }
+
+  bool _isJpeg(Uint8List bytes) {
+    return bytes.length >= 4 &&
+        bytes[0] == 0xff &&
+        bytes[1] == 0xd8 &&
+        bytes[bytes.length - 2] == 0xff &&
+        bytes[bytes.length - 1] == 0xd9;
+  }
+
+  Uint8List _mjpegAviFromJpeg(Uint8List jpeg) {
+    final Uint8List avih = Uint8List(56);
+    _writeUint32(avih, 0, 1000000);
+    _writeUint32(avih, 16, 2);
+    _writeUint32(avih, 32, 550);
+    _writeUint32(avih, 36, 368);
+
+    final Uint8List hdrl = _listChunk('hdrl', _chunk('avih', avih));
+    final Uint8List firstFrame = _chunk('00dc', jpeg);
+    final Uint8List secondFrame = _chunk('00dc', jpeg);
+    final Uint8List movi = _listChunk(
+      'movi',
+      Uint8List.fromList(<int>[...firstFrame, ...secondFrame]),
+    );
+    final Uint8List payload = Uint8List.fromList(<int>[
+      ...'AVI '.codeUnits,
+      ...hdrl,
+      ...movi,
+    ]);
+    final Uint8List riff = Uint8List(8 + payload.length);
+    riff.setRange(0, 4, 'RIFF'.codeUnits);
+    _writeUint32(riff, 4, payload.length);
+    riff.setRange(8, riff.length, payload);
+    return riff;
+  }
+
+  Uint8List _listChunk(String kind, Uint8List payload) {
+    return _chunk(
+      'LIST',
+      Uint8List.fromList(<int>[...kind.codeUnits, ...payload]),
+    );
+  }
+
+  Uint8List _chunk(String id, Uint8List payload) {
+    final int paddedLength = payload.length + (payload.length.isOdd ? 1 : 0);
+    final Uint8List bytes = Uint8List(8 + paddedLength);
+    bytes.setRange(0, 4, id.codeUnits);
+    _writeUint32(bytes, 4, payload.length);
+    bytes.setRange(8, 8 + payload.length, payload);
+    return bytes;
+  }
+
+  void _writeUint32(Uint8List bytes, int offset, int value) {
+    ByteData.sublistView(bytes).setUint32(offset, value, Endian.little);
+  }
+
+  void _deleteVideoFile() {
+    final File? file = _videoFile;
+    _videoFile = null;
+    if (file != null && file.existsSync()) {
+      try {
+        file.deleteSync();
+      } on FileSystemException {
+        // Best-effort cleanup for native-only example temp files.
+      }
+    }
   }
 }
 

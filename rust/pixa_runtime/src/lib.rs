@@ -1862,7 +1862,28 @@ fn encode_plugin_registry_stats(stats: PluginRegistryStats) -> RuntimeResult<Vec
     push_usize_as_u64(&mut bytes, stats.decoders, "decoders")?;
     push_usize_as_u64(&mut bytes, stats.processors, "processors")?;
     push_usize_as_u64(&mut bytes, stats.cache_stores, "cache_stores")?;
+    push_string_list(
+        &mut bytes,
+        &stats.video_frame_source_kinds,
+        "video_frame_source_kinds",
+    )?;
+    push_string_list(
+        &mut bytes,
+        &stats.video_frame_output_mime_types,
+        "video_frame_output_mime_types",
+    )?;
     Ok(bytes)
+}
+
+fn push_string_list(bytes: &mut Vec<u8>, values: &[String], label: &str) -> RuntimeResult<()> {
+    let count = u32::try_from(values.len()).map_err(|_| {
+        RuntimeError::new("runtime", false, format!("{label} count exceeds ABI limit"))
+    })?;
+    bytes.extend_from_slice(&count.to_le_bytes());
+    for value in values {
+        push_string(bytes, value)?;
+    }
+    Ok(())
 }
 
 fn encode_image_format_capabilities() -> RuntimeResult<Vec<u8>> {
@@ -2495,7 +2516,7 @@ mod tests {
         assert!(!ptr.is_null());
         let bytes = unsafe { slice::from_raw_parts(ptr, out_len) };
         assert_eq!(&bytes[0..4], b"PXM1");
-        assert_eq!(out_len, 4 + 11 * 8);
+        assert_eq!(out_len, 4 + 11 * 8 + 4 + 4);
         assert_eq!(read_le_u64(bytes, 4), 3);
         assert_eq!(read_le_u64(bytes, 12), 2);
         assert_eq!(read_le_u64(bytes, 20), 1);
@@ -2507,6 +2528,8 @@ mod tests {
         assert_eq!(read_le_u64(bytes, 68), 1);
         assert_eq!(read_le_u64(bytes, 76), 0);
         assert_eq!(read_le_u64(bytes, 84), 1);
+        assert_eq!(read_le_u32(bytes, 92), 0);
+        assert_eq!(read_le_u32(bytes, 96), 0);
         pixa_buffer_free(ptr, out_len);
     }
 

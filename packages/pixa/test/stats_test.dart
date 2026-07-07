@@ -138,6 +138,8 @@ void main() {
           fetchers: 1,
           videoFrameFetchers: 0,
           videoFrameEncodedOutputFetchers: 0,
+          videoFrameSourceKinds: const <String>[],
+          videoFrameOutputMimeTypes: const <String>[],
           decoders: 1,
           processors: 0,
           cacheStores: 0,
@@ -822,6 +824,14 @@ void main() {
     expect(stats.fetchers, 6);
     expect(stats.videoFrameFetchers, 7);
     expect(stats.videoFrameEncodedOutputFetchers, 8);
+    expect(stats.videoFrameSourceKinds, <String>[
+      'video-frame:mjpeg',
+      'video-frame:platform',
+    ]);
+    expect(stats.videoFrameOutputMimeTypes, <String>[
+      'image/jpeg',
+      'image/png',
+    ]);
     expect(stats.decoders, 9);
     expect(stats.processors, 10);
     expect(stats.cacheStores, 11);
@@ -883,6 +893,12 @@ Uint8List _binaryPluginStatsPayload() {
   for (int value = 1; value <= 11; value++) {
     _addUint64(builder, value);
   }
+  _addUint32(builder, 2);
+  _addString(builder, 'video-frame:mjpeg');
+  _addString(builder, 'video-frame:platform');
+  _addUint32(builder, 2);
+  _addString(builder, 'image/jpeg');
+  _addString(builder, 'image/png');
   return builder.takeBytes();
 }
 
