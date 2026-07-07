@@ -53,6 +53,24 @@ void main() {
         const Duration(minutes: 20),
     'allows slow iOS simulator self-check startup',
   );
+  _expect(
+    build.platformSelfCheckMaxAttemptsForTesting() >= 2,
+    'retries hosted simulator launch hangs without hiding failures',
+  );
+  _expect(
+    build.shouldRetryPixaPlatformSelfCheckTimeoutForTesting(
+      'Running Xcode build...\nXcode build done.\n',
+      null,
+    ),
+    'retries timeout with no self-check report or pass marker',
+  );
+  _expect(
+    !build.shouldRetryPixaPlatformSelfCheckTimeoutForTesting(
+      passingOutput,
+      passingReport,
+    ),
+    'does not retry once a passing report exists',
+  );
 
   stdout.writeln('Pixa platform build self-test passed.');
 }

@@ -836,98 +836,131 @@ Future<void> _runSelfCheck(
   required Map<String, String> environment,
   required String? reportPath,
 }) async {
-  stdout.writeln('> $executable ${arguments.join(' ')}');
-  if (reportPath != null && reportPath.trim().isNotEmpty) {
-    final File staleReport = File(reportPath);
-    if (staleReport.existsSync()) {
-      staleReport.deleteSync();
+  for (var attempt = 1; attempt <= _selfCheckMaxAttempts; attempt++) {
+    final String attemptLabel = _selfCheckMaxAttempts == 1
+        ? ''
+        : ' (attempt $attempt/$_selfCheckMaxAttempts)';
+    stdout.writeln('> $executable ${arguments.join(' ')}$attemptLabel');
+    if (reportPath != null && reportPath.trim().isNotEmpty) {
+      final File staleReport = File(reportPath);
+      if (staleReport.existsSync()) {
+        staleReport.deleteSync();
+      }
     }
-  }
-  final Process process = await Process.start(
-    executable,
-    arguments,
-    workingDirectory: workingDirectory.path,
-    environment: environment,
-  );
-  final StringBuffer output = StringBuffer();
-  final Future<void> stdoutDone = process.stdout
-      .transform(utf8.decoder)
-      .forEach((String chunk) {
-        stdout.write(chunk);
-        output.write(chunk);
-      });
-  final Future<void> stderrDone = process.stderr
-      .transform(utf8.decoder)
-      .forEach((String chunk) {
-        stderr.write(chunk);
-        output.write(chunk);
-      });
-  final Future<int> exitCodeFuture = process.exitCode;
-  late final int exitCode;
-  try {
-    exitCode = await exitCodeFuture.timeout(_selfCheckExitTimeout);
-  } on TimeoutException {
-    final String capturedOutput = output.toString();
-    final String? reportText =
-        _readExistingPlatformSelfCheckReport(reportPath) ??
-        tryExtractPixaPlatformSelfCheckReport(capturedOutput);
-    if (reportText != null &&
-        acceptsNonZeroPixaPlatformSelfCheckExit(capturedOutput, reportText)) {
+    final Process process = await Process.start(
+      executable,
+      arguments,
+      workingDirectory: workingDirectory.path,
+      environment: environment,
+    );
+    final StringBuffer output = StringBuffer();
+    final Future<void> stdoutDone = process.stdout
+        .transform(utf8.decoder)
+        .forEach((String chunk) {
+          stdout.write(chunk);
+          output.write(chunk);
+        });
+    final Future<void> stderrDone = process.stderr
+        .transform(utf8.decoder)
+        .forEach((String chunk) {
+          stderr.write(chunk);
+          output.write(chunk);
+        });
+    final Future<int> exitCodeFuture = process.exitCode;
+    late final int exitCode;
+    try {
+      exitCode = await exitCodeFuture.timeout(_selfCheckExitTimeout);
+    } on TimeoutException {
+      final String capturedOutput = output.toString();
+      final String? reportText =
+          _readExistingPlatformSelfCheckReport(reportPath) ??
+          tryExtractPixaPlatformSelfCheckReport(capturedOutput);
+      if (reportText != null &&
+          acceptsNonZeroPixaPlatformSelfCheckExit(capturedOutput, reportText)) {
+        await _terminateProcess(process, exitCodeFuture);
+        await stdoutDone;
+        await stderrDone;
+        _writePlatformSelfCheckReportIfMissing(reportPath, reportText);
+        stdout.writeln(
+          'Pixa platform self-check accepted timed-out flutter test after '
+          'validating the self-check report and Flutter test pass marker.',
+        );
+        return;
+      }
       await _terminateProcess(process, exitCodeFuture);
       await stdoutDone;
       await stderrDone;
-      _writePlatformSelfCheckReportIfMissing(reportPath, reportText);
-      stdout.writeln(
-        'Pixa platform self-check accepted timed-out flutter test after '
-        'validating the self-check report and Flutter test pass marker.',
+      if (attempt < _selfCheckMaxAttempts &&
+          _shouldRetryPixaPlatformSelfCheckTimeout(
+            capturedOutput,
+            reportText,
+          )) {
+        stdout.writeln(
+          'Pixa platform self-check timed out without a report; retrying '
+          'once to tolerate hosted simulator launch hangs.',
+        );
+        continue;
+      }
+      throw TimeoutException(
+        'Pixa platform self-check did not exit within '
+        '${_selfCheckExitTimeout.inMinutes} minutes.\n'
+        '${_tailText(capturedOutput, 24000)}',
+        _selfCheckExitTimeout,
       );
-      return;
     }
-    await _terminateProcess(process, exitCodeFuture);
     await stdoutDone;
     await stderrDone;
-    throw TimeoutException(
-      'Pixa platform self-check did not exit within '
-      '${_selfCheckExitTimeout.inMinutes} minutes.\n'
-      '${_tailText(capturedOutput, 24000)}',
-      _selfCheckExitTimeout,
-    );
-  }
-  await stdoutDone;
-  await stderrDone;
-  final String capturedOutput = output.toString();
-  if (exitCode != 0) {
-    final String? reportText =
-        _readExistingPlatformSelfCheckReport(reportPath) ??
-        tryExtractPixaPlatformSelfCheckReport(capturedOutput);
-    if (reportText != null &&
-        acceptsNonZeroPixaPlatformSelfCheckExit(capturedOutput, reportText)) {
-      _writePlatformSelfCheckReportIfMissing(reportPath, reportText);
-      stdout.writeln(
-        'Pixa platform self-check accepted non-zero flutter test exit '
-        '$exitCode after validating the self-check report and Flutter test '
-        'pass marker.',
-      );
+    final String capturedOutput = output.toString();
+    if (exitCode != 0) {
+      final String? reportText =
+          _readExistingPlatformSelfCheckReport(reportPath) ??
+          tryExtractPixaPlatformSelfCheckReport(capturedOutput);
+      if (reportText != null &&
+          acceptsNonZeroPixaPlatformSelfCheckExit(capturedOutput, reportText)) {
+        _writePlatformSelfCheckReportIfMissing(reportPath, reportText);
+        stdout.writeln(
+          'Pixa platform self-check accepted non-zero flutter test exit '
+          '$exitCode after validating the self-check report and Flutter test '
+          'pass marker.',
+        );
+        return;
+      }
+      throw ProcessException(executable, arguments, 'command failed', exitCode);
+    }
+    if (reportPath == null || reportPath.trim().isEmpty) {
       return;
     }
-    throw ProcessException(executable, arguments, 'command failed', exitCode);
-  }
-  if (reportPath == null || reportPath.trim().isEmpty) {
+    final File report = File(reportPath);
+    if (report.existsSync() && report.lengthSync() > 0) {
+      return;
+    }
+    _writePlatformSelfCheckReportIfMissing(
+      reportPath,
+      extractPixaPlatformSelfCheckReport(capturedOutput),
+    );
     return;
   }
-  final File report = File(reportPath);
-  if (report.existsSync() && report.lengthSync() > 0) {
-    return;
-  }
-  _writePlatformSelfCheckReportIfMissing(
-    reportPath,
-    extractPixaPlatformSelfCheckReport(capturedOutput),
-  );
 }
 
 const Duration _selfCheckExitTimeout = Duration(minutes: 20);
+const int _selfCheckMaxAttempts = 2;
 
 Duration platformSelfCheckExitTimeoutForTesting() => _selfCheckExitTimeout;
+int platformSelfCheckMaxAttemptsForTesting() => _selfCheckMaxAttempts;
+
+bool shouldRetryPixaPlatformSelfCheckTimeoutForTesting(
+  String output,
+  String? reportText,
+) {
+  return _shouldRetryPixaPlatformSelfCheckTimeout(output, reportText);
+}
+
+bool _shouldRetryPixaPlatformSelfCheckTimeout(
+  String output,
+  String? reportText,
+) {
+  return reportText == null && !hasFlutterTestPassedMarker(output);
+}
 
 Future<void> _terminateProcess(
   Process process,
