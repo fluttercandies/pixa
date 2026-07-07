@@ -5,12 +5,16 @@ import 'package:flexbox_layout/flexbox_layout.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:pixa/pixa.dart';
+import 'package:pixa/pixa_debug.dart';
 
 import 'config/image_config.dart';
 import 'models/image_post.dart';
 import 'sources/image_source_factory.dart';
 
 enum _GalleryLayout { flexRows, masonry, denseGrid }
+
+/// Top-level example destinations.
+enum PixaGalleryTab { gallery, scenarios, diagnostics }
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -37,6 +41,7 @@ final class PixaGalleryApp extends StatelessWidget {
     super.key,
     this.initialPosts = const <ImagePost>[],
     this.loadOnStart = true,
+    this.initialTab = PixaGalleryTab.gallery,
   });
 
   /// Optional posts injected by automated smoke tests.
@@ -44,6 +49,9 @@ final class PixaGalleryApp extends StatelessWidget {
 
   /// Whether the gallery should fetch the configured public source on start.
   final bool loadOnStart;
+
+  /// Initial example destination.
+  final PixaGalleryTab initialTab;
 
   @override
   Widget build(BuildContext context) {
@@ -57,6 +65,7 @@ final class PixaGalleryApp extends StatelessWidget {
       home: PixaGalleryHome(
         initialPosts: initialPosts,
         loadOnStart: loadOnStart,
+        initialTab: initialTab,
       ),
     );
   }
@@ -69,6 +78,7 @@ final class PixaGalleryHome extends StatefulWidget {
     super.key,
     this.initialPosts = const <ImagePost>[],
     this.loadOnStart = true,
+    this.initialTab = PixaGalleryTab.gallery,
   });
 
   /// Optional posts injected by automated smoke tests.
@@ -76,6 +86,9 @@ final class PixaGalleryHome extends StatefulWidget {
 
   /// Whether the gallery should fetch the configured public source on start.
   final bool loadOnStart;
+
+  /// Initial example destination.
+  final PixaGalleryTab initialTab;
 
   @override
   State<PixaGalleryHome> createState() => _PixaGalleryHomeState();
@@ -88,6 +101,7 @@ final class _PixaGalleryHomeState extends State<PixaGalleryHome> {
   late final PixaPredictivePrefetcher _prefetcher;
 
   SourceType _selectedSource = ImageConfig.currentSource;
+  late PixaGalleryTab _selectedTab;
   _GalleryLayout _layout = _GalleryLayout.flexRows;
   bool _isLoading = false;
   bool _hasMore = true;
@@ -103,6 +117,7 @@ final class _PixaGalleryHomeState extends State<PixaGalleryHome> {
   @override
   void initState() {
     super.initState();
+    _selectedTab = widget.initialTab;
     _prefetcher = PixaPredictivePrefetcher(
       requestBuilder: _requestForIndex,
       target: PixaPrefetchTarget.diskOnly,
@@ -132,6 +147,14 @@ final class _PixaGalleryHomeState extends State<PixaGalleryHome> {
   }
 
   @override
+  void didUpdateWidget(PixaGalleryHome oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialTab != widget.initialTab) {
+      _selectedTab = widget.initialTab;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -154,67 +177,106 @@ final class _PixaGalleryHomeState extends State<PixaGalleryHome> {
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _refresh,
-        child: NotificationListener<ScrollNotification>(
-          onNotification: _handleScroll,
-          child: CustomScrollView(
-            key: const ValueKey<String>('pixa-gallery-scroll'),
-            controller: _scrollController,
-            scrollCacheExtent: const ScrollCacheExtent.pixels(320),
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: <Widget>[
-              SliverToBoxAdapter(
-                child: _GalleryHeader(
-                  status: _status,
-                  selectedSource: _selectedSource,
-                  layout: _layout,
-                  targetRowHeight: _targetRowHeight,
-                  onSourceChanged: _selectSource,
-                  onLayoutChanged: (value) {
-                    setState(() {
-                      _layout = value;
-                      _lastPrefetchFirst = -1;
-                      _lastPrefetchLast = -1;
-                    });
-                  },
-                  onRowHeightChanged: (double value) {
-                    setState(() {
-                      _targetRowHeight = value;
-                      _lastPrefetchFirst = -1;
-                      _lastPrefetchLast = -1;
-                    });
-                  },
-                ),
-              ),
-              if (_error != null && _posts.isEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _ErrorState(message: _error!, onRetry: _refresh),
-                )
-              else if (_posts.isEmpty && _isLoading)
-                const SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _LoadingState(),
-                )
-              else
-                _GallerySliver(
-                  posts: _posts,
-                  aspectRatios: _aspectRatios,
-                  layout: _layout,
-                  targetRowHeight: _targetRowHeight,
-                ),
-              SliverToBoxAdapter(
-                child: _LoadMoreBar(
-                  isLoading: _isLoading,
-                  hasMore: _hasMore,
-                  onLoadMore: _loadMore,
-                ),
-              ),
-              SliverToBoxAdapter(child: _ScenarioSection(posts: _posts)),
-              const SliverToBoxAdapter(child: SizedBox(height: 28)),
-            ],
+      body: switch (_selectedTab) {
+        PixaGalleryTab.gallery => _buildGalleryBody(),
+        PixaGalleryTab.scenarios => _ScenarioSection(posts: _posts),
+        PixaGalleryTab.diagnostics => _DiagnosticsPage(
+          onPrefetchVisible: _prefetchVisible,
+          onTrimMemory: _trimMemory,
+          onShowCacheStats: _showCacheStats,
+        ),
+      },
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedTab.index,
+        onDestinationSelected: (int index) {
+          setState(() {
+            _selectedTab = PixaGalleryTab.values[index];
+          });
+        },
+        destinations: const <NavigationDestination>[
+          NavigationDestination(
+            key: ValueKey<String>('tab-gallery'),
+            icon: Icon(Icons.photo_library_outlined),
+            selectedIcon: Icon(Icons.photo_library),
+            label: 'Gallery',
           ),
+          NavigationDestination(
+            key: ValueKey<String>('tab-scenarios'),
+            icon: Icon(Icons.widgets_outlined),
+            selectedIcon: Icon(Icons.widgets),
+            label: 'Scenarios',
+          ),
+          NavigationDestination(
+            key: ValueKey<String>('tab-diagnostics'),
+            icon: Icon(Icons.monitor_heart_outlined),
+            selectedIcon: Icon(Icons.monitor_heart),
+            label: 'Diagnostics',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGalleryBody() {
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: NotificationListener<ScrollNotification>(
+        onNotification: _handleScroll,
+        child: CustomScrollView(
+          key: const ValueKey<String>('pixa-gallery-scroll'),
+          controller: _scrollController,
+          scrollCacheExtent: const ScrollCacheExtent.pixels(320),
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: <Widget>[
+            SliverToBoxAdapter(
+              child: _GalleryHeader(
+                status: _status,
+                selectedSource: _selectedSource,
+                layout: _layout,
+                targetRowHeight: _targetRowHeight,
+                onSourceChanged: _selectSource,
+                onLayoutChanged: (value) {
+                  setState(() {
+                    _layout = value;
+                    _lastPrefetchFirst = -1;
+                    _lastPrefetchLast = -1;
+                  });
+                },
+                onRowHeightChanged: (double value) {
+                  setState(() {
+                    _targetRowHeight = value;
+                    _lastPrefetchFirst = -1;
+                    _lastPrefetchLast = -1;
+                  });
+                },
+              ),
+            ),
+            if (_error != null && _posts.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: _ErrorState(message: _error!, onRetry: _refresh),
+              )
+            else if (_posts.isEmpty && _isLoading)
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: _LoadingState(),
+              )
+            else
+              _GallerySliver(
+                posts: _posts,
+                aspectRatios: _aspectRatios,
+                layout: _layout,
+                targetRowHeight: _targetRowHeight,
+              ),
+            SliverToBoxAdapter(
+              child: _LoadMoreBar(
+                isLoading: _isLoading,
+                hasMore: _hasMore,
+                onLoadMore: _loadMore,
+              ),
+            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 28)),
+          ],
         ),
       ),
     );
@@ -862,7 +924,9 @@ final class _LargeImagePageState extends State<_LargeImagePage> {
         ],
       ),
       body: PixaLargeImage(
-        request: _requestForPost(post),
+        request: _requestForPost(
+          post,
+        ).copyWith(lowRes: _thumbnailRequestForPost(post)),
         imageWidth: post.width,
         imageHeight: post.height,
         controller: _controller,
@@ -959,6 +1023,360 @@ final class _ErrorState extends StatelessWidget {
   }
 }
 
+final class _DiagnosticsPage extends StatefulWidget {
+  const _DiagnosticsPage({
+    required this.onPrefetchVisible,
+    required this.onTrimMemory,
+    required this.onShowCacheStats,
+  });
+
+  final Future<void> Function() onPrefetchVisible;
+  final Future<void> Function() onTrimMemory;
+  final VoidCallback onShowCacheStats;
+
+  @override
+  State<_DiagnosticsPage> createState() => _DiagnosticsPageState();
+}
+
+final class _DiagnosticsPageState extends State<_DiagnosticsPage> {
+  String _status = 'Snapshot ready';
+
+  @override
+  Widget build(BuildContext context) {
+    final PixaDebugSnapshot snapshot = PixaDebugInspector.snapshot();
+    final PixaCacheStats? cache = snapshot.cacheStats;
+    final PixaDecodedCacheStats decoded = snapshot.decodedCacheStats;
+    final PixaSchedulerStats? scheduler = snapshot.schedulerStats;
+    final List<PixaRuntimeImageFormatCapability> formats =
+        snapshot.capabilities.imageFormats;
+    final Iterable<String> runtimeFormats = formats
+        .where(
+          (PixaRuntimeImageFormatCapability format) =>
+              format.runtimeDisplay || format.processorDecode,
+        )
+        .map((PixaRuntimeImageFormatCapability format) => format.format.name);
+    return RefreshIndicator(
+      onRefresh: () async => setState(() {
+        _status = 'Snapshot refreshed';
+      }),
+      child: ListView(
+        key: const ValueKey<String>('pixa-diagnostics-scroll'),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        children: <Widget>[
+          Text(
+            'Diagnostics',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _status,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              letterSpacing: 0,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              FilledButton.icon(
+                onPressed: () => unawaited(
+                  _run('Prefetched visible window', widget.onPrefetchVisible),
+                ),
+                icon: const Icon(Icons.download_for_offline),
+                label: const Text('Prefetch window'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () =>
+                    unawaited(_run('Trimmed caches', widget.onTrimMemory)),
+                icon: const Icon(Icons.memory),
+                label: const Text('Trim memory'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () {
+                  widget.onShowCacheStats();
+                  setState(() {
+                    _status = 'Cache stats copied to gallery status';
+                  });
+                },
+                icon: const Icon(Icons.query_stats),
+                label: const Text('Cache stats'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _DiagnosticCard(
+            title: 'Runtime',
+            icon: Icons.developer_board,
+            rows: <_DiagnosticRow>[
+              _DiagnosticRow(
+                'Platform',
+                snapshot.capabilities.platformStatus.platform,
+              ),
+              _DiagnosticRow(
+                'Runtime',
+                snapshot.capabilities.platformStatus.runtimeAvailable
+                    ? 'available'
+                    : 'unavailable',
+              ),
+              _DiagnosticRow(
+                'Self-check',
+                snapshot.platformSelfCheck.passed ? 'passed' : 'failed',
+              ),
+              _DiagnosticRow(
+                'HTTP transport',
+                snapshot.capabilities.httpTransport ? 'enabled' : 'disabled',
+              ),
+              _DiagnosticRow(
+                'Disk cache',
+                snapshot.capabilities.diskCache ? 'enabled' : 'disabled',
+              ),
+              _DiagnosticRow(
+                'Pixel processors',
+                snapshot.capabilities.pixelProcessors ? 'enabled' : 'disabled',
+              ),
+            ],
+          ),
+          _DiagnosticCard(
+            title: 'Cache',
+            icon: Icons.storage,
+            rows: <_DiagnosticRow>[
+              _DiagnosticRow(
+                'Encoded memory',
+                cache == null
+                    ? 'unconfigured'
+                    : _formatBytes(cache.memoryBytes),
+              ),
+              _DiagnosticRow(
+                'Memory entries',
+                cache?.memoryEntries.toString() ?? '0',
+              ),
+              _DiagnosticRow(
+                'Hit rate',
+                cache == null
+                    ? '0.0%'
+                    : '${(cache.hitRate * 100).toStringAsFixed(1)}%',
+              ),
+              _DiagnosticRow(
+                'Disk writes',
+                cache?.diskWrites.toString() ?? '0',
+              ),
+              _DiagnosticRow(
+                'Processed hit rate',
+                cache == null
+                    ? '0.0%'
+                    : '${(cache.processedHitRate * 100).toStringAsFixed(1)}%',
+              ),
+              _DiagnosticRow(
+                'Live buffers',
+                cache?.liveOwnedBufferHandles.toString() ?? '0',
+              ),
+            ],
+          ),
+          _DiagnosticCard(
+            title: 'Decoded ImageCache',
+            icon: Icons.photo_library,
+            rows: <_DiagnosticRow>[
+              _DiagnosticRow(
+                'Entries',
+                '${decoded.currentSize}/${decoded.maximumSize}',
+              ),
+              _DiagnosticRow(
+                'Bytes',
+                '${_formatBytes(decoded.currentSizeBytes)} / ${_formatBytes(decoded.maximumSizeBytes)}',
+              ),
+              _DiagnosticRow('Live images', decoded.liveImageCount.toString()),
+              _DiagnosticRow(
+                'Utilization',
+                '${(decoded.byteUtilization * 100).clamp(0, 999).toStringAsFixed(1)}%',
+              ),
+            ],
+          ),
+          _DiagnosticCard(
+            title: 'Scheduler',
+            icon: Icons.speed,
+            rows: <_DiagnosticRow>[
+              _DiagnosticRow(
+                'Active runtime loads',
+                scheduler?.activeRuntimeLoads.toString() ?? '0',
+              ),
+              _DiagnosticRow(
+                'Queue depth',
+                scheduler?.queueDepth.toString() ?? '0',
+              ),
+              _DiagnosticRow(
+                'In-flight requests',
+                scheduler?.inflightRequests.toString() ?? '0',
+              ),
+              _DiagnosticRow(
+                'Listeners',
+                scheduler?.listeners.toString() ?? '0',
+              ),
+              _DiagnosticRow(
+                'Coalesced',
+                scheduler?.totalCoalesced.toString() ?? '0',
+              ),
+              _DiagnosticRow(
+                'Backpressure dropped',
+                scheduler?.totalBackpressureDropped.toString() ?? '0',
+              ),
+            ],
+          ),
+          _DiagnosticCard(
+            title: 'Formats and plugins',
+            icon: Icons.extension,
+            rows: <_DiagnosticRow>[
+              _DiagnosticRow('Image formats', formats.length.toString()),
+              _DiagnosticRow(
+                'Runtime formats',
+                runtimeFormats.take(14).join(', '),
+              ),
+              _DiagnosticRow(
+                'Region decode formats',
+                formats
+                    .where(
+                      (PixaRuntimeImageFormatCapability format) =>
+                          format.regionDecode,
+                    )
+                    .map(
+                      (PixaRuntimeImageFormatCapability format) =>
+                          format.format.name,
+                    )
+                    .join(', '),
+              ),
+              _DiagnosticRow(
+                'Video-frame backends',
+                snapshot.registryArchitecture.videoFrameBackends.toString(),
+              ),
+              _DiagnosticRow(
+                'Runtime modules',
+                snapshot.registryArchitecture.runtimeModules.toString(),
+              ),
+              _DiagnosticRow(
+                'Single host binary',
+                snapshot.registryArchitecture.runtimeCanUseSingleHostBinary
+                    ? 'yes'
+                    : 'no',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _run(String success, Future<void> Function() action) async {
+    setState(() {
+      _status = 'Running';
+    });
+    try {
+      await action();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _status = success;
+      });
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _status = 'Action failed: $error';
+      });
+    }
+  }
+}
+
+final class _DiagnosticCard extends StatelessWidget {
+  const _DiagnosticCard({
+    required this.title,
+    required this.icon,
+    required this.rows,
+  });
+
+  final String title;
+  final IconData icon;
+  final List<_DiagnosticRow> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.surfaceContainer,
+          border: Border.all(color: colors.outlineVariant),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Icon(icon, size: 20, color: colors.primary),
+                  const SizedBox(width: 8),
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              for (final _DiagnosticRow row in rows)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      SizedBox(
+                        width: 150,
+                        child: Text(
+                          row.label,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: colors.onSurfaceVariant,
+                                letterSpacing: 0,
+                              ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          row.value.isEmpty ? '-' : row.value,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodyMedium?.copyWith(letterSpacing: 0),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+final class _DiagnosticRow {
+  const _DiagnosticRow(this.label, this.value);
+
+  final String label;
+  final String value;
+}
+
 final class _ScenarioSection extends StatelessWidget {
   const _ScenarioSection({required this.posts});
 
@@ -967,23 +1385,30 @@ final class _ScenarioSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ImagePost? first = posts.isEmpty ? null : posts.first;
+    final PixaDebugSnapshot snapshot = PixaDebugInspector.snapshot();
+    final bool hasVideoFrameBackend =
+        snapshot.registryArchitecture.videoFrameBackends > 0 &&
+        snapshot.registryArchitecture.videoFrameEncodedOutputBackends > 0;
     final List<_Scenario> scenarios = <_Scenario>[
       if (first != null)
         _Scenario(
           title: 'Provider',
-          child: Image(
-            image: PixaProvider.network(first.imageUrl),
-            fit: BoxFit.cover,
-          ),
+          subtitle: 'ImageProvider compatibility',
+          icon: Icons.image_outlined,
+          child: _ProviderPreview(post: first),
         ),
       if (first != null)
         _Scenario(
           title: 'Large viewer',
+          subtitle: 'Tiled pan and zoom',
+          icon: Icons.open_in_full,
           child: _LargeImagePreview(post: first),
         ),
       if (first != null)
         _Scenario(
           title: 'Low-res chain',
+          subtitle: 'Preview swaps to full request',
+          icon: Icons.swap_horiz,
           child: PixaImage(
             request: _requestForPost(
               first,
@@ -998,13 +1423,16 @@ final class _ScenarioSection extends StatelessWidget {
         ),
       if (first != null)
         _Scenario(
-          title: 'Processor',
+          title: 'Processors',
+          subtitle: 'Resize, sharpen, watermark',
+          icon: Icons.auto_fix_high,
           child: PixaImage(
             request: _requestForPost(
               first,
               targetPixels: 360,
-              processors: const <String>[
-                'resizeExact(width=360,height=360)',
+              processors: <String>[
+                PixaProcessors.resizeToFill(360, 360),
+                PixaProcessors.unsharpen(sigma: 1.0, threshold: 2),
                 'watermark(text=Pixa,position=bottomRight,padding=14,scale=2)',
               ],
             ),
@@ -1017,7 +1445,28 @@ final class _ScenarioSection extends StatelessWidget {
         ),
       if (first != null)
         _Scenario(
+          title: 'Thumbnail',
+          subtitle: 'No-upscale runtime transform',
+          icon: Icons.photo_size_select_small,
+          child: PixaImage(
+            request: _requestForPost(
+              first,
+              targetPixels: 320,
+              processors: <String>[PixaProcessors.thumbnail(320, 240)],
+            ),
+            fit: BoxFit.contain,
+            background: const ColoredBox(color: Color(0xFFE8ECEF)),
+            placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+            progressBuilder: _progressBuilder,
+            errorBuilder: _errorBuilder,
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+      if (first != null)
+        _Scenario(
           title: 'Cache only',
+          subtitle: 'Typed miss or cached hit',
+          icon: Icons.offline_bolt_outlined,
           child: PixaImage(
             request: _requestForPost(
               first,
@@ -1029,8 +1478,17 @@ final class _ScenarioSection extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
           ),
         ),
+      if (first != null)
+        _Scenario(
+          title: 'Decoded prewarm',
+          subtitle: 'Flutter ImageCache integration',
+          icon: Icons.memory,
+          child: _PrewarmPreview(post: first),
+        ),
       _Scenario(
         title: 'Progressive JPEG',
+        subtitle: 'Streaming preview event',
+        icon: Icons.downloading,
         child: PixaImage.network(
           'https://raw.githubusercontent.com/sindresorhus/is-progressive/main/fixture/progressive.jpg',
           fit: BoxFit.cover,
@@ -1042,6 +1500,8 @@ final class _ScenarioSection extends StatelessWidget {
       ),
       _Scenario(
         title: 'Animated GIF',
+        subtitle: 'Controlled animated display',
+        icon: Icons.movie_filter_outlined,
         child: PixaImage.network(
           'https://media.giphy.com/media/3oEjI6SIIHBdRxXI40/giphy.gif',
           fit: BoxFit.cover,
@@ -1053,6 +1513,8 @@ final class _ScenarioSection extends StatelessWidget {
       ),
       _Scenario(
         title: 'Animated WebP',
+        subtitle: 'Engine-backed animation path',
+        icon: Icons.motion_photos_on_outlined,
         child: PixaImage.network(
           'https://www.gstatic.com/webp/animated/1.webp',
           fit: BoxFit.cover,
@@ -1064,6 +1526,8 @@ final class _ScenarioSection extends StatelessWidget {
       ),
       _Scenario(
         title: 'Retry',
+        subtitle: 'Failure surface and retry',
+        icon: Icons.refresh,
         child: PixaImage.network(
           'https://images.example.invalid/missing.jpg',
           fit: BoxFit.cover,
@@ -1073,37 +1537,78 @@ final class _ScenarioSection extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
         ),
       ),
+      _Scenario(
+        title: 'Video frame',
+        subtitle: hasVideoFrameBackend
+            ? 'Runtime backend available'
+            : 'No backend in this binary',
+        icon: Icons.video_file_outlined,
+        child: hasVideoFrameBackend
+            ? PixaImage.videoFrame(
+                'https://flutter.github.io/assets-for-api-docs/assets/videos/bee.mp4',
+                timestamp: const Duration(seconds: 1),
+                fit: BoxFit.cover,
+                placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+                errorBuilder: _errorBuilder,
+                borderRadius: BorderRadius.circular(8),
+              )
+            : const _DisabledScenarioPreview(
+                icon: Icons.video_file_outlined,
+                label: 'video-frame backend unavailable',
+              ),
+      ),
     ];
-    if (scenarios.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(
-            'Pixa scenarios',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0,
+    return CustomScrollView(
+      key: const ValueKey<String>('pixa-scenarios-scroll'),
+      slivers: <Widget>[
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Pixa scenarios',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  first == null
+                      ? 'Load the gallery to enable source-dependent scenarios.'
+                      : '${scenarios.length} scenarios using ${first.source.name} #${first.id}',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    letterSpacing: 0,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 210,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: scenarios.length,
-              separatorBuilder: (BuildContext context, int index) =>
-                  const SizedBox(width: 10),
-              itemBuilder: (BuildContext context, int index) {
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          sliver: SliverGrid(
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 320,
+              mainAxisExtent: 276,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+            ),
+            delegate: SliverChildBuilderDelegate(
+              (BuildContext context, int index) {
                 return _ScenarioTile(scenario: scenarios[index]);
               },
+              childCount: scenarios.length,
+              addAutomaticKeepAlives: false,
+              addRepaintBoundaries: true,
+              addSemanticIndexes: false,
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -1116,38 +1621,169 @@ final class _ScenarioTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
-    return SizedBox(
-      width: 190,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Expanded(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: colors.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
-              ),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainer,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colors.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            AspectRatio(
+              aspectRatio: 4 / 3,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: SizedBox.expand(
-                  child: _ScenarioViewport(child: scenario.child),
+                child: ColoredBox(
+                  color: colors.surfaceContainerHighest,
+                  child: SizedBox.expand(child: scenario.child),
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            scenario.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0,
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                Icon(scenario.icon, size: 18, color: colors.primary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    scenario.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
+            const SizedBox(height: 3),
+            Text(
+              scenario.subtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.onSurfaceVariant,
+                letterSpacing: 0,
+              ),
+            ),
+          ],
+        ),
       ),
     );
+  }
+}
+
+final class _ProviderPreview extends StatelessWidget {
+  const _ProviderPreview({required this.post});
+
+  final ImagePost post;
+
+  @override
+  Widget build(BuildContext context) {
+    final double dpr = MediaQuery.devicePixelRatioOf(context);
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final int? targetWidth = _targetDimension(constraints.maxWidth, dpr);
+        final int? targetHeight = _targetDimension(constraints.maxHeight, dpr);
+        return Image(
+          image: PixaProvider.network(
+            post.imageUrl,
+            targetWidth: targetWidth,
+            targetHeight: targetHeight,
+            cachePolicy: const PixaCachePolicy.public(
+              maxAge: Duration(days: 7),
+            ),
+            retryPolicy: const PixaRetryPolicy.exponential(maxAttempts: 2),
+          ),
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          filterQuality: FilterQuality.none,
+        );
+      },
+    );
+  }
+}
+
+final class _PrewarmPreview extends StatefulWidget {
+  const _PrewarmPreview({required this.post});
+
+  final ImagePost post;
+
+  @override
+  State<_PrewarmPreview> createState() => _PrewarmPreviewState();
+}
+
+final class _PrewarmPreviewState extends State<_PrewarmPreview> {
+  String _status = 'Tap to prewarm decoded cache';
+  bool _isRunning = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        PixaImage(
+          request: _requestForPost(widget.post, targetPixels: 360),
+          fit: BoxFit.cover,
+          placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+          errorBuilder: _errorBuilder,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        Positioned(
+          left: 8,
+          right: 8,
+          bottom: 8,
+          child: FilledButton.tonalIcon(
+            onPressed: _isRunning ? null : _prewarm,
+            icon: _isRunning
+                ? const SizedBox.square(
+                    dimension: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.memory, size: 18),
+            label: Text(_status, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _prewarm() async {
+    setState(() {
+      _isRunning = true;
+      _status = 'Prewarming';
+    });
+    try {
+      await Pixa.prefetch(
+        _requestForPost(widget.post, targetPixels: 360),
+        target: PixaPrefetchTarget.decodedPrewarm,
+        context: context,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _status = 'Decoded cache warm';
+      });
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _status = 'Prewarm failed';
+      });
+      debugPrint('Pixa prewarm scenario failed: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRunning = false;
+        });
+      }
+    }
   }
 }
 
@@ -1190,21 +1826,52 @@ final class _LargeImagePreview extends StatelessWidget {
   }
 }
 
-final class _ScenarioViewport extends StatelessWidget {
-  const _ScenarioViewport({required this.child});
+final class _DisabledScenarioPreview extends StatelessWidget {
+  const _DisabledScenarioPreview({required this.icon, required this.label});
 
-  final Widget child;
+  final IconData icon;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox.expand(child: child);
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return ColoredBox(
+      color: colors.surfaceContainerHighest,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(icon, size: 32, color: colors.onSurfaceVariant),
+              const SizedBox(height: 8),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                  letterSpacing: 0,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
 final class _Scenario {
-  const _Scenario({required this.title, required this.child});
+  const _Scenario({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.child,
+  });
 
   final String title;
+  final String subtitle;
+  final IconData icon;
   final Widget child;
 }
 
@@ -1249,6 +1916,13 @@ PixaRequest _thumbnailRequestForPost(ImagePost post) {
     priority: PixaPriority.low,
     retryPolicy: const PixaRetryPolicy.exponential(maxAttempts: 2),
   );
+}
+
+int? _targetDimension(double logicalExtent, double devicePixelRatio) {
+  if (!logicalExtent.isFinite || logicalExtent <= 0) {
+    return null;
+  }
+  return (logicalExtent * devicePixelRatio).ceil().clamp(1, 1 << 30).toInt();
 }
 
 Widget _progressBuilder(BuildContext context, PixaProgress? progress) {

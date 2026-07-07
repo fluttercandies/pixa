@@ -77,6 +77,13 @@ void main() {
           find.text('Masonry').evaluate().isNotEmpty &&
           find.text('Grid').evaluate().isNotEmpty,
     );
+    _check(
+      checks,
+      'exampleNavigation',
+      find.text('Gallery').evaluate().isNotEmpty &&
+          find.text('Scenarios').evaluate().isNotEmpty &&
+          find.text('Diagnostics').evaluate().isNotEmpty,
+    );
 
     await tester.ensureVisible(find.text('Masonry'));
     await tester.tap(find.text('Masonry'));
@@ -86,6 +93,69 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     await _pumpUntil(tester, () => server.requestCount > 0);
     _check(checks, 'loopbackImageRequest', server.requestCount > 0);
+
+    await tester.pumpWidget(
+      PixaGalleryApp(
+        initialPosts: server.posts,
+        loadOnStart: false,
+        initialTab: PixaGalleryTab.scenarios,
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 200));
+    await _pumpUntil(
+      tester,
+      () => find.text('Pixa scenarios').evaluate().isNotEmpty,
+    );
+    final bool scenarioInitialVisible =
+        find.text('Pixa scenarios').evaluate().isNotEmpty &&
+        find.text('Provider').evaluate().isNotEmpty;
+    await _dragUntilVisible(
+      tester,
+      scrollable: find.byKey(const ValueKey<String>('pixa-scenarios-scroll')),
+      target: find.text('Video frame'),
+    );
+    _check(
+      checks,
+      'scenarioCatalog',
+      scenarioInitialVisible && find.text('Video frame').evaluate().isNotEmpty,
+    );
+
+    await tester.pumpWidget(
+      PixaGalleryApp(
+        initialPosts: server.posts,
+        loadOnStart: false,
+        initialTab: PixaGalleryTab.diagnostics,
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 200));
+    await _pumpUntil(
+      tester,
+      () => find.text('Diagnostics').evaluate().isNotEmpty,
+    );
+    final bool diagnosticsInitialVisible =
+        find.text('Diagnostics').evaluate().isNotEmpty &&
+        find.text('Runtime').evaluate().isNotEmpty &&
+        find.text('Cache').evaluate().isNotEmpty;
+    await _dragUntilVisible(
+      tester,
+      scrollable: find.byKey(const ValueKey<String>('pixa-diagnostics-scroll')),
+      target: find.text('Formats and plugins'),
+    );
+    _check(
+      checks,
+      'diagnosticsCatalog',
+      diagnosticsInitialVisible &&
+          find.text('Formats and plugins').evaluate().isNotEmpty,
+    );
+
+    await tester.pumpWidget(
+      PixaGalleryApp(
+        initialPosts: server.posts,
+        loadOnStart: false,
+        initialTab: PixaGalleryTab.gallery,
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 200));
 
     final Finder tile = find.byKey(const ValueKey<String>('grid-1'));
     await _pumpUntil(tester, () => tile.evaluate().isNotEmpty);
@@ -155,6 +225,21 @@ Future<void> _pumpUntil(
 }) async {
   final DateTime deadline = DateTime.now().add(timeout);
   while (!condition() && DateTime.now().isBefore(deadline)) {
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+}
+
+Future<void> _dragUntilVisible(
+  WidgetTester tester, {
+  required Finder scrollable,
+  required Finder target,
+  int maxAttempts = 8,
+}) async {
+  for (var attempt = 0; attempt < maxAttempts; attempt++) {
+    if (target.evaluate().isNotEmpty) {
+      return;
+    }
+    await tester.drag(scrollable, const Offset(0, -340));
     await tester.pump(const Duration(milliseconds: 100));
   }
 }
