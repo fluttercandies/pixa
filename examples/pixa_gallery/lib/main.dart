@@ -2236,8 +2236,7 @@ final class _ControllerPreviewState extends State<_ControllerPreview> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  PixaScenarioControlBar(
                     children: <Widget>[
                       _SmallIconButton(
                         tooltip: 'Reload',
@@ -3367,6 +3366,24 @@ final class _MjpegVideoFramePreviewState
         // Best-effort cleanup for native-only example temp files.
       }
     }
+  }
+}
+
+/// Compact action bar used by scenario preview overlays.
+final class PixaScenarioControlBar extends StatelessWidget {
+  /// Creates a control bar that wraps controls instead of overflowing.
+  const PixaScenarioControlBar({super.key, required this.children});
+
+  /// Controls displayed inside the preview overlay.
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      alignment: WrapAlignment.center,
+      runAlignment: WrapAlignment.center,
+      children: children,
+    );
   }
 }
 
