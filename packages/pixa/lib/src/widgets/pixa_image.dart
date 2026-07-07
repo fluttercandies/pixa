@@ -440,6 +440,87 @@ final class PixaImage extends StatefulWidget {
     );
   }
 
+  /// Creates an image from a still frame extracted from a video.
+  factory PixaImage.videoFrame(
+    String locator, {
+    required Duration timestamp,
+    PixaVideoFrameSelection frameSelection = PixaVideoFrameSelection.nearest,
+    String? backend,
+    Key? key,
+    double? width,
+    double? height,
+    BoxFit? fit,
+    AlignmentGeometry alignment = Alignment.center,
+    String? semanticLabel,
+    bool gaplessPlayback = false,
+    FilterQuality filterQuality = FilterQuality.medium,
+    PixaController? controller,
+    PixaAnimationController? animationController,
+    PixaAnimationOptions animationOptions = const PixaAnimationOptions(),
+    PixaPlaceholder? placeholder,
+    PixaProgressBuilder? progressBuilder,
+    PixaErrorBuilder? errorBuilder,
+    Duration transitionDuration = Duration.zero,
+    BorderRadius? borderRadius,
+    bool circle = false,
+    Widget? overlay,
+    Widget? background,
+    AlignmentGeometry? focusPoint,
+    Widget? pressOverlay,
+    bool tapToRetry = true,
+    Map<String, String> headers = const <String, String>{},
+    PixaHeadersPolicy headersPolicy = const PixaHeadersPolicy(),
+    PixaCachePolicy cachePolicy = const PixaCachePolicy(),
+    PixaPriority priority = PixaPriority.normal,
+    PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
+    PixaRedirectPolicy redirectPolicy = const PixaRedirectPolicy(),
+    PixaPluginExecutionPolicy pluginExecutionPolicy =
+        const PixaPluginExecutionPolicy.runtimeOnly(),
+  }) {
+    return PixaImage(
+      key: key,
+      request: PixaRequest.videoFrame(
+        locator,
+        timestamp: timestamp,
+        frameSelection: frameSelection,
+        backend: backend,
+        headers: headers,
+        headersPolicy: headersPolicy,
+        targetSize: PixaTargetSize(
+          width: width?.round(),
+          height: height?.round(),
+        ),
+        fit: fit,
+        cachePolicy: cachePolicy,
+        priority: priority,
+        retryPolicy: retryPolicy,
+        redirectPolicy: redirectPolicy,
+        pluginExecutionPolicy: pluginExecutionPolicy,
+      ),
+      controller: controller,
+      animationController: animationController,
+      animationOptions: animationOptions,
+      width: width,
+      height: height,
+      fit: fit,
+      alignment: alignment,
+      semanticLabel: semanticLabel,
+      gaplessPlayback: gaplessPlayback,
+      filterQuality: filterQuality,
+      placeholder: placeholder,
+      progressBuilder: progressBuilder,
+      errorBuilder: errorBuilder,
+      transitionDuration: transitionDuration,
+      borderRadius: borderRadius,
+      circle: circle,
+      overlay: overlay,
+      background: background,
+      focusPoint: focusPoint,
+      pressOverlay: pressOverlay,
+      tapToRetry: tapToRetry,
+    );
+  }
+
   /// runtime request.
   final PixaRequest request;
 

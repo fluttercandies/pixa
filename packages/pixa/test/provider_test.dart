@@ -1857,6 +1857,43 @@ void main() {
     expect(provider.onProgress, isNull);
   });
 
+  test('PixaProvider.videoFrame builds a runtime video-frame request', () {
+    final PixaProvider provider = PixaProvider.videoFrame(
+      'https://media.example.test/private/movie.mp4?token=secret',
+      timestamp: const Duration(milliseconds: 1500),
+      frameSelection: PixaVideoFrameSelection.exact,
+      backend: 'platform',
+      targetWidth: 320,
+      targetHeight: 180,
+      scale: 2,
+      cachePolicy: const PixaCachePolicy(privateDiskCache: true),
+      priority: PixaPriority.high,
+      retryPolicy: const PixaRetryPolicy.exponential(maxAttempts: 2),
+    );
+    final PixaRequest request = provider.request;
+
+    expect(request.source, isA<PixaVideoFrameSource>());
+    final PixaVideoFrameSource source = request.source as PixaVideoFrameSource;
+    expect(source.locator, contains('movie.mp4'));
+    expect(source.options.timestamp, const Duration(milliseconds: 1500));
+    expect(source.options.frameSelection, PixaVideoFrameSelection.exact);
+    expect(source.options.normalizedBackend, 'platform');
+    expect(request.targetSize, const PixaTargetSize(width: 320, height: 180));
+    expect(request.scale, 2);
+    expect(request.cachePolicy, const PixaCachePolicy(privateDiskCache: true));
+    expect(request.priority, PixaPriority.high);
+    expect(
+      request.retryPolicy,
+      const PixaRetryPolicy.exponential(maxAttempts: 2),
+    );
+    expect(
+      request.pluginExecutionPolicy,
+      const PixaPluginExecutionPolicy.runtimeOnly(),
+    );
+    expect(request.source.safeLabel, 'video-frame:movie.mp4@1500000us');
+    expect(request.cacheKey.debugLabel, isNot(contains('secret')));
+  });
+
   test('PixaRequest memoizes hot-path cache keys', () {
     final PixaRequest request = PixaRequest.network(
       'https://images.example.test/a.jpg?token=secret',
@@ -1890,6 +1927,48 @@ void main() {
     expect(image.request.priority, PixaPriority.normal);
     expect(image.request.retryPolicy, const PixaRetryPolicy.none());
     expect(image.request.redirectPolicy, const PixaRedirectPolicy());
+  });
+
+  test('PixaImage.videoFrame preserves widget and request options', () {
+    final PixaImage image = PixaImage.videoFrame(
+      'file:///videos/movie.mp4',
+      timestamp: const Duration(seconds: 2),
+      frameSelection: PixaVideoFrameSelection.nearest,
+      backend: 'platform',
+      width: 160,
+      height: 90,
+      fit: BoxFit.cover,
+      gaplessPlayback: true,
+      filterQuality: ui.FilterQuality.none,
+      cachePolicy: const PixaCachePolicy(privateDiskCache: true),
+      priority: PixaPriority.high,
+    );
+
+    expect(image.width, 160);
+    expect(image.height, 90);
+    expect(image.fit, BoxFit.cover);
+    expect(image.gaplessPlayback, isTrue);
+    expect(image.filterQuality, ui.FilterQuality.none);
+    expect(image.request.source, isA<PixaVideoFrameSource>());
+    final PixaVideoFrameSource source =
+        image.request.source as PixaVideoFrameSource;
+    expect(source.options.timestamp, const Duration(seconds: 2));
+    expect(source.options.frameSelection, PixaVideoFrameSelection.nearest);
+    expect(source.options.normalizedBackend, 'platform');
+    expect(
+      image.request.targetSize,
+      const PixaTargetSize(width: 160, height: 90),
+    );
+    expect(image.request.fit, BoxFit.cover);
+    expect(
+      image.request.cachePolicy,
+      const PixaCachePolicy(privateDiskCache: true),
+    );
+    expect(image.request.priority, PixaPriority.high);
+    expect(
+      image.request.pluginExecutionPolicy,
+      const PixaPluginExecutionPolicy.runtimeOnly(),
+    );
   });
 
   test('PixaImage network factory attaches low-res request', () {

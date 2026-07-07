@@ -188,6 +188,49 @@ final class PixaProvider extends ImageProvider<PixaProvider> {
     );
   }
 
+  /// Creates a provider for a still frame extracted from a video.
+  factory PixaProvider.videoFrame(
+    String locator, {
+    required Duration timestamp,
+    PixaVideoFrameSelection frameSelection = PixaVideoFrameSelection.nearest,
+    String? backend,
+    int? targetWidth,
+    int? targetHeight,
+    double scale = 1.0,
+    Map<String, String> headers = const <String, String>{},
+    PixaHeadersPolicy headersPolicy = const PixaHeadersPolicy(),
+    PixaCachePolicy cachePolicy = const PixaCachePolicy(),
+    PixaPriority priority = PixaPriority.normal,
+    PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
+    PixaRedirectPolicy redirectPolicy = const PixaRedirectPolicy(),
+    PixaPluginExecutionPolicy pluginExecutionPolicy =
+        const PixaPluginExecutionPolicy.runtimeOnly(),
+    PixaAnimationController? animationController,
+    PixaAnimationOptions animationOptions = const PixaAnimationOptions(),
+    ValueChanged<PixaProgress>? onProgress,
+  }) {
+    return PixaProvider(
+      request: PixaRequest.videoFrame(
+        locator,
+        timestamp: timestamp,
+        frameSelection: frameSelection,
+        backend: backend,
+        headers: headers,
+        headersPolicy: headersPolicy,
+        targetSize: PixaTargetSize(width: targetWidth, height: targetHeight),
+        scale: scale,
+        cachePolicy: cachePolicy,
+        priority: priority,
+        retryPolicy: retryPolicy,
+        redirectPolicy: redirectPolicy,
+        pluginExecutionPolicy: pluginExecutionPolicy,
+      ),
+      onProgress: onProgress,
+      animationController: animationController,
+      animationOptions: animationOptions,
+    );
+  }
+
   /// runtime request.
   final PixaRequest request;
 
