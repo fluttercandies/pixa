@@ -75,6 +75,18 @@ abstract final class PixaProcessors {
         'filter=${_resizeFilter(filter)})';
   }
 
+  /// Builds a fast aspect-fit thumbnail that never enlarges the source image.
+  static String thumbnail(int width, int height) {
+    return 'thumbnail(width=${_checkPositiveInt(width, 'width')},'
+        'height=${_checkPositiveInt(height, 'height')})';
+  }
+
+  /// Builds a fast thumbnail with exact output dimensions.
+  static String thumbnailExact(int width, int height) {
+    return 'thumbnailExact(width=${_checkPositiveInt(width, 'width')},'
+        'height=${_checkPositiveInt(height, 'height')})';
+  }
+
   /// Crops a rectangle from the image.
   static String crop({
     required int x,

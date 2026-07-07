@@ -1567,9 +1567,7 @@ void main() {
             () async => _minimalGif(),
           ),
           cachePolicy: const PixaCachePolicy.noStore(),
-          processors: const <String>[
-            'resize-to-fill(width=1,height=1,filter=nearest)',
-          ],
+          processors: const <String>['thumbnail(width=1,height=1)'],
         ),
       );
       final ImageStreamCompleter completer = provider.loadImage(provider, (

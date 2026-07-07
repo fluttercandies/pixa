@@ -24,6 +24,11 @@ void main() {
       PixaProcessors.resizeToFill(40, 30, filter: PixaResizeFilter.nearest),
       'resizeToFill(width=40,height=30,filter=nearest)',
     );
+    expect(PixaProcessors.thumbnail(40, 30), 'thumbnail(width=40,height=30)');
+    expect(
+      PixaProcessors.thumbnailExact(40, 30),
+      'thumbnailExact(width=40,height=30)',
+    );
     expect(
       PixaProcessors.crop(x: 1, y: 2, width: 3, height: 4),
       'crop(x=1,y=2,width=3,height=4)',
@@ -66,6 +71,10 @@ void main() {
     expect(() => PixaProcessors.resize(width: 0), throwsRangeError);
     expect(() => PixaProcessors.resizeToFill(0, 1), throwsRangeError);
     expect(() => PixaProcessors.resizeToFill(1, 0), throwsRangeError);
+    expect(() => PixaProcessors.thumbnail(0, 1), throwsRangeError);
+    expect(() => PixaProcessors.thumbnail(1, 0), throwsRangeError);
+    expect(() => PixaProcessors.thumbnailExact(0, 1), throwsRangeError);
+    expect(() => PixaProcessors.thumbnailExact(1, 0), throwsRangeError);
     expect(
       () => PixaProcessors.crop(x: -1, y: 0, width: 1, height: 1),
       throwsRangeError,

@@ -663,6 +663,8 @@ bool _isRuntimeDisplayProcessor(String descriptor) {
     'resizeexact' ||
     'resizetofill' ||
     'centercrop' ||
+    'thumbnail' ||
+    'thumbnailexact' ||
     'crop' ||
     'tile' ||
     'tilecropresize' ||

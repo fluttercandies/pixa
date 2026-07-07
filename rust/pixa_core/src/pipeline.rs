@@ -2148,6 +2148,14 @@ enum RuntimeProcessor {
         height: u32,
         filter: image::imageops::FilterType,
     },
+    Thumbnail {
+        width: u32,
+        height: u32,
+    },
+    ThumbnailExact {
+        width: u32,
+        height: u32,
+    },
     Crop {
         x: u32,
         y: u32,
@@ -2272,6 +2280,14 @@ fn parse_processor_descriptor(descriptor: &str) -> RuntimeResult<RuntimeProcesso
             width: required_processor_u32(&args, "width")?,
             height: required_processor_u32(&args, "height")?,
             filter: parse_resize_filter(args.get("filter").map(String::as_str))?,
+        }),
+        "thumbnail" => Ok(RuntimeProcessor::Thumbnail {
+            width: required_processor_u32(&args, "width")?,
+            height: required_processor_u32(&args, "height")?,
+        }),
+        "thumbnailexact" => Ok(RuntimeProcessor::ThumbnailExact {
+            width: required_processor_u32(&args, "width")?,
+            height: required_processor_u32(&args, "height")?,
         }),
         "crop" => Ok(RuntimeProcessor::Crop {
             x: required_processor_u32_allow_zero(&args, "x")?,
@@ -3303,6 +3319,10 @@ fn apply_processor(
             height,
             filter,
         } => image.resize_to_fill(width, height, filter),
+        RuntimeProcessor::Thumbnail { width, height } => {
+            apply_thumbnail_processor(&image, width, height)
+        }
+        RuntimeProcessor::ThumbnailExact { width, height } => image.thumbnail_exact(width, height),
         RuntimeProcessor::Crop {
             x,
             y,
@@ -3413,6 +3433,18 @@ fn apply_resize_processor(
         }
         (None, None, _) => image.clone(),
     }
+}
+
+fn apply_thumbnail_processor(
+    image: &image::DynamicImage,
+    width: u32,
+    height: u32,
+) -> image::DynamicImage {
+    let (source_width, source_height) = image.dimensions();
+    if width >= source_width && height >= source_height {
+        return image.clone();
+    }
+    image.thumbnail(width, height)
 }
 
 fn scaled_dimension(numerator: u32, target: u32, denominator: u32) -> u32 {
@@ -5518,6 +5550,33 @@ mod tests {
         let decoded = image::load_from_memory(&outcome.bytes).expect("processed PNG should decode");
 
         assert_eq!(decoded.dimensions(), (3, 1));
+    }
+
+    #[test]
+    fn applies_thumbnail_processors() {
+        let mut thumbnail_request = bytes_request(RuntimeLimits::default());
+        thumbnail_request.cache_key = "processor-thumbnail".to_string();
+        thumbnail_request.encoded_cache_key = "processor-thumbnail-origin".to_string();
+        thumbnail_request.processors = vec!["thumbnail(width=8,height=8)".to_string()];
+
+        let thumbnail_outcome = load_image("", thumbnail_request, Some(&png_rgba_4x4()))
+            .expect("thumbnail processor should complete");
+        let thumbnail_decoded =
+            image::load_from_memory(&thumbnail_outcome.bytes).expect("processed PNG should decode");
+
+        assert_eq!(thumbnail_decoded.dimensions(), (4, 4));
+
+        let mut exact_request = bytes_request(RuntimeLimits::default());
+        exact_request.cache_key = "processor-thumbnail-exact".to_string();
+        exact_request.encoded_cache_key = "processor-thumbnail-exact-origin".to_string();
+        exact_request.processors = vec!["thumbnailExact(width=3,height=2)".to_string()];
+
+        let exact_outcome = load_image("", exact_request, Some(&png_rgba_4x4()))
+            .expect("thumbnailExact processor should complete");
+        let exact_decoded =
+            image::load_from_memory(&exact_outcome.bytes).expect("processed PNG should decode");
+
+        assert_eq!(exact_decoded.dimensions(), (3, 2));
     }
 
     #[test]
