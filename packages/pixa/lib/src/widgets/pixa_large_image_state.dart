@@ -70,12 +70,19 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
         _ensureInitialTransform(viewportSize);
         final double fitScale = _scaleFor(viewportSize, widget.fit);
         final double minScale = widget.minScale ?? fitScale;
-        final PixaLargeImageTilePlan plan = planner.plan(
-          transform: _controller._transform.value,
-          viewportSize: viewportSize,
-          devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
-        );
-        _syncTileLifecycle(plan);
+        final bool useTiles = _shouldUseTiles();
+        final PixaLargeImageTilePlan? plan = useTiles
+            ? planner.plan(
+                transform: _controller._transform.value,
+                viewportSize: viewportSize,
+                devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+              )
+            : null;
+        if (plan == null) {
+          _clearTileLifecycle();
+        } else {
+          _syncTileLifecycle(plan);
+        }
         return ColoredBox(
           color: widget.backgroundColor,
           child: GestureDetector(
@@ -105,16 +112,20 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
                 child: Stack(
                   fit: StackFit.expand,
                   children: <Widget>[
-                    if (widget.showOverview) _buildOverview(),
-                    for (final PixaLargeImageTile tile in plan.visibleTiles)
-                      _TileImage(
-                        key: ValueKey<String>(tile.key),
-                        tile: tile,
-                        request: tile.requestFor(widget.request),
-                        filterQuality: widget.filterQuality,
-                        errorBuilder:
-                            widget.tileErrorBuilder ?? widget.errorBuilder,
-                      ),
+                    if (plan == null)
+                      _buildDirectImage()
+                    else ...<Widget>[
+                      if (widget.showOverview) _buildOverview(),
+                      for (final PixaLargeImageTile tile in plan.visibleTiles)
+                        _TileImage(
+                          key: ValueKey<String>(tile.key),
+                          tile: tile,
+                          request: tile.requestFor(widget.request),
+                          filterQuality: widget.filterQuality,
+                          errorBuilder:
+                              widget.tileErrorBuilder ?? widget.errorBuilder,
+                        ),
+                    ],
                   ],
                 ),
               ),
@@ -130,6 +141,29 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
     widget.imageWidth,
     widget.imageHeight,
   );
+
+  bool _shouldUseTiles() {
+    return switch (widget.tileMode) {
+      PixaLargeImageTileMode.always => true,
+      PixaLargeImageTileMode.never => false,
+      PixaLargeImageTileMode.adaptive =>
+        widget.imageWidth * widget.imageHeight >= widget.minTileSourcePixels,
+    };
+  }
+
+  Widget _buildDirectImage() {
+    return Positioned.fill(
+      child: PixaImage(
+        request: widget.request.copyWith(priority: PixaPriority.high),
+        fit: BoxFit.fill,
+        filterQuality: widget.filterQuality,
+        placeholder: widget.placeholder,
+        progressBuilder: widget.progressBuilder,
+        errorBuilder: widget.errorBuilder,
+        transitionDuration: Duration.zero,
+      ),
+    );
+  }
 
   Widget _buildOverview() {
     final int width;
@@ -193,6 +227,27 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
       });
     }
     _schedulePrefetch(plan);
+  }
+
+  void _clearTileLifecycle() {
+    _prefetchTimer?.cancel();
+    _lastPrefetchSignature = null;
+    if (_lastVisibleTileSignature == '' && _visibleTileRequests.isEmpty) {
+      return;
+    }
+    _lastVisibleTileSignature = '';
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      final List<PixaRequest> exited = _visibleTileRequests.values.toList(
+        growable: false,
+      );
+      _visibleTileRequests.clear();
+      if (widget.evictDecodedTilesOnExit) {
+        _evictDecodedRequests(exited);
+      }
+    });
   }
 
   void _schedulePrefetch(PixaLargeImageTilePlan plan) {

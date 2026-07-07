@@ -146,6 +146,7 @@ void main() {
                 ),
                 imageWidth: 512,
                 imageHeight: 512,
+                tileMode: PixaLargeImageTileMode.always,
                 tileSize: 512,
                 showOverview: false,
                 prefetchTiles: false,
@@ -168,6 +169,101 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
   });
+
+  testWidgets('large image adaptive mode displays small images directly', (
+    WidgetTester tester,
+  ) async {
+    await _configure('pixa-large-image-small-direct-');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(devicePixelRatio: 1),
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 256,
+              height: 256,
+              child: PixaLargeImage(
+                request: PixaRequest(
+                  source: PixaSource.custom(
+                    'large-image-small-direct',
+                    () => Future<Uint8List>.error(StateError('direct failed')),
+                  ),
+                  cachePolicy: const PixaCachePolicy.noStore(),
+                ),
+                imageWidth: 512,
+                imageHeight: 512,
+                showOverview: false,
+                prefetchTiles: false,
+                evictDecodedTilesOnExit: false,
+                errorBuilder: (_, _, _) => const Text('direct-error'),
+                tileErrorBuilder: (_, _, _) => const Text('tile-error'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await _pumpUntilFound(tester, find.text('direct-error'));
+
+    expect(find.text('direct-error'), findsOneWidget);
+    expect(find.text('tile-error'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+  });
+
+  testWidgets(
+    'large image never tile mode displays oversized images directly',
+    (WidgetTester tester) async {
+      await _configure('pixa-large-image-never-direct-');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: const MediaQueryData(devicePixelRatio: 1),
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: 256,
+                height: 256,
+                child: PixaLargeImage(
+                  request: PixaRequest(
+                    source: PixaSource.custom(
+                      'large-image-never-direct',
+                      () =>
+                          Future<Uint8List>.error(StateError('direct failed')),
+                    ),
+                    cachePolicy: const PixaCachePolicy.noStore(),
+                  ),
+                  imageWidth: 6000,
+                  imageHeight: 4000,
+                  tileMode: PixaLargeImageTileMode.never,
+                  showOverview: false,
+                  prefetchTiles: false,
+                  evictDecodedTilesOnExit: false,
+                  errorBuilder: (_, _, _) => const Text('direct-error'),
+                  tileErrorBuilder: (_, _, _) => const Text('tile-error'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await _pumpUntilFound(tester, find.text('direct-error'));
+
+      expect(find.text('direct-error'), findsOneWidget);
+      expect(find.text('tile-error'), findsNothing);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+    },
+  );
 }
 
 Future<void> _doubleTapAt(WidgetTester tester, Offset position) async {

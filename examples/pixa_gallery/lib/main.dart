@@ -18,6 +18,35 @@ enum _GalleryLayout { flexRows, masonry, denseGrid }
 /// Top-level example destinations.
 enum PixaGalleryTab { gallery, scenarios, diagnostics }
 
+const List<ImagePost> _learningPosts = <ImagePost>[
+  ImagePost(
+    id: 1001,
+    imageUrl: 'https://www.gstatic.com/webp/gallery/1.jpg',
+    width: 550,
+    height: 368,
+    source: SourceType.nekosia,
+    thumbnailUrl: 'https://www.gstatic.com/webp/gallery/1.webp',
+    thumbnailWidth: 550,
+    thumbnailHeight: 368,
+  ),
+  ImagePost(
+    id: 1002,
+    imageUrl:
+        'https://flutter.github.io/assets-for-api-docs/assets/widgets/owl.jpg',
+    width: 512,
+    height: 512,
+    source: SourceType.nekosia,
+  ),
+  ImagePost(
+    id: 1003,
+    imageUrl:
+        'https://flutter.github.io/assets-for-api-docs/assets/widgets/owl-2.jpg',
+    width: 520,
+    height: 521,
+    source: SourceType.nekosia,
+  ),
+];
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Pixa.configure(
@@ -268,6 +297,7 @@ final class _PixaGalleryHomeState extends State<PixaGalleryHome> {
 
   @override
   Widget build(BuildContext context) {
+    final bool useNavigationRail = MediaQuery.sizeOf(context).width >= 900;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pixa Gallery'),
@@ -289,62 +319,110 @@ final class _PixaGalleryHomeState extends State<PixaGalleryHome> {
           ),
         ],
       ),
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 180),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        transitionBuilder: (Widget child, Animation<double> animation) {
-          final Animation<Offset> offset = Tween<Offset>(
-            begin: const Offset(0, 0.015),
-            end: Offset.zero,
-          ).animate(animation);
-          return FadeTransition(
-            opacity: animation,
-            child: SlideTransition(position: offset, child: child),
-          );
+      body: useNavigationRail
+          ? Row(
+              children: <Widget>[
+                _buildNavigationRail(),
+                VerticalDivider(
+                  width: 1,
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+                Expanded(child: _buildSelectedPage()),
+              ],
+            )
+          : _buildSelectedPage(),
+      bottomNavigationBar: useNavigationRail ? null : _buildNavigationBar(),
+    );
+  }
+
+  Widget _buildSelectedPage() {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (Widget child, Animation<double> animation) {
+        final Animation<Offset> offset = Tween<Offset>(
+          begin: const Offset(0, 0.015),
+          end: Offset.zero,
+        ).animate(animation);
+        return FadeTransition(
+          opacity: animation,
+          child: SlideTransition(position: offset, child: child),
+        );
+      },
+      child: KeyedSubtree(
+        key: ValueKey<PixaGalleryTab>(_selectedTab),
+        child: switch (_selectedTab) {
+          PixaGalleryTab.gallery => _buildGalleryBody(),
+          PixaGalleryTab.scenarios => _ScenarioSection(posts: _posts),
+          PixaGalleryTab.diagnostics => _DiagnosticsPage(
+            onPrefetchVisible: _prefetchVisible,
+            onTrimMemory: _trimMemory,
+            onShowCacheStats: _showCacheStats,
+          ),
         },
-        child: KeyedSubtree(
-          key: ValueKey<PixaGalleryTab>(_selectedTab),
-          child: switch (_selectedTab) {
-            PixaGalleryTab.gallery => _buildGalleryBody(),
-            PixaGalleryTab.scenarios => _ScenarioSection(posts: _posts),
-            PixaGalleryTab.diagnostics => _DiagnosticsPage(
-              onPrefetchVisible: _prefetchVisible,
-              onTrimMemory: _trimMemory,
-              onShowCacheStats: _showCacheStats,
-            ),
-          },
-        ),
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedTab.index,
-        onDestinationSelected: (int index) {
-          setState(() {
-            _selectedTab = PixaGalleryTab.values[index];
-          });
-        },
-        destinations: const <NavigationDestination>[
-          NavigationDestination(
-            key: ValueKey<String>('tab-gallery'),
-            icon: Icon(Icons.photo_library_outlined),
-            selectedIcon: Icon(Icons.photo_library),
-            label: 'Gallery',
-          ),
-          NavigationDestination(
-            key: ValueKey<String>('tab-scenarios'),
-            icon: Icon(Icons.widgets_outlined),
-            selectedIcon: Icon(Icons.widgets),
-            label: 'Scenarios',
-          ),
-          NavigationDestination(
-            key: ValueKey<String>('tab-diagnostics'),
-            icon: Icon(Icons.monitor_heart_outlined),
-            selectedIcon: Icon(Icons.monitor_heart),
-            label: 'Diagnostics',
-          ),
-        ],
       ),
     );
+  }
+
+  Widget _buildNavigationRail() {
+    return NavigationRail(
+      selectedIndex: _selectedTab.index,
+      onDestinationSelected: _selectTab,
+      labelType: NavigationRailLabelType.all,
+      minWidth: 86,
+      groupAlignment: -0.88,
+      destinations: const <NavigationRailDestination>[
+        NavigationRailDestination(
+          icon: Icon(Icons.photo_library_outlined),
+          selectedIcon: Icon(Icons.photo_library),
+          label: Text('Gallery'),
+        ),
+        NavigationRailDestination(
+          icon: Icon(Icons.widgets_outlined),
+          selectedIcon: Icon(Icons.widgets),
+          label: Text('Scenarios'),
+        ),
+        NavigationRailDestination(
+          icon: Icon(Icons.monitor_heart_outlined),
+          selectedIcon: Icon(Icons.monitor_heart),
+          label: Text('Diagnostics'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNavigationBar() {
+    return NavigationBar(
+      selectedIndex: _selectedTab.index,
+      onDestinationSelected: _selectTab,
+      destinations: const <NavigationDestination>[
+        NavigationDestination(
+          key: ValueKey<String>('tab-gallery'),
+          icon: Icon(Icons.photo_library_outlined),
+          selectedIcon: Icon(Icons.photo_library),
+          label: 'Gallery',
+        ),
+        NavigationDestination(
+          key: ValueKey<String>('tab-scenarios'),
+          icon: Icon(Icons.widgets_outlined),
+          selectedIcon: Icon(Icons.widgets),
+          label: 'Scenarios',
+        ),
+        NavigationDestination(
+          key: ValueKey<String>('tab-diagnostics'),
+          icon: Icon(Icons.monitor_heart_outlined),
+          selectedIcon: Icon(Icons.monitor_heart),
+          label: 'Diagnostics',
+        ),
+      ],
+    );
+  }
+
+  void _selectTab(int index) {
+    setState(() {
+      _selectedTab = PixaGalleryTab.values[index];
+    });
   }
 
   Widget _buildGalleryBody() {
@@ -1061,16 +1139,21 @@ final class _LargeImagePage extends StatefulWidget {
 
 final class _LargeImagePageState extends State<_LargeImagePage> {
   late final PixaLargeImageController _controller = PixaLargeImageController();
+  late final TransformationController _overviewController =
+      TransformationController();
 
   @override
   void dispose() {
     _controller.dispose();
+    _overviewController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final ImagePost post = widget.post;
+    final bool useTiledViewer = _shouldUseTiledLargeViewer(post);
+    final bool useOverviewOnly = _needsOverviewOnlyLargeViewer(post);
     return Scaffold(
       backgroundColor: const Color(0xFF111318),
       appBar: AppBar(
@@ -1079,35 +1162,99 @@ final class _LargeImagePageState extends State<_LargeImagePage> {
           IconButton(
             tooltip: 'Fit',
             icon: const Icon(Icons.fit_screen),
-            onPressed: _controller.reset,
+            onPressed: useOverviewOnly ? _resetOverview : _controller.reset,
           ),
           IconButton(
             tooltip: '100%',
             icon: const Icon(Icons.center_focus_strong),
-            onPressed: () => _controller.zoomTo(1),
+            onPressed: useOverviewOnly
+                ? () => _zoomOverview(1)
+                : () => _controller.zoomTo(1),
           ),
           IconButton(
             tooltip: '200%',
             icon: const Icon(Icons.zoom_in),
-            onPressed: () => _controller.zoomTo(2),
+            onPressed: useOverviewOnly
+                ? () => _zoomOverview(2)
+                : () => _controller.zoomTo(2),
           ),
         ],
       ),
-      body: PixaLargeImage(
-        request: _requestForPost(
-          post,
-        ).copyWith(lowRes: _thumbnailRequestForPost(post)),
-        imageWidth: post.width,
-        imageHeight: post.height,
-        controller: _controller,
+      body: useOverviewOnly
+          ? _OverviewLargeImageViewer(
+              post: post,
+              controller: _overviewController,
+            )
+          : PixaLargeImage(
+              request: _requestForPost(
+                post,
+              ).copyWith(lowRes: _thumbnailRequestForPost(post)),
+              imageWidth: post.width,
+              imageHeight: post.height,
+              controller: _controller,
+              tileMode: useTiledViewer
+                  ? PixaLargeImageTileMode.always
+                  : PixaLargeImageTileMode.adaptive,
+              maxScale: 4,
+              tileSize: 512,
+              cacheExtentScreens: 1.25,
+              maxVisibleTiles: 80,
+              placeholder: const PixaPlaceholder.color(Color(0xFF1D222B)),
+              progressBuilder: _progressBuilder,
+              errorBuilder: _errorBuilder,
+              tileErrorBuilder: _largeImageTileErrorBuilder,
+            ),
+    );
+  }
+
+  void _resetOverview() {
+    _overviewController.value = Matrix4.identity();
+  }
+
+  void _zoomOverview(double scale) {
+    _overviewController.value = Matrix4.identity()
+      ..scaleByDouble(scale, scale, 1, 1);
+  }
+}
+
+final class _OverviewLargeImageViewer extends StatelessWidget {
+  const _OverviewLargeImageViewer({
+    required this.post,
+    required this.controller,
+  });
+
+  final ImagePost post;
+  final TransformationController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final int maxEdge = math.max(post.width, post.height);
+    final int targetMaxEdge = math.min(maxEdge, 2200);
+    final double scale = targetMaxEdge / maxEdge;
+    final PixaRequest overviewRequest = _requestForPost(
+      post,
+      targetWidth: math.max(1, (post.width * scale).round()),
+      targetHeight: math.max(1, (post.height * scale).round()),
+    ).copyWith(lowRes: _thumbnailRequestForPost(post));
+    return ColoredBox(
+      color: const Color(0xFF111318),
+      child: InteractiveViewer(
+        transformationController: controller,
+        minScale: 0.5,
         maxScale: 4,
-        tileSize: 512,
-        cacheExtentScreens: 1.25,
-        maxVisibleTiles: 80,
-        placeholder: const PixaPlaceholder.color(Color(0xFF1D222B)),
-        progressBuilder: _progressBuilder,
-        errorBuilder: _errorBuilder,
-        tileErrorBuilder: _largeImageTileErrorBuilder,
+        child: Center(
+          child: AspectRatio(
+            aspectRatio: post.aspectRatio,
+            child: PixaImage(
+              request: overviewRequest,
+              fit: BoxFit.contain,
+              placeholder: const PixaPlaceholder.color(Color(0xFF1D222B)),
+              progressBuilder: _progressBuilder,
+              errorBuilder: _errorBuilder,
+              transitionDuration: Duration.zero,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1554,212 +1701,215 @@ final class _ScenarioSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ImagePost? first = posts.isEmpty ? null : posts.first;
+    final List<ImagePost> scenarioPosts = posts.isEmpty
+        ? _learningPosts
+        : posts;
+    final ImagePost first = scenarioPosts.first;
+    final bool usingLearningPosts = posts.isEmpty;
     final PixaDebugSnapshot snapshot = PixaDebugInspector.snapshot();
     final bool hasVideoFrameBackend =
         snapshot.registryArchitecture.videoFrameBackends > 0 &&
         snapshot.registryArchitecture.videoFrameEncodedOutputBackends > 0;
-    final List<_ScenarioGroup> groups = first == null
-        ? const <_ScenarioGroup>[]
-        : <_ScenarioGroup>[
-            _ScenarioGroup(
-              title: 'Display APIs',
-              scenarios: <_Scenario>[
-                _Scenario(
-                  title: 'PixaImage',
-                  subtitle: 'Widget surface with fit and progress',
-                  icon: Icons.photo_outlined,
-                  child: PixaImage(
-                    request: _requestForPost(first, targetPixels: 480),
-                    fit: BoxFit.cover,
-                    placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
-                    progressBuilder: _progressBuilder,
-                    errorBuilder: _errorBuilder,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                _Scenario(
-                  title: 'Provider',
-                  subtitle: 'ImageProvider compatibility',
-                  icon: Icons.image_outlined,
-                  child: _ProviderPreview(post: first),
-                ),
-                _Scenario(
-                  title: 'Controller',
-                  subtitle: 'Reload, cancel, pause, resume',
-                  icon: Icons.tune,
-                  child: _ControllerPreview(post: first),
-                ),
-              ],
+    final List<_ScenarioGroup> groups = <_ScenarioGroup>[
+      _ScenarioGroup(
+        title: 'Display APIs',
+        scenarios: <_Scenario>[
+          _Scenario(
+            title: 'PixaImage',
+            subtitle: 'Widget surface with fit and progress',
+            icon: Icons.photo_outlined,
+            child: PixaImage(
+              request: _requestForPost(first, targetPixels: 480),
+              fit: BoxFit.cover,
+              placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+              progressBuilder: _progressBuilder,
+              errorBuilder: _errorBuilder,
+              borderRadius: BorderRadius.circular(8),
             ),
-            _ScenarioGroup(
-              title: 'Sources',
-              scenarios: <_Scenario>[
-                _Scenario(
-                  title: 'Source bundle',
-                  subtitle: 'Network, file, memory, bytes, custom',
-                  icon: Icons.account_tree_outlined,
-                  child: _SourceBundlePreview(post: first),
-                ),
-              ],
+          ),
+          _Scenario(
+            title: 'Provider',
+            subtitle: 'ImageProvider compatibility',
+            icon: Icons.image_outlined,
+            child: _ProviderPreview(post: first),
+          ),
+          _Scenario(
+            title: 'Controller',
+            subtitle: 'Reload, cancel, pause, resume',
+            icon: Icons.tune,
+            child: _ControllerPreview(post: first),
+          ),
+          _Scenario(
+            title: 'Pipeline load',
+            subtitle: 'Low-level bytes with typed metadata',
+            icon: Icons.account_tree,
+            child: _PipelinePreview(post: first),
+          ),
+        ],
+      ),
+      _ScenarioGroup(
+        title: 'Sources',
+        scenarios: <_Scenario>[
+          _Scenario(
+            title: 'Source bundle',
+            subtitle: 'Network, file, asset, memory, bytes, custom',
+            icon: Icons.account_tree_outlined,
+            child: _SourceBundlePreview(post: first),
+          ),
+        ],
+      ),
+      _ScenarioGroup(
+        title: 'Cache and Prefetch',
+        scenarios: <_Scenario>[
+          _Scenario(
+            title: 'Low-res chain',
+            subtitle: 'Preview swaps to full request',
+            icon: Icons.swap_horiz,
+            child: PixaImage(
+              request: _requestForPost(
+                first,
+                targetPixels: 720,
+              ).copyWith(lowRes: _thumbnailRequestForPost(first)),
+              fit: BoxFit.cover,
+              placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+              progressBuilder: _progressBuilder,
+              errorBuilder: _errorBuilder,
+              borderRadius: BorderRadius.circular(8),
             ),
-            _ScenarioGroup(
-              title: 'Cache and Prefetch',
-              scenarios: <_Scenario>[
-                _Scenario(
-                  title: 'Low-res chain',
-                  subtitle: 'Preview swaps to full request',
-                  icon: Icons.swap_horiz,
-                  child: PixaImage(
-                    request: _requestForPost(
-                      first,
-                      targetPixels: 720,
-                    ).copyWith(lowRes: _thumbnailRequestForPost(first)),
-                    fit: BoxFit.cover,
-                    placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
-                    progressBuilder: _progressBuilder,
-                    errorBuilder: _errorBuilder,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                _Scenario(
-                  title: 'Cache policy',
-                  subtitle: 'Mode switch, prefetch, evict',
-                  icon: Icons.offline_bolt_outlined,
-                  child: _CachePolicyPreview(post: first),
-                ),
-                _Scenario(
-                  title: 'Decoded prewarm',
-                  subtitle: 'Flutter ImageCache integration',
-                  icon: Icons.memory,
-                  child: _PrewarmPreview(post: first),
-                ),
-              ],
+          ),
+          _Scenario(
+            title: 'Cache policy',
+            subtitle: 'Mode switch, prefetch, evict',
+            icon: Icons.offline_bolt_outlined,
+            child: _CachePolicyPreview(post: first),
+          ),
+          _Scenario(
+            title: 'Decoded prewarm',
+            subtitle: 'Flutter ImageCache integration',
+            icon: Icons.memory,
+            child: _PrewarmPreview(post: first),
+          ),
+        ],
+      ),
+      _ScenarioGroup(
+        title: 'Processing and Metadata',
+        scenarios: <_Scenario>[
+          _Scenario(
+            title: 'Processor lab',
+            subtitle: 'All public Rust helpers',
+            icon: Icons.auto_fix_high,
+            child: _ProcessorLabPreview(post: first),
+          ),
+          _Scenario(
+            title: 'Thumbnail',
+            subtitle: 'No-upscale runtime transform',
+            icon: Icons.photo_size_select_small,
+            child: PixaImage(
+              request: _requestForPost(
+                first,
+                targetPixels: 320,
+                processors: <String>[PixaProcessors.thumbnail(320, 240)],
+              ),
+              fit: BoxFit.contain,
+              background: const ColoredBox(color: Color(0xFFE8ECEF)),
+              placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+              progressBuilder: _progressBuilder,
+              errorBuilder: _errorBuilder,
+              borderRadius: BorderRadius.circular(8),
             ),
-            _ScenarioGroup(
-              title: 'Processing and Metadata',
-              scenarios: <_Scenario>[
-                _Scenario(
-                  title: 'Processor lab',
-                  subtitle: 'All public Rust helpers',
-                  icon: Icons.auto_fix_high,
-                  child: _ProcessorLabPreview(post: first),
-                ),
-                _Scenario(
-                  title: 'Thumbnail',
-                  subtitle: 'No-upscale runtime transform',
-                  icon: Icons.photo_size_select_small,
-                  child: PixaImage(
-                    request: _requestForPost(
-                      first,
-                      targetPixels: 320,
-                      processors: <String>[PixaProcessors.thumbnail(320, 240)],
-                    ),
-                    fit: BoxFit.contain,
-                    background: const ColoredBox(color: Color(0xFFE8ECEF)),
-                    placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
-                    progressBuilder: _progressBuilder,
-                    errorBuilder: _errorBuilder,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                _Scenario(
-                  title: 'Metadata',
-                  subtitle: 'Header probe without full decode',
-                  icon: Icons.info_outline,
-                  child: _MetadataPreview(post: first),
-                ),
-              ],
+          ),
+          _Scenario(
+            title: 'Metadata',
+            subtitle: 'Header probe without full decode',
+            icon: Icons.info_outline,
+            child: _MetadataPreview(post: first),
+          ),
+        ],
+      ),
+      _ScenarioGroup(
+        title: 'Large, Animated, Video',
+        scenarios: <_Scenario>[
+          _Scenario(
+            title: 'Large viewer',
+            subtitle: 'Tiled pan and zoom',
+            icon: Icons.open_in_full,
+            child: _LargeImagePreview(post: first),
+          ),
+          _Scenario(
+            title: 'Progressive JPEG',
+            subtitle: 'Streaming preview event',
+            icon: Icons.downloading,
+            child: PixaImage.network(
+              'https://raw.githubusercontent.com/sindresorhus/is-progressive/main/fixture/progressive.jpg',
+              fit: BoxFit.cover,
+              placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+              progressBuilder: _progressBuilder,
+              errorBuilder: _errorBuilder,
+              borderRadius: BorderRadius.circular(8),
             ),
-            _ScenarioGroup(
-              title: 'Large, Animated, Video',
-              scenarios: <_Scenario>[
-                _Scenario(
-                  title: 'Large viewer',
-                  subtitle: 'Tiled pan and zoom',
-                  icon: Icons.open_in_full,
-                  child: _LargeImagePreview(post: first),
-                ),
-                _Scenario(
-                  title: 'Progressive JPEG',
-                  subtitle: 'Streaming preview event',
-                  icon: Icons.downloading,
-                  child: PixaImage.network(
-                    'https://raw.githubusercontent.com/sindresorhus/is-progressive/main/fixture/progressive.jpg',
-                    fit: BoxFit.cover,
-                    placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
-                    progressBuilder: _progressBuilder,
-                    errorBuilder: _errorBuilder,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                _Scenario(
-                  title: 'Animated GIF',
-                  subtitle: 'Playback controller',
-                  icon: Icons.movie_filter_outlined,
-                  child: const _AnimatedPreview(
-                    url:
-                        'https://media.giphy.com/media/3oEjI6SIIHBdRxXI40/giphy.gif',
-                  ),
-                ),
-                _Scenario(
-                  title: 'Animated WebP',
-                  subtitle: 'Engine-backed animation path',
-                  icon: Icons.motion_photos_on_outlined,
-                  child: PixaImage.network(
-                    'https://www.gstatic.com/webp/animated/1.webp',
-                    fit: BoxFit.cover,
-                    placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
-                    progressBuilder: _progressBuilder,
-                    errorBuilder: _errorBuilder,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                _Scenario(
-                  title: 'Video frame',
-                  subtitle: hasVideoFrameBackend
-                      ? 'Runtime backend available'
-                      : 'No backend in this binary',
-                  icon: Icons.video_file_outlined,
-                  child: hasVideoFrameBackend
-                      ? PixaImage.videoFrame(
-                          'https://flutter.github.io/assets-for-api-docs/assets/videos/bee.mp4',
-                          timestamp: const Duration(seconds: 1),
-                          fit: BoxFit.cover,
-                          placeholder: const PixaPlaceholder.color(
-                            Color(0xFFE8ECEF),
-                          ),
-                          errorBuilder: _errorBuilder,
-                          borderRadius: BorderRadius.circular(8),
-                        )
-                      : const _DisabledScenarioPreview(
-                          icon: Icons.video_file_outlined,
-                          label: 'video-frame backend unavailable',
-                        ),
-                ),
-              ],
+          ),
+          _Scenario(
+            title: 'Animated GIF',
+            subtitle: 'Playback controller',
+            icon: Icons.movie_filter_outlined,
+            child: const _AnimatedPreview(
+              url: 'https://media.giphy.com/media/3oEjI6SIIHBdRxXI40/giphy.gif',
             ),
-            _ScenarioGroup(
-              title: 'Failure Handling',
-              scenarios: <_Scenario>[
-                _Scenario(
-                  title: 'Retry',
-                  subtitle: 'Failure surface and retry',
-                  icon: Icons.refresh,
-                  child: PixaImage.network(
-                    'https://images.example.invalid/missing.jpg',
+          ),
+          _Scenario(
+            title: 'Animated WebP',
+            subtitle: 'Engine-backed animation path',
+            icon: Icons.motion_photos_on_outlined,
+            child: PixaImage.network(
+              'https://www.gstatic.com/webp/animated/1.webp',
+              fit: BoxFit.cover,
+              placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+              progressBuilder: _progressBuilder,
+              errorBuilder: _errorBuilder,
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          _Scenario(
+            title: 'Video frame',
+            subtitle: hasVideoFrameBackend
+                ? 'Runtime backend available'
+                : 'No backend in this binary',
+            icon: Icons.video_file_outlined,
+            child: hasVideoFrameBackend
+                ? PixaImage.videoFrame(
+                    'https://flutter.github.io/assets-for-api-docs/assets/videos/bee.mp4',
+                    timestamp: const Duration(seconds: 1),
                     fit: BoxFit.cover,
                     placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
                     errorBuilder: _errorBuilder,
-                    retryPolicy: const PixaRetryPolicy.exponential(
-                      maxAttempts: 2,
-                    ),
                     borderRadius: BorderRadius.circular(8),
+                  )
+                : const _DisabledScenarioPreview(
+                    icon: Icons.video_file_outlined,
+                    label: 'video-frame backend unavailable',
                   ),
-                ),
-              ],
+          ),
+        ],
+      ),
+      _ScenarioGroup(
+        title: 'Failure Handling',
+        scenarios: <_Scenario>[
+          _Scenario(
+            title: 'Retry',
+            subtitle: 'Failure surface and retry',
+            icon: Icons.refresh,
+            child: PixaImage.network(
+              'https://images.example.invalid/missing.jpg',
+              fit: BoxFit.cover,
+              placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+              errorBuilder: _errorBuilder,
+              retryPolicy: const PixaRetryPolicy.exponential(maxAttempts: 2),
+              borderRadius: BorderRadius.circular(8),
             ),
-          ];
+          ),
+        ],
+      ),
+    ];
     final int scenarioCount = groups.fold<int>(
       0,
       (int total, _ScenarioGroup group) => total + group.scenarios.length,
@@ -1782,13 +1932,26 @@ final class _ScenarioSection extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  first == null
-                      ? 'Load the gallery to enable source-dependent scenarios.'
+                  usingLearningPosts
+                      ? '$scenarioCount scenarios using real public images'
                       : '$scenarioCount scenarios using ${first.source.name} #${first.id}',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                     letterSpacing: 0,
                   ),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: const <Widget>[
+                    _LearningChip(icon: Icons.image_outlined, label: 'Widget'),
+                    _LearningChip(icon: Icons.key, label: 'Provider'),
+                    _LearningChip(icon: Icons.storage, label: 'Cache'),
+                    _LearningChip(icon: Icons.speed, label: 'Prefetch'),
+                    _LearningChip(icon: Icons.auto_fix_high, label: 'Process'),
+                    _LearningChip(icon: Icons.open_in_full, label: 'Large'),
+                  ],
                 ),
               ],
             ),
@@ -1839,6 +2002,24 @@ final class _ScenarioGroupHeader extends StatelessWidget {
           letterSpacing: 0,
         ),
       ),
+    );
+  }
+}
+
+final class _LearningChip extends StatelessWidget {
+  const _LearningChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Chip(
+      avatar: Icon(icon, size: 16, color: colors.onSecondaryContainer),
+      label: Text(label),
+      backgroundColor: colors.secondaryContainer,
+      side: BorderSide.none,
     );
   }
 }
@@ -2070,6 +2251,124 @@ final class _ControllerPreviewState extends State<_ControllerPreview> {
   }
 }
 
+final class _PipelinePreview extends StatefulWidget {
+  const _PipelinePreview({required this.post});
+
+  final ImagePost post;
+
+  @override
+  State<_PipelinePreview> createState() => _PipelinePreviewState();
+}
+
+final class _PipelinePreviewState extends State<_PipelinePreview> {
+  Uint8List? _bytes;
+  String _status = 'loading pipeline';
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  @override
+  void didUpdateWidget(_PipelinePreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.post.imageUrl != widget.post.imageUrl) {
+      setState(() {
+        _bytes = null;
+        _status = 'loading pipeline';
+        _error = null;
+      });
+      unawaited(_load());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Uint8List? bytes = _bytes;
+    if (_error != null) {
+      return const _DisabledScenarioPreview(
+        icon: Icons.error_outline,
+        label: 'pipeline load failed',
+      );
+    }
+    if (bytes == null) {
+      return const _MiniLoadingPreview(label: 'loading pipeline');
+    }
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        PixaImage.bytes(
+          bytes,
+          id: 'pipeline-${widget.post.id}',
+          fit: BoxFit.cover,
+          placeholder: const PixaPlaceholder.color(Color(0xFFE8ECEF)),
+          errorBuilder: _errorBuilder,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        Positioned(
+          left: 8,
+          right: 8,
+          bottom: 8,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.58),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Text(
+                _status,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Colors.white,
+                  letterSpacing: 0,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _load() async {
+    try {
+      final PixaPipelineLoad load = await Pixa.pipeline.load(
+        _requestForPost(
+          widget.post,
+          targetPixels: 360,
+        ).copyWith(cachePolicy: const PixaCachePolicy.noStore()),
+      );
+      final Uint8List bytes;
+      final String status;
+      try {
+        bytes = Uint8List.fromList(load.bytes);
+        status =
+            '${_formatBytes(bytes.length)} · ${load.mimeType ?? 'unknown'}';
+      } finally {
+        load.dispose();
+      }
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _bytes = bytes;
+        _status = status;
+      });
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error;
+      });
+    }
+  }
+}
+
 final class _SourceBundlePreview extends StatefulWidget {
   const _SourceBundlePreview({required this.post});
 
@@ -2161,10 +2460,9 @@ final class _SourceBundlePreviewState extends State<_SourceBundlePreview> {
                 const SizedBox(width: 6),
                 Expanded(
                   child: _SourceMini(
-                    label: 'memory',
-                    child: PixaImage.memory(
-                      'source-memory-${widget.post.id}',
-                      bytes,
+                    label: 'asset',
+                    child: PixaImage.asset(
+                      'assets/pixa_sample.ppm',
                       fit: BoxFit.cover,
                       placeholder: const PixaPlaceholder.color(
                         Color(0xFFE8ECEF),
@@ -2180,6 +2478,21 @@ final class _SourceBundlePreviewState extends State<_SourceBundlePreview> {
           Expanded(
             child: Row(
               children: <Widget>[
+                Expanded(
+                  child: _SourceMini(
+                    label: 'memory',
+                    child: PixaImage.memory(
+                      'source-memory-${widget.post.id}',
+                      bytes,
+                      fit: BoxFit.cover,
+                      placeholder: const PixaPlaceholder.color(
+                        Color(0xFFE8ECEF),
+                      ),
+                      errorBuilder: _errorBuilder,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
                 Expanded(
                   child: _SourceMini(
                     label: 'bytes',
@@ -2219,8 +2532,6 @@ final class _SourceBundlePreviewState extends State<_SourceBundlePreview> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 6),
-                const Expanded(child: SizedBox.expand()),
               ],
             ),
           ),
@@ -3182,6 +3493,93 @@ PixaRequest _thumbnailRequestForPost(ImagePost post) {
     priority: PixaPriority.low,
     retryPolicy: const PixaRetryPolicy.exponential(maxAttempts: 2),
   );
+}
+
+bool _shouldUseTiledLargeViewer(ImagePost post) {
+  return post.width * post.height >= 12 * 1024 * 1024 &&
+      _hasRegionDecodeForPost(post);
+}
+
+bool _needsOverviewOnlyLargeViewer(ImagePost post) {
+  return post.width * post.height >= 12 * 1024 * 1024 &&
+      !_hasRegionDecodeForPost(post);
+}
+
+bool _hasRegionDecodeForPost(ImagePost post) {
+  final PixaImageMetadataFormat? format = _formatFromImageUrl(post.imageUrl);
+  if (format == null) {
+    return false;
+  }
+  return PixaDebugInspector.snapshot().capabilities.imageFormats.any(
+    (PixaRuntimeImageFormatCapability capability) =>
+        capability.format == format && capability.regionDecode,
+  );
+}
+
+PixaImageMetadataFormat? _formatFromImageUrl(String imageUrl) {
+  final String path = Uri.tryParse(imageUrl)?.path.toLowerCase() ?? '';
+  if (path.endsWith('.jpg') || path.endsWith('.jpeg')) {
+    return PixaImageMetadataFormat.jpeg;
+  }
+  if (path.endsWith('.png')) {
+    return PixaImageMetadataFormat.png;
+  }
+  if (path.endsWith('.gif')) {
+    return PixaImageMetadataFormat.gif;
+  }
+  if (path.endsWith('.webp')) {
+    return PixaImageMetadataFormat.webp;
+  }
+  if (path.endsWith('.bmp')) {
+    return PixaImageMetadataFormat.bmp;
+  }
+  if (path.endsWith('.wbmp')) {
+    return PixaImageMetadataFormat.wbmp;
+  }
+  if (path.endsWith('.ico')) {
+    return PixaImageMetadataFormat.ico;
+  }
+  if (path.endsWith('.tif') || path.endsWith('.tiff')) {
+    return PixaImageMetadataFormat.tiff;
+  }
+  if (path.endsWith('.pnm') ||
+      path.endsWith('.pbm') ||
+      path.endsWith('.pgm') ||
+      path.endsWith('.ppm') ||
+      path.endsWith('.pam')) {
+    return PixaImageMetadataFormat.pnm;
+  }
+  if (path.endsWith('.qoi')) {
+    return PixaImageMetadataFormat.qoi;
+  }
+  if (path.endsWith('.tga')) {
+    return PixaImageMetadataFormat.tga;
+  }
+  if (path.endsWith('.dds')) {
+    return PixaImageMetadataFormat.dds;
+  }
+  if (path.endsWith('.hdr')) {
+    return PixaImageMetadataFormat.hdr;
+  }
+  if (path.endsWith('.ff')) {
+    return PixaImageMetadataFormat.farbfeld;
+  }
+  if (path.endsWith('.pcx')) {
+    return PixaImageMetadataFormat.pcx;
+  }
+  if (path.endsWith('.sgi') ||
+      path.endsWith('.rgb') ||
+      path.endsWith('.rgba') ||
+      path.endsWith('.bw')) {
+    return PixaImageMetadataFormat.sgi;
+  }
+  if (path.endsWith('.xbm')) {
+    return PixaImageMetadataFormat.xbm;
+  }
+  if (path.endsWith('.xpm')) {
+    return PixaImageMetadataFormat.xpm;
+  }
+  return null;
 }
 
 int? _targetDimension(double logicalExtent, double devicePixelRatio) {

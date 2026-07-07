@@ -13,6 +13,18 @@ import 'pixa_image.dart';
 part 'pixa_large_image_controller.dart';
 part 'pixa_large_image_state.dart';
 
+/// Tile selection strategy for [PixaLargeImage].
+enum PixaLargeImageTileMode {
+  /// Use direct display for small images and tile requests for large images.
+  adaptive,
+
+  /// Always render visible regions through tile requests.
+  always,
+
+  /// Never render tiles; display the base request directly.
+  never,
+}
+
 /// Selects, positions, and renders visible tiles for very large images.
 final class PixaLargeImage extends StatefulWidget {
   /// Creates a tiled image viewer from a base request and source dimensions.
@@ -22,6 +34,8 @@ final class PixaLargeImage extends StatefulWidget {
     required this.imageWidth,
     required this.imageHeight,
     this.controller,
+    this.tileMode = PixaLargeImageTileMode.adaptive,
+    this.minTileSourcePixels = 12 * 1024 * 1024,
     this.tileSize = 512,
     this.cacheExtentScreens = 1.0,
     this.maxVisibleTiles = 96,
@@ -47,6 +61,7 @@ final class PixaLargeImage extends StatefulWidget {
     this.clipBehavior = Clip.hardEdge,
   }) : assert(imageWidth > 0),
        assert(imageHeight > 0),
+       assert(minTileSourcePixels > 0),
        assert(tileSize > 0),
        assert(cacheExtentScreens >= 0),
        assert(maxVisibleTiles > 0),
@@ -63,6 +78,8 @@ final class PixaLargeImage extends StatefulWidget {
     required int imageWidth,
     required int imageHeight,
     PixaLargeImageController? controller,
+    PixaLargeImageTileMode tileMode = PixaLargeImageTileMode.adaptive,
+    int minTileSourcePixels = 12 * 1024 * 1024,
     int tileSize = 512,
     double cacheExtentScreens = 1.0,
     int maxVisibleTiles = 96,
@@ -108,6 +125,8 @@ final class PixaLargeImage extends StatefulWidget {
       imageWidth: imageWidth,
       imageHeight: imageHeight,
       controller: controller,
+      tileMode: tileMode,
+      minTileSourcePixels: minTileSourcePixels,
       tileSize: tileSize,
       cacheExtentScreens: cacheExtentScreens,
       maxVisibleTiles: maxVisibleTiles,
@@ -145,6 +164,13 @@ final class PixaLargeImage extends StatefulWidget {
 
   /// Optional controller for zoom, pan, and reset operations.
   final PixaLargeImageController? controller;
+
+  /// Tiling strategy used by this viewer.
+  final PixaLargeImageTileMode tileMode;
+
+  /// Minimum source pixel count before Pixa switches from direct display to
+  /// tiled region requests.
+  final int minTileSourcePixels;
 
   /// Base tile edge length in source pixels before sampling.
   final int tileSize;
