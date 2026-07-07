@@ -64,6 +64,17 @@ abstract final class PixaProcessors {
         'filter=${_resizeFilter(filter)})';
   }
 
+  /// Resizes to fill [width] x [height], cropping from the center if needed.
+  static String resizeToFill(
+    int width,
+    int height, {
+    PixaResizeFilter filter = PixaResizeFilter.lanczos3,
+  }) {
+    return 'resizeToFill(width=${_checkPositiveInt(width, 'width')},'
+        'height=${_checkPositiveInt(height, 'height')},'
+        'filter=${_resizeFilter(filter)})';
+  }
+
   /// Crops a rectangle from the image.
   static String crop({
     required int x,

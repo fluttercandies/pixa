@@ -2143,6 +2143,11 @@ enum RuntimeProcessor {
         mode: ResizeMode,
         filter: image::imageops::FilterType,
     },
+    ResizeToFill {
+        width: u32,
+        height: u32,
+        filter: image::imageops::FilterType,
+    },
     Crop {
         x: u32,
         y: u32,
@@ -2263,6 +2268,11 @@ fn parse_processor_descriptor(descriptor: &str) -> RuntimeResult<RuntimeProcesso
                 filter: parse_resize_filter(args.get("filter").map(String::as_str))?,
             })
         }
+        "resizetofill" | "centercrop" => Ok(RuntimeProcessor::ResizeToFill {
+            width: required_processor_u32(&args, "width")?,
+            height: required_processor_u32(&args, "height")?,
+            filter: parse_resize_filter(args.get("filter").map(String::as_str))?,
+        }),
         "crop" => Ok(RuntimeProcessor::Crop {
             x: required_processor_u32_allow_zero(&args, "x")?,
             y: required_processor_u32_allow_zero(&args, "y")?,
@@ -3288,6 +3298,11 @@ fn apply_processor(
             mode,
             filter,
         } => apply_resize_processor(&image, width, height, mode, filter),
+        RuntimeProcessor::ResizeToFill {
+            width,
+            height,
+            filter,
+        } => image.resize_to_fill(width, height, filter),
         RuntimeProcessor::Crop {
             x,
             y,
@@ -5489,6 +5504,20 @@ mod tests {
         assert_eq!(hue_decoded.dimensions(), (1, 1));
         assert_ne!(hue_pixel, [120, 0, 0, 255]);
         assert_eq!(hue_pixel[3], 255);
+    }
+
+    #[test]
+    fn applies_resize_to_fill_processor() {
+        let mut request = bytes_request(RuntimeLimits::default());
+        request.cache_key = "processor-resize-to-fill".to_string();
+        request.encoded_cache_key = "processor-resize-to-fill-origin".to_string();
+        request.processors = vec!["resizeToFill(width=3,height=1,filter=nearest)".to_string()];
+
+        let outcome = load_image("", request, Some(&png_rgba_4x4()))
+            .expect("resizeToFill processor should complete");
+        let decoded = image::load_from_memory(&outcome.bytes).expect("processed PNG should decode");
+
+        assert_eq!(decoded.dimensions(), (3, 1));
     }
 
     #[test]

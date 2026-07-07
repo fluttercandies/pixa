@@ -624,6 +624,8 @@ bool _isRuntimeDisplayProcessor(String descriptor) {
   return switch (operation) {
     'resize' ||
     'resizeexact' ||
+    'resizetofill' ||
+    'centercrop' ||
     'crop' ||
     'tile' ||
     'tilecropresize' ||
