@@ -79,10 +79,13 @@ steps:
     step:
       stepType: command
       command:
-        commandId: assert-source-scenario
-        commandType: assertText
-        parameters:
+        commandId: reveal-source-scenario
+        commandType: scrollUntilVisible
+        locator:
           text: Network & asset
+        parameters:
+          maxScrolls: 8
+          viewportFraction: 0.55
 
   - stepId: search-cache
     stepType: command
@@ -101,10 +104,13 @@ steps:
     step:
       stepType: command
       command:
-        commandId: assert-cache-policy
-        commandType: assertText
-        parameters:
+        commandId: reveal-cache-policy
+        commandType: scrollUntilVisible
+        locator:
           text: Cache policy
+        parameters:
+          maxScrolls: 8
+          viewportFraction: 0.55
 
   - stepId: search-processor
     stepType: command
@@ -123,10 +129,13 @@ steps:
     step:
       stepType: command
       command:
-        commandId: assert-processor-lab
-        commandType: assertText
-        parameters:
+        commandId: reveal-processor-lab
+        commandType: scrollUntilVisible
+        locator:
           text: Processor lab
+        parameters:
+          maxScrolls: 8
+          viewportFraction: 0.55
 
   - stepId: search-progressive
     stepType: command
@@ -145,10 +154,13 @@ steps:
     step:
       stepType: command
       command:
-        commandId: assert-progressive-jpeg
-        commandType: assertText
-        parameters:
+        commandId: reveal-progressive-jpeg
+        commandType: scrollUntilVisible
+        locator:
           text: Progressive JPEG
+        parameters:
+          maxScrolls: 8
+          viewportFraction: 0.55
 
   - stepId: search-animated
     stepType: command
@@ -167,10 +179,13 @@ steps:
     step:
       stepType: command
       command:
-        commandId: assert-animated-gif
-        commandType: assertText
-        parameters:
+        commandId: reveal-animated-gif
+        commandType: scrollUntilVisible
+        locator:
           text: Animated GIF
+        parameters:
+          maxScrolls: 8
+          viewportFraction: 0.55
 
   - stepId: search-video
     stepType: command
@@ -189,10 +204,13 @@ steps:
     step:
       stepType: command
       command:
-        commandId: assert-video-frame
-        commandType: assertText
-        parameters:
+        commandId: reveal-video-frame
+        commandType: scrollUntilVisible
+        locator:
           text: Video frame
+        parameters:
+          maxScrolls: 8
+          viewportFraction: 0.55
 
   - stepId: search-warmup
     stepType: command
@@ -211,10 +229,13 @@ steps:
     step:
       stepType: command
       command:
-        commandId: assert-warmup-manifest
-        commandType: assertText
-        parameters:
+        commandId: reveal-warmup-manifest
+        commandType: scrollUntilVisible
+        locator:
           text: Warmup manifest
+        parameters:
+          maxScrolls: 8
+          viewportFraction: 0.55
 
   - stepId: search-retry
     stepType: command
@@ -233,10 +254,13 @@ steps:
     step:
       stepType: command
       command:
-        commandId: assert-retry
-        commandType: assertText
-        parameters:
+        commandId: reveal-retry
+        commandType: scrollUntilVisible
+        locator:
           text: Retry
+        parameters:
+          maxScrolls: 8
+          viewportFraction: 0.55
 
   - stepId: dismiss-learn-keyboard
     stepType: command
