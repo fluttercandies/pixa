@@ -12,12 +12,12 @@ use pixa_core::cancel::{
 use pixa_core::request::decode_binary_request;
 use pixa_core::{
     cache_stats, configure, decode_image_to_png_variant, decode_image_to_rgba,
-    disk_trim_to_configured_budget, image_metadata, load_image_with_cancel,
+    disk_trim_to_configured_budget, image_analysis, image_metadata, load_image_with_cancel,
     load_image_with_cancel_and_progress, memory_clear, memory_clear_namespace, memory_contains,
     memory_get_processed, memory_pin, memory_put_processed, memory_remove, memory_trim_to_bytes,
     memory_unpin, plugin_registry_stats, register_plugin_module,
-    register_plugin_module_with_executor, runtime_image_format_capabilities, ImageMetadata,
-    ImageMetadataFormat, RuntimeCacheStats, RuntimeError, RuntimePipelineConfig,
+    register_plugin_module_with_executor, runtime_image_format_capabilities, ImageAnalysis,
+    ImageMetadata, ImageMetadataFormat, RuntimeCacheStats, RuntimeError, RuntimePipelineConfig,
     RuntimePluginCacheClearNamespaceRequest as PluginCacheClearNamespaceRequest,
     RuntimePluginCacheReadRequest as PluginCacheReadRequest,
     RuntimePluginCacheReadResult as PluginCacheReadResult,
@@ -30,6 +30,7 @@ use pixa_core::{
     RuntimePluginProcessRequest as PluginProcessRequest,
     RuntimePluginRegistryStats as PluginRegistryStats, RuntimePluginRoutes as PluginRoutes,
     RuntimeProgressEvent, RuntimeProgressSink, RuntimeProgressStage, RuntimeResult,
+    S3RuntimePluginExecutor, S3_FETCHER_MODULE_ID,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::c_void;
@@ -318,6 +319,11 @@ fn register_generated_plugin_modules() -> RuntimeResult<()> {
         if let Some(entrypoint) = module.entrypoint {
             let executor = instantiate_host_linked_executor(module, entrypoint)?;
             register_plugin_module_with_executor(runtime_module, Arc::new(executor))?;
+        } else if module.module_id == S3_FETCHER_MODULE_ID {
+            register_plugin_module_with_executor(
+                runtime_module,
+                Arc::new(S3RuntimePluginExecutor),
+            )?;
         } else {
             register_plugin_module(runtime_module)?;
         }
@@ -1957,6 +1963,21 @@ fn encode_image_metadata(metadata: ImageMetadata) -> Vec<u8> {
     bytes
 }
 
+fn encode_image_analysis(analysis: ImageAnalysis) -> Vec<u8> {
+    let palette_len = analysis.palette_argb.len().min(u8::MAX as usize);
+    let mut bytes = Vec::with_capacity(21 + palette_len * 4);
+    bytes.extend_from_slice(b"PXA1");
+    bytes.extend_from_slice(&analysis.width.to_le_bytes());
+    bytes.extend_from_slice(&analysis.height.to_le_bytes());
+    bytes.extend_from_slice(&analysis.average_argb.to_be_bytes());
+    bytes.extend_from_slice(&analysis.dominant_argb.to_be_bytes());
+    bytes.push(palette_len as u8);
+    for color in analysis.palette_argb.iter().take(palette_len) {
+        bytes.extend_from_slice(&color.to_be_bytes());
+    }
+    bytes
+}
+
 /// Returns binary encoded image metadata parsed without full decode. Caller must free it.
 #[no_mangle]
 pub extern "C" fn pixa_image_metadata(
@@ -1975,6 +1996,28 @@ pub extern "C" fn pixa_image_metadata(
     };
     match image_metadata(bytes) {
         Ok(metadata) => write_success(encode_image_metadata(metadata), out_len),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Returns binary encoded image color analysis. Caller must free it.
+#[no_mangle]
+pub extern "C" fn pixa_image_analysis(
+    bytes_ptr: *const u8,
+    bytes_len: usize,
+    out_len: *mut usize,
+) -> *mut u8 {
+    if out_len.is_null() {
+        return std::ptr::null_mut();
+    }
+    unsafe {
+        *out_len = 0;
+    }
+    let Some(bytes) = (unsafe { bytes_from_ptr(bytes_ptr, bytes_len) }) else {
+        return std::ptr::null_mut();
+    };
+    match image_analysis(bytes, 4096) {
+        Ok(analysis) => write_success(encode_image_analysis(analysis), out_len),
         Err(_) => std::ptr::null_mut(),
     }
 }
@@ -2155,7 +2198,7 @@ unsafe fn bytes_from_ptr<'a>(ptr: *const u8, len: usize) -> Option<&'a [u8]> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pixa_core::{RuntimeProgressStage, PIXA_PLUGIN_ABI_VERSION};
+    use pixa_core::{RuntimeProgressStage, PIXA_PLUGIN_ABI_VERSION, S3_FETCHER_MODULE_ID};
 
     #[test]
     fn exposes_plugin_host_abi_version() {
@@ -2534,6 +2577,21 @@ mod tests {
     }
 
     #[test]
+    fn generated_s3_fetcher_module_registers_builtin_executor() {
+        ensure_generated_plugins_registered().expect("generated runtime plugins should register");
+
+        let (module, _) = pixa_core::runtime_fetcher_executor_for_source_kind("s3")
+            .expect("runtime fetcher registry lookup should not fail")
+            .expect("S3 fetcher should have a built-in executor");
+        let (alias_module, _) = pixa_core::runtime_fetcher_executor_for_source_kind("s3-object")
+            .expect("runtime fetcher registry lookup should not fail")
+            .expect("S3 object alias should have a built-in executor");
+
+        assert_eq!(module.module_id, S3_FETCHER_MODULE_ID);
+        assert_eq!(alias_module.module_id, S3_FETCHER_MODULE_ID);
+    }
+
+    #[test]
     fn image_format_capabilities_use_binary_payload() {
         let mut out_len = 0_usize;
 
@@ -2593,6 +2651,35 @@ mod tests {
         assert_eq!(read_le_u32(bytes, 8), 9);
         assert_eq!(bytes[12], 6);
         assert_eq!(bytes[13], 0);
+        pixa_buffer_free(ptr, out_len);
+    }
+
+    #[test]
+    fn image_analysis_uses_binary_payload() {
+        use image::ImageEncoder;
+
+        let mut image = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut image)
+            .write_image(
+                &[255, 0, 0, 255, 0, 0, 255, 255],
+                2,
+                1,
+                image::ExtendedColorType::Rgba8,
+            )
+            .expect("fixture PNG should encode");
+        let mut out_len = 0_usize;
+
+        let ptr = pixa_image_analysis(image.as_ptr(), image.len(), &mut out_len);
+
+        assert!(!ptr.is_null());
+        let bytes = unsafe { slice::from_raw_parts(ptr, out_len) };
+        assert_eq!(&bytes[0..4], b"PXA1");
+        assert_eq!(out_len, 29);
+        assert_eq!(read_le_u32(bytes, 4), 2);
+        assert_eq!(read_le_u32(bytes, 8), 1);
+        assert_eq!(read_be_u32(bytes, 12), 0xff7f007f);
+        assert_eq!(read_be_u32(bytes, 16), 0xffff0000);
+        assert_eq!(bytes[20], 2);
         pixa_buffer_free(ptr, out_len);
     }
 
@@ -3191,6 +3278,10 @@ mod tests {
 
     fn read_le_u32(bytes: &[u8], offset: usize) -> u32 {
         u32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("u32 range"))
+    }
+
+    fn read_be_u32(bytes: &[u8], offset: usize) -> u32 {
+        u32::from_be_bytes(bytes[offset..offset + 4].try_into().expect("u32 range"))
     }
 
     fn read_le_u16(bytes: &[u8], offset: usize) -> u16 {

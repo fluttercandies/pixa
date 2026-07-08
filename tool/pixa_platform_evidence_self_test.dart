@@ -12,80 +12,14 @@ Future<void> main() async {
     await _acceptsNativeModuleEvidence(root, temp);
     await _acceptsDesktopNativeModuleEvidence(root, temp);
     await _acceptsHostedCiNativeModuleEvidence(root, temp);
-    await _acceptsHostedCiExampleSmokeEvidence(root, temp);
     await _rejectsMissingRequiredChecks(root, temp);
     await _rejectsMissingNativeModuleCheck(root, temp);
-    await _rejectsMissingExampleSmokeCheck(root, temp);
     stdout.writeln('Pixa platform evidence self-test passed.');
   } finally {
     if (temp.existsSync()) {
       temp.deleteSync(recursive: true);
     }
   }
-}
-
-Future<void> _acceptsHostedCiExampleSmokeEvidence(
-  Directory root,
-  Directory temp,
-) async {
-  final Directory reports = Directory('${temp.path}/hosted-ci-example-smoke')
-    ..createSync();
-  const Map<String, ({String deviceKind, String connection, String signing})>
-  platformEvidence =
-      <String, ({String deviceKind, String connection, String signing})>{
-        'android': (
-          deviceKind: 'emulator',
-          connection: 'local',
-          signing: 'debug',
-        ),
-        'ios': (deviceKind: 'simulator', connection: 'local', signing: 'debug'),
-        'linux': (
-          deviceKind: 'desktop',
-          connection: 'local',
-          signing: 'not-applicable',
-        ),
-        'macos': (
-          deviceKind: 'desktop',
-          connection: 'local',
-          signing: 'not-applicable',
-        ),
-        'windows': (
-          deviceKind: 'desktop',
-          connection: 'local',
-          signing: 'not-applicable',
-        ),
-      };
-  for (final MapEntry<
-        String,
-        ({String deviceKind, String connection, String signing})
-      >
-      entry
-      in platformEvidence.entries) {
-    _writeReport(
-      reports,
-      '${entry.key}-platform.json',
-      platform: entry.key,
-      deviceKind: entry.value.deviceKind,
-      connection: entry.value.connection,
-      signing: entry.value.signing,
-      runMode: 'integration-test',
-    );
-    _writeExampleReport(
-      reports,
-      '${entry.key}-example.json',
-      platform: entry.key,
-      deviceKind: entry.value.deviceKind,
-      connection: entry.value.connection,
-      signing: entry.value.signing,
-      runMode: 'integration-test',
-    );
-  }
-  final ProcessResult result = await _runVerifier(root, reports, <String>[
-    '--require-platforms=android,ios,linux,macos,windows',
-    '--require-run-mode=integration-test',
-    '--require-example-smoke',
-  ]);
-  _expectExit(result, 0, 'hosted CI example smoke evidence should pass');
 }
 
 Future<void> _acceptsDesktopEvidence(Directory root, Directory temp) async {
@@ -334,47 +268,6 @@ Future<void> _rejectsMissingNativeModuleCheck(
   }
 }
 
-Future<void> _rejectsMissingExampleSmokeCheck(
-  Directory root,
-  Directory temp,
-) async {
-  final Directory reports = Directory('${temp.path}/example-missing-check')
-    ..createSync();
-  _writeReport(
-    reports,
-    'linux-platform.json',
-    platform: 'linux',
-    deviceKind: 'desktop',
-    connection: 'local',
-    signing: 'not-applicable',
-    runMode: 'integration-test',
-  );
-  _writeExampleReport(
-    reports,
-    'linux-example.json',
-    platform: 'linux',
-    deviceKind: 'desktop',
-    connection: 'local',
-    signing: 'not-applicable',
-    runMode: 'integration-test',
-    checks: _requiredExampleSmokeChecks.where(
-      (String check) => check != 'loopbackImageRequest',
-    ),
-  );
-  final ProcessResult result = await _runVerifier(root, reports, <String>[
-    '--require-platforms=linux',
-    '--require-run-mode=integration-test',
-    '--require-example-smoke',
-  ]);
-  _expectExit(result, 1, 'missing example smoke check should fail');
-  final String output = '${result.stdout}\n${result.stderr}';
-  if (!output.contains('loopbackImageRequest')) {
-    throw StateError(
-      'Expected loopbackImageRequest example failure, got:\n$output',
-    );
-  }
-}
-
 Future<ProcessResult> _runVerifier(
   Directory root,
   Directory reports,
@@ -419,39 +312,6 @@ void _writeReport(
         ],
       },
       if (nativeModules.isNotEmpty) 'nativeModules': nativeModules,
-    }),
-  );
-}
-
-void _writeExampleReport(
-  Directory reports,
-  String name, {
-  required String platform,
-  required String deviceKind,
-  required String connection,
-  required String signing,
-  String runMode = 'integration-test',
-  Iterable<String> checks = _requiredExampleSmokeChecks,
-}) {
-  File('${reports.path}/$name').writeAsStringSync(
-    const JsonEncoder.withIndent('  ').convert(<String, Object?>{
-      'generatedUtc': '2026-07-06T00:00:00.000Z',
-      'evidence': <String, Object?>{
-        'platform': platform,
-        'runnerOs': Platform.operatingSystem,
-        'runMode': runMode,
-        'deviceKind': deviceKind,
-        'connection': connection,
-        'signing': signing,
-      },
-      'exampleSmoke': <String, Object?>{
-        'platform': platform,
-        'passed': true,
-        'checks': <Object?>[
-          for (final String check in checks)
-            <String, Object?>{'name': check, 'passed': true},
-        ],
-      },
     }),
   );
 }
@@ -504,14 +364,4 @@ const Set<String> _requiredNativeModuleChecks = <String>{
   'nativeLink',
   'processorRoute',
   'runtimeCapability',
-};
-
-const Set<String> _requiredExampleSmokeChecks = <String>{
-  'runtimePlatformSelfCheck',
-  'runtimePipelineLoad',
-  'appLaunch',
-  'layoutControls',
-  'loopbackImageRequest',
-  'largeViewerRoute',
-  'cacheStats',
 };

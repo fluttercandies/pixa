@@ -44,6 +44,8 @@ void main() {
   );
   _checkStableRasterFormatMatrix(root, failures);
   _checkRuntimePackagingDiscipline(root, failures);
+  _checkPluginAuthoringDocs(root, failures);
+  _checkCoreProductFeatureDocs(root, failures);
   _checkSwiftPackageManagerSupport(root, failures);
   _checkPublicExports(root, failures);
   _checkUnsafeBoundary(root, failures);
@@ -599,6 +601,81 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
   );
 }
 
+void _checkPluginAuthoringDocs(Directory root, List<String> failures) {
+  final File guide = File('${root.path}/packages/pixa/PLUGIN_AUTHORING.md');
+  if (!guide.existsSync()) {
+    failures.add('missing packages/pixa/PLUGIN_AUTHORING.md');
+    return;
+  }
+  final String guideText = guide.readAsStringSync();
+  for (final String token in <String>[
+    'Third-party plugin package layout',
+    'pubspec.yaml',
+    'PixaPlugin',
+    'PixaVersionConstraint',
+    'PixaConfig(plugins:',
+    'dart pub publish --dry-run',
+    'dart pub publish',
+    'host-linked runtime modules',
+    'Pure Dart mode',
+    'Host-merge mode',
+    'Standalone FFI mode',
+    'Asset module mode',
+    'plugin_manifest',
+    'plugin_manifest_directory',
+    'root app',
+    'breaking changes',
+  ]) {
+    if (!guideText.contains(token)) {
+      failures.add('plugin authoring guide missing `$token`');
+    }
+  }
+
+  const Map<String, String> links = <String, String>{
+    'README.md': 'packages/pixa/PLUGIN_AUTHORING.md',
+    'README_ZH.md': 'packages/pixa/PLUGIN_AUTHORING.md',
+    'packages/pixa/README.md': 'PLUGIN_AUTHORING.md',
+  };
+  for (final MapEntry<String, String> entry in links.entries) {
+    final File file = File('${root.path}/${entry.key}');
+    if (!file.existsSync()) {
+      failures.add('missing ${entry.key}');
+      continue;
+    }
+    if (!file.readAsStringSync().contains(entry.value)) {
+      failures.add('${entry.key} must link to ${entry.value}');
+    }
+  }
+}
+
+void _checkCoreProductFeatureDocs(Directory root, List<String> failures) {
+  const List<String> tokens = <String>[
+    'PixaSourceSet',
+    'PixaResponsiveImage',
+    'PixaCacheWarmupManifest',
+    'Pixa.warmup',
+    'PixaImageAnalysis',
+    'Pixa.analyze(request)',
+  ];
+  for (final String path in <String>[
+    'README.md',
+    'README_ZH.md',
+    'packages/pixa/README.md',
+  ]) {
+    final File file = File('${root.path}/$path');
+    if (!file.existsSync()) {
+      failures.add('missing $path');
+      continue;
+    }
+    final String text = file.readAsStringSync();
+    for (final String token in tokens) {
+      if (!text.contains(token)) {
+        failures.add('$path must document `$token`');
+      }
+    }
+  }
+}
+
 void _checkSwiftPackageManagerSupport(Directory root, List<String> failures) {
   final Map<String, String> sources = <String, String>{};
   for (final String path in <String>[
@@ -732,7 +809,7 @@ void _checkPodspec(
 }) {
   for (final String token in <String>[
     "s.name             = 'pixa'",
-    "s.version          = '0.1.0-dev.1'",
+    "s.version          = '1.0.0'",
     "s.source_files     = 'pixa/Sources/pixa/**/*'",
     flutterDependency,
     platformToken,
@@ -1025,10 +1102,12 @@ void _checkPublicExports(Directory root, List<String> failures) {
   final Map<String, Set<String>> allowedExports = <String, Set<String>>{
     'packages/pixa/lib/pixa.dart': <String>{
       'src/animation.dart',
+      'src/cache_warmup.dart',
       'src/cache/cache_stats.dart',
       'src/config.dart',
       'src/controller.dart',
       'src/failure.dart',
+      'src/image_analysis.dart',
       'src/image_metadata.dart',
       'src/large_image/tile_plan.dart',
       'src/observer.dart',
@@ -1041,8 +1120,10 @@ void _checkPublicExports(Directory root, List<String> failures) {
       'src/provider.dart',
       'src/request.dart',
       'src/source.dart',
+      'src/source_set.dart',
       'src/widgets/pixa_image.dart',
       'src/widgets/pixa_large_image.dart',
+      'src/widgets/pixa_responsive_image.dart',
     },
     'packages/pixa/lib/pixa_plugins.dart': <String>{
       'src/contracts.dart',

@@ -74,6 +74,18 @@ Image(
 )
 ```
 
+## Product APIs
+
+`PixaSourceSet` and `PixaResponsiveImage` select responsive image candidates by
+layout width, device pixel ratio, and MIME preference.
+
+`PixaCacheWarmupManifest` and `Pixa.warmup` run startup, first-viewport, or
+offline-gallery prefetch batches with per-entry reports.
+
+`PixaImageAnalysis` and `Pixa.analyze(request)` use the Rust runtime to compute
+average color, dominant color, and a small palette for placeholders and
+diagnostics.
+
 ## Advanced Request
 
 `PixaRequest` is the stable model used by widgets, providers, prefetch, and the
@@ -212,6 +224,14 @@ streaming input, zero-copy input, owned output buffers, and stability. Runtime
 decoder descriptors that are not stable or do not preserve the ownership
 contract fail during registration.
 
+Plugin authors should follow [PLUGIN_AUTHORING.md](PLUGIN_AUTHORING.md) when
+publishing packages from their own repositories. The guide covers pubspec
+dependencies, stable plugin ids and routes, `PixaPlugin` implementation,
+consumer setup through `PixaConfig(plugins: [...])`, pub.dev publishing checks,
+Pure Dart mode, Standalone FFI mode, and app-selected Host-merge mode through a
+Pixa runtime manifest. Third-party host-linked runtime modules are not
+automatically injected into Pixa's shared Rust host by publishing a package.
+
 ## Supported Formats
 
 Current public display support covers JPEG, PNG, GIF and animated GIF, WebP and
@@ -254,9 +274,10 @@ melos run release:preflight
 
 The preflight applies Dart fixes, formats sources, analyzes the workspace, runs
 Flutter tests, Rust formatting, Rust clippy, Rust tests, architecture guard,
-platform self-check, platform evidence self-test, example smoke wrapper
-self-test, benchmark report self-test, example smoke, and smoke benchmark report
-generation. The architecture guard also verifies the Darwin SwiftPM manifests,
+platform self-check, platform evidence self-test, benchmark report self-test,
+gallery example analyze, cockpit acceptance, and smoke benchmark report
+generation. The architecture
+guard also verifies the Darwin SwiftPM manifests,
 CocoaPods podspecs, and CI SPM build switch.
 
 ## Stability Policy

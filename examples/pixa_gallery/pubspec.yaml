@@ -1,5 +1,5 @@
 name: pixa_gallery
-description: Smoke-test gallery for the Pixa image loading package.
+description: Runtime acceptance gallery for the Pixa image loading package.
 publish_to: none
 
 environment:
@@ -10,13 +10,14 @@ dependencies:
   flexbox_layout: ^3.1.0
   flutter:
     sdk: flutter
+  path_provider: ^2.1.0
   pixa:
     path: ../../packages/pixa
 
 dev_dependencies:
+  cockpit: ^1.1.3
+  flutter_cockpit: ^1.1.3
   flutter_test:
-    sdk: flutter
-  integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
 

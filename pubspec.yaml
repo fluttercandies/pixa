@@ -30,7 +30,7 @@ melos:
       description: Run Flutter tests for packages with a test directory.
     test:integration:
       run: melos exec --scope=pixa --concurrency=1 -- "flutter test test/integration"
-      description: Run Pixa package integration smoke tests.
+      description: Run Pixa package integration tests.
     test:golden:
       run: melos exec --scope=pixa --concurrency=1 -- "flutter test test/pixa_image_golden_test.dart"
       description: Run Pixa golden tests.
@@ -68,8 +68,8 @@ melos:
       run: dart run tool/pixa_platform_evidence.dart --require-platforms=linux,macos,windows --require-run-mode=integration-test --require-native-modules=jpeg-turbo-roi,webp-roi
       description: Validate collected Linux, macOS, and Windows native ROI self-check reports.
     platform:evidence:ci:
-      run: dart run tool/pixa_platform_evidence.dart --require-platforms=android,ios,linux,macos,windows --require-run-mode=integration-test --require-native-modules=jpeg-turbo-roi,webp-roi --require-example-smoke
-      description: Validate hosted CI native ROI self-check and example smoke reports.
+      run: dart run tool/pixa_platform_evidence.dart --require-platforms=android,ios,linux,macos,windows --require-run-mode=integration-test --require-native-modules=jpeg-turbo-roi,webp-roi
+      description: Validate hosted CI native ROI self-check reports.
     release:preflight:
       run: dart run tool/pixa_release_preflight.dart
       description: Run the local release preflight gate.
@@ -80,7 +80,10 @@ melos:
       description: No generated bindings are required for the hand-written runtime ABI.
     example:
       run: flutter analyze examples/pixa_gallery
-      description: Smoke check the gallery example.
+      description: Analyze the gallery example.
+    example:cockpit:
+      run: dart run tool/pixa_gallery_cockpit_acceptance.dart
+      description: Run the gallery example cockpit acceptance workflow on the host desktop platform.
     build:android:
       run: dart run tool/pixa_platform_build.dart --platform=android
       description: Build a temporary Android app against Pixa runtime assets.

@@ -1101,6 +1101,10 @@ fn strip_cross_host_sensitive_headers(headers: &mut HeaderMap) {
     headers.remove(PROXY_AUTHORIZATION);
     headers.remove("x-api-key");
     headers.remove("x-auth-token");
+    headers.remove("x-amz-security-token");
+    headers.remove("x-pixa-s3-access-key-id");
+    headers.remove("x-pixa-s3-secret-access-key");
+    headers.remove("x-pixa-s3-session-token");
 }
 
 fn is_retryable_status(status: StatusCode) -> bool {

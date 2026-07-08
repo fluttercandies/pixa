@@ -102,6 +102,11 @@ final class PixaRuntimeBridge {
     return _withRuntimeBytesAndBuffer(bytes, _imageMetadata);
   }
 
+  /// runtime image color analysis payload parsed from encoded bytes.
+  static Uint8List imageAnalysisPayload(Uint8List bytes) {
+    return _withRuntimeBytesAndBuffer(bytes, _imageAnalysis);
+  }
+
   /// Parses JPEG EXIF orientation, returning null when absent.
   static int? jpegExifOrientation(Uint8List bytes) {
     return _withRuntimeBytesAndOut(bytes, (
@@ -276,6 +281,17 @@ external Pointer<Uint8> _imageFormatCapabilities(Pointer<UintPtr> outLen);
   isLeaf: false,
 )
 external Pointer<Uint8> _imageMetadata(
+  Pointer<Uint8> ptr,
+  int len,
+  Pointer<UintPtr> outLen,
+);
+
+@Native<Pointer<Uint8> Function(Pointer<Uint8>, UintPtr, Pointer<UintPtr>)>(
+  assetId: 'package:pixa/pixa_runtime',
+  symbol: 'pixa_image_analysis',
+  isLeaf: false,
+)
+external Pointer<Uint8> _imageAnalysis(
   Pointer<Uint8> ptr,
   int len,
   Pointer<UintPtr> outLen,

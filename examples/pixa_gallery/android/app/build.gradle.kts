@@ -26,8 +26,8 @@ android {
 
     buildTypes {
         release {
-            // CI and local smoke checks do not require production signing.
-            // Debug keys keep release-mode smoke runs installable.
+            // CI and local runtime acceptance checks do not require production
+            // signing. Debug keys keep release-mode validation runs installable.
             signingConfig = signingConfigs.getByName("debug")
         }
     }

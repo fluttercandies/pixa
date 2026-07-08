@@ -72,15 +72,15 @@ List<_Step> _releaseSteps() {
       'run',
       'tool/pixa_platform_evidence_self_test.dart',
     ]),
-    _Step('Run example smoke wrapper self-test', 'dart', <String>[
-      'run',
-      'tool/pixa_example_smoke_self_test.dart',
-    ]),
     _Step('Run benchmark report self-test', 'dart', <String>[
       'run',
       'tool/pixa_benchmark_report_self_test.dart',
     ]),
-    _Step('Run example smoke check', 'melos', <String>['run', 'example']),
+    _Step('Analyze gallery example', 'melos', <String>['run', 'example']),
+    _Step('Run gallery cockpit acceptance', 'melos', <String>[
+      'run',
+      'example:cockpit',
+    ]),
     _Step('Generate smoke benchmark report', 'dart', <String>[
       'run',
       'tool/pixa_benchmark_report.dart',
@@ -145,7 +145,8 @@ Usage: dart run tool/pixa_release_preflight.dart [--dry-run]
 
 Runs the local release gate in the same order expected before publishing:
 Dart fixes, formatting, analysis, Flutter tests, Rust fmt/clippy/tests,
-architecture guard, platform self-check, example smoke, and benchmark smoke.
+architecture guard, platform self-check, gallery example analyze, cockpit
+acceptance, and benchmark smoke.
 
 Options:
   --dry-run  Print the command plan without executing commands.

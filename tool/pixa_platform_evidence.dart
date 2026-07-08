@@ -41,22 +41,6 @@ void main(List<String> args) {
           ),
         );
       }
-      if (options.requireExampleSmoke) {
-        final _Report? exampleReport = _firstAcceptableExampleReport(
-          reports,
-          platform,
-          requiredRunMode: options.requiredRunMode,
-        );
-        if (exampleReport == null) {
-          failures.addAll(
-            _exampleReportFailures(
-              reports,
-              platform,
-              requiredRunMode: options.requiredRunMode,
-            ),
-          );
-        }
-      }
       continue;
     }
     failures.addAll(
@@ -100,16 +84,6 @@ const Set<String> _requiredNativeModuleChecks = <String>{
   'runtimeCapability',
 };
 
-const Set<String> _requiredExampleSmokeChecks = <String>{
-  'runtimePlatformSelfCheck',
-  'runtimePipelineLoad',
-  'appLaunch',
-  'layoutControls',
-  'loopbackImageRequest',
-  'largeViewerRoute',
-  'cacheStats',
-};
-
 const _RequiredNativeModule _jpegTurboRoiModule = _RequiredNativeModule(
   aliases: <String>{
     'jpeg-turbo-roi',
@@ -147,14 +121,12 @@ final class _Options {
     required this.requiredPlatforms,
     required this.requiredRunMode,
     required this.requiredNativeModules,
-    required this.requireExampleSmoke,
   });
 
   final String reportsPath;
   final List<String> requiredPlatforms;
   final String? requiredRunMode;
   final List<_RequiredNativeModule> requiredNativeModules;
-  final bool requireExampleSmoke;
 
   factory _Options.parse(List<String> args) {
     var reportsPath = 'build/reports';
@@ -167,7 +139,6 @@ final class _Options {
     ];
     String? requiredRunMode;
     var requiredNativeModules = const <_RequiredNativeModule>[];
-    var requireExampleSmoke = false;
     for (final String arg in args) {
       if (arg.startsWith('--reports=')) {
         reportsPath = arg.substring('--reports='.length).trim();
@@ -189,8 +160,6 @@ final class _Options {
             .map((String value) => _requiredNativeModule(value.trim()))
             .whereType<_RequiredNativeModule>()
             .toList(growable: false);
-      } else if (arg == '--require-example-smoke') {
-        requireExampleSmoke = true;
       } else {
         throw ArgumentError('Unknown platform evidence argument: $arg');
       }
@@ -215,7 +184,6 @@ final class _Options {
       requiredNativeModules: List<_RequiredNativeModule>.unmodifiable(
         requiredNativeModules,
       ),
-      requireExampleSmoke: requireExampleSmoke,
     );
   }
 }
@@ -229,8 +197,6 @@ final class _Report {
     required this.evidence,
     required this.nativeModules,
     required this.hasSelfCheck,
-    required this.exampleSmokePassed,
-    required this.exampleSmokeChecks,
   });
 
   final String path;
@@ -240,8 +206,6 @@ final class _Report {
   final Map<String, Object?> evidence;
   final List<_NativeModuleReport> nativeModules;
   final bool hasSelfCheck;
-  final bool exampleSmokePassed;
-  final Set<String> exampleSmokeChecks;
 }
 
 final class _NativeModuleReport {
@@ -293,9 +257,7 @@ List<_Report> _readReports(String reportsPath) {
       continue;
     }
     final Object? decoded = jsonDecode(entity.readAsStringSync());
-    if (decoded is! Map<String, Object?> ||
-        !decoded.containsKey('selfCheck') &&
-            !decoded.containsKey('exampleSmoke')) {
+    if (decoded is! Map<String, Object?> || !decoded.containsKey('selfCheck')) {
       continue;
     }
     reports.add(_parseReport(entity.path, decoded));
@@ -313,14 +275,8 @@ _Report _parseReport(String path, Map<String, Object?> json) {
   final Map<String, Object?> evidence = json['evidence'] is Map
       ? _object(json['evidence'], '$path:evidence')
       : const <String, Object?>{};
-  final Map<String, Object?>? exampleSmoke = json['exampleSmoke'] is Map
-      ? _object(json['exampleSmoke'], '$path:exampleSmoke')
-      : null;
   final String platform = _normalizePlatform(
-    _string(evidence['platform']) ??
-        _string(selfCheck?['platform']) ??
-        _string(exampleSmoke?['platform']) ??
-        '',
+    _string(evidence['platform']) ?? _string(selfCheck?['platform']) ?? '',
   );
   final List<Object?> checks = selfCheck?['checks'] is List
       ? _list(selfCheck!['checks'], '$path:selfCheck.checks')
@@ -329,9 +285,6 @@ _Report _parseReport(String path, Map<String, Object?> json) {
     checks,
     '$path:selfCheck.checks[]',
   );
-  final List<Object?> exampleChecks = exampleSmoke?['checks'] is List
-      ? _list(exampleSmoke!['checks'], '$path:exampleSmoke.checks')
-      : const <Object?>[];
   return _Report(
     path: path,
     platform: platform,
@@ -340,11 +293,6 @@ _Report _parseReport(String path, Map<String, Object?> json) {
     evidence: evidence,
     nativeModules: _parseNativeModuleReports(path, json, evidence),
     hasSelfCheck: selfCheck != null,
-    exampleSmokePassed: exampleSmoke?['passed'] == true,
-    exampleSmokeChecks: _passedCheckNames(
-      exampleChecks,
-      '$path:exampleSmoke.checks[]',
-    ),
   );
 }
 
@@ -619,80 +567,6 @@ List<String> _nativeModuleFailures(
   return failures;
 }
 
-_Report? _firstAcceptableExampleReport(
-  List<_Report> reports,
-  String platform, {
-  required String? requiredRunMode,
-}) {
-  for (final _Report report in reports.where(
-    (_Report report) => report.platform == platform,
-  )) {
-    if (_exampleReportFailuresForOne(
-      report,
-      platform,
-      requiredRunMode: requiredRunMode,
-    ).isEmpty) {
-      return report;
-    }
-  }
-  return null;
-}
-
-List<String> _exampleReportFailures(
-  List<_Report> reports,
-  String platform, {
-  required String? requiredRunMode,
-}) {
-  final List<_Report> candidates = reports
-      .where((_Report report) => report.platform == platform)
-      .toList(growable: false);
-  for (final _Report report in candidates) {
-    final List<String> failures = _exampleReportFailuresForOne(
-      report,
-      platform,
-      requiredRunMode: requiredRunMode,
-    );
-    if (!failures.contains('$platform is missing example smoke evidence')) {
-      return failures;
-    }
-  }
-  return <String>['$platform is missing example smoke evidence'];
-}
-
-List<String> _exampleReportFailuresForOne(
-  _Report report,
-  String platform, {
-  required String? requiredRunMode,
-}) {
-  final List<String> failures = <String>[];
-  if (!report.exampleSmokePassed && report.exampleSmokeChecks.isEmpty) {
-    failures.add('$platform is missing example smoke evidence');
-    return failures;
-  }
-  if (!report.exampleSmokePassed) {
-    failures.add('$platform example smoke ${report.path} did not pass');
-  }
-  final List<String> missingChecks = _requiredExampleSmokeChecks
-      .where((String check) => !report.exampleSmokeChecks.contains(check))
-      .toList(growable: false);
-  if (missingChecks.isNotEmpty) {
-    failures.add(
-      '$platform example smoke is missing required checks: '
-      '${missingChecks.join(', ')}',
-    );
-  }
-  if (requiredRunMode != null) {
-    final String runMode = _string(report.evidence['runMode']) ?? 'unknown';
-    if (runMode != requiredRunMode) {
-      failures.add(
-        '$platform example smoke ${report.path} has runMode $runMode, '
-        'expected $requiredRunMode',
-      );
-    }
-  }
-  return failures;
-}
-
 Map<String, Object?> _object(Object? value, String label) {
   if (value is Map) {
     final Map<String, Object?> typed = <String, Object?>{};
@@ -769,6 +643,5 @@ Options:
   --require-native-modules=<list>
                                 Comma-separated optional native module evidence.
                                 Supported: jpeg-turbo-roi, webp-roi.
-  --require-example-smoke        Require real pixa_gallery example smoke evidence.
   --help                         Show this message.
 ''';

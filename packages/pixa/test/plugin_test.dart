@@ -7,7 +7,7 @@ import 'package:pixa/src/image_format_catalog.dart';
 
 void main() {
   test('Pixa exposes the package version used for plugin compatibility', () {
-    expect(Pixa.version, '0.1.0-dev.1');
+    expect(Pixa.version, '1.0.0');
   });
 
   test(
@@ -28,7 +28,7 @@ void main() {
           isA<StateError>().having(
             (StateError error) => error.message,
             'message',
-            contains('0.1.0-dev.1'),
+            contains('1.0.0'),
           ),
         ),
       );

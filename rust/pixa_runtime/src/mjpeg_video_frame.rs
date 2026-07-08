@@ -367,6 +367,7 @@ mod tests {
                     backend: Some("mjpeg"),
                 }),
                 max_output_bytes: 8192,
+                context: None,
             })
             .expect("fetch callback should succeed")
             .expect("fetch callback should be present");

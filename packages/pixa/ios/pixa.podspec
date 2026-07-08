@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'pixa'
-  s.version          = '0.1.0-dev.1'
+  s.version          = '1.0.0'
   s.summary          = 'Production-oriented Flutter image loading, caching, and pipeline primitives.'
   s.description      = <<-DESC
 Production-oriented Flutter image loading, caching, and pipeline primitives.

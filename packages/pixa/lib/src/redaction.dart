@@ -14,6 +14,10 @@ final class PixaRedactor {
     'proxy-authorization',
     'x-api-key',
     'x-auth-token',
+    'x-amz-security-token',
+    'x-pixa-s3-access-key-id',
+    'x-pixa-s3-secret-access-key',
+    'x-pixa-s3-session-token',
   };
 
   static const Set<String> _sensitiveQueryNames = <String>{
@@ -170,7 +174,7 @@ final class PixaRedactor {
   static String redactText(String text) {
     final String keyValueRedacted = text.replaceAllMapped(
       RegExp(
-        r'\b(authorization|cookie|token|signature)=((?:bearer\s+)?[^&\s]+)',
+        r'\b(authorization|cookie|secret|token|signature|x-pixa-s3-secret-access-key|x-amz-security-token)=((?:bearer\s+)?[^&\s]+)',
         caseSensitive: false,
       ),
       (Match match) => '${match.group(1)}=<redacted>',

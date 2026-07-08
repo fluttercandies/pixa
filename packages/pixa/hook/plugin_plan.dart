@@ -20,11 +20,23 @@ final class PixaRuntimePluginBuildPlan {
     Uri? userManifest,
     Uri? userManifestDirectory,
   }) {
-    final List<Uri> manifestUris = <Uri>[coreManifest, ...additionalManifests];
+    final List<Uri> additionalManifestUris = additionalManifests.toList(
+      growable: false,
+    );
+    final List<Uri> manifestUris = <Uri>[
+      coreManifest,
+      ...additionalManifestUris,
+    ];
+    final List<Uri> dependencyUris = <Uri>[
+      coreManifest,
+      ...additionalManifestUris,
+    ];
     if (userManifest != null) {
       manifestUris.add(userManifest);
+      dependencyUris.add(userManifest);
     }
     if (userManifestDirectory != null) {
+      dependencyUris.add(userManifestDirectory);
       final Directory directory = Directory.fromUri(userManifestDirectory);
       if (!directory.existsSync()) {
         throw StateError(
@@ -39,12 +51,14 @@ final class PixaRuntimePluginBuildPlan {
               .where((File file) => file.path.endsWith('.json'))
               .toList()
             ..sort((File a, File b) => a.path.compareTo(b.path));
-      manifestUris.addAll(files.map((File file) => file.uri));
+      final Iterable<Uri> fileUris = files.map((File file) => file.uri);
+      manifestUris.addAll(fileUris);
+      dependencyUris.addAll(files.map((File file) => file.uri));
     }
 
     return PixaRuntimePluginBuildPlan._fromManifestInputs(
       manifestUris.map(_readManifestInput),
-      dependencies: manifestUris,
+      dependencies: dependencyUris,
     );
   }
 

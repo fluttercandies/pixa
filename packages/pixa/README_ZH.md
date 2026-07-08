@@ -231,7 +231,7 @@ melos run release:preflight
 
 preflight 会执行 Dart fix、format、analyze、Flutter tests、Rust format、Rust
 clippy、Rust tests、architecture guard、platform self-check、platform evidence
-self-test、example smoke wrapper self-test、benchmark report self-test、example smoke
+self-test、benchmark report self-test、gallery example analyze、cockpit acceptance
 和 smoke benchmark report。architecture guard 也会校验 Darwin SwiftPM manifest、
 CocoaPods podspec 和 CI SPM build 开关。
 

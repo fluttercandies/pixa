@@ -1,5 +1,6 @@
 //! Runtime primitives shared by Pixa platform bindings.
 
+pub mod analysis;
 pub mod cache;
 pub mod cancel;
 pub mod error;
@@ -11,7 +12,9 @@ pub mod progress;
 pub mod request;
 
 mod http_transport;
+mod s3_fetcher;
 
+pub use analysis::{image_analysis, ImageAnalysis};
 pub use error::{RuntimeError, RuntimeResult};
 pub use image_format::{
     runtime_image_format_capabilities, RuntimeImageFormat, RuntimeImageFormatCapability,
@@ -42,12 +45,13 @@ pub use plugin_host::{
     RuntimePluginCacheReadResult, RuntimePluginCacheRemoveRequest, RuntimePluginCacheWriteRequest,
     RuntimePluginCapabilities, RuntimePluginDecodeRequest, RuntimePluginDecoderSignature,
     RuntimePluginDeployment, RuntimePluginExecutor, RuntimePluginExecutorRef,
-    RuntimePluginFetchRequest, RuntimePluginModule, RuntimePluginOutput,
+    RuntimePluginFetchContext, RuntimePluginFetchRequest, RuntimePluginModule, RuntimePluginOutput,
     RuntimePluginProcessRequest, RuntimePluginRegistryStats, RuntimePluginRoutes,
     RuntimePluginVideoFrameSpec, PIXA_PLUGIN_ABI_VERSION,
 };
 pub use progress::{RuntimeProgressEvent, RuntimeProgressSink, RuntimeProgressStage};
 pub use request::{CacheMode, RuntimeRequest, RuntimeSource};
+pub use s3_fetcher::{S3RuntimePluginExecutor, S3_FETCHER_MODULE_ID};
 
 /// Returns a stable FNV-1a 64-bit hash for normalized cache-key material.
 pub fn fnv1a64(input: &[u8]) -> u64 {
@@ -118,6 +122,29 @@ mod tests {
                 fnv1a64(&concatenated)
             );
         }
+    }
+
+    #[test]
+    fn image_analysis_reports_average_dominant_and_palette() {
+        use image::ImageEncoder;
+
+        let mut png = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut png)
+            .write_image(
+                &[255, 0, 0, 255, 0, 0, 255, 255],
+                2,
+                1,
+                image::ExtendedColorType::Rgba8,
+            )
+            .expect("fixture PNG should encode");
+
+        let analysis = image_analysis(&png, 8).expect("analysis should decode");
+
+        assert_eq!((analysis.width, analysis.height), (2, 1));
+        assert_eq!(analysis.average_argb, 0xff7f007f);
+        assert_eq!(analysis.dominant_argb, 0xffff0000);
+        assert!(analysis.palette_argb.contains(&0xffff0000));
+        assert!(analysis.palette_argb.contains(&0xff0000ff));
     }
 
     fn pseudo_random_bytes(seed: &mut u64, length: usize) -> Vec<u8> {

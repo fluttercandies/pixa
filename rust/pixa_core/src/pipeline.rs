@@ -17,9 +17,9 @@ use crate::{
     runtime_decoder_executor_for_mime_type, runtime_decoder_executor_for_signature,
     runtime_decoder_for_format_id, runtime_decoder_for_mime_type,
     runtime_fetcher_executor_for_source_kind, runtime_fetcher_for_source_kind, runtime_process,
-    RuntimeError, RuntimePluginDecodeRequest, RuntimePluginExecutorRef, RuntimePluginFetchRequest,
-    RuntimePluginModule, RuntimePluginOutput, RuntimePluginProcessRequest,
-    RuntimePluginVideoFrameSpec, RuntimeResult,
+    RuntimeError, RuntimePluginDecodeRequest, RuntimePluginExecutorRef, RuntimePluginFetchContext,
+    RuntimePluginFetchRequest, RuntimePluginModule, RuntimePluginOutput,
+    RuntimePluginProcessRequest, RuntimePluginVideoFrameSpec, RuntimeResult,
 };
 use image::GenericImageView;
 use std::borrow::Cow;
@@ -1846,7 +1846,14 @@ fn fetch_source_uncached(
         RuntimeSource::RuntimePlugin {
             source_kind,
             locator,
-        } => fetch_plugin_source(request, source_kind, locator, None, progress_sink),
+        } => fetch_plugin_source(
+            request,
+            source_kind,
+            locator,
+            None,
+            cancel_token,
+            progress_sink,
+        ),
         RuntimeSource::VideoFrame {
             locator,
             timestamp_micros,
@@ -1863,6 +1870,7 @@ fn fetch_source_uncached(
                     exact: *exact,
                     backend: backend.as_deref(),
                 }),
+                cancel_token,
                 progress_sink,
             )
         }
@@ -1874,6 +1882,7 @@ fn fetch_plugin_source(
     source_kind: &str,
     locator: &str,
     video_frame: Option<RuntimePluginVideoFrameSpec<'_>>,
+    cancel_token: Option<&RuntimeCancelToken>,
     progress_sink: Option<&dyn RuntimeProgressSink>,
 ) -> RuntimeResult<FetchOutcome> {
     let module = runtime_fetcher_for_source_kind(source_kind)?.ok_or_else(|| {
@@ -1902,6 +1911,15 @@ fn fetch_plugin_source(
             locator,
             video_frame,
             max_output_bytes: request.limits.max_encoded_bytes,
+            context: Some(RuntimePluginFetchContext {
+                request,
+                network_concurrency: pipeline_config()
+                    .lock()
+                    .map_err(|_| RuntimeError::new("config", true, "runtime config lock poisoned"))?
+                    .network_concurrency,
+                cancel_token,
+                progress_sink,
+            }),
         })?
         .ok_or_else(|| {
             plugin_entrypoint_missing_error("fetch", "fetcher", &module.module_id, source_kind)
@@ -3667,7 +3685,15 @@ fn has_private_headers(request: &RuntimeRequest) -> bool {
     request.headers.keys().any(|name| {
         matches!(
             name.to_ascii_lowercase().as_str(),
-            "authorization" | "cookie" | "proxy-authorization" | "x-api-key" | "x-auth-token"
+            "authorization"
+                | "cookie"
+                | "proxy-authorization"
+                | "x-api-key"
+                | "x-auth-token"
+                | "x-amz-security-token"
+                | "x-pixa-s3-access-key-id"
+                | "x-pixa-s3-secret-access-key"
+                | "x-pixa-s3-session-token"
         )
     })
 }
@@ -5928,6 +5954,80 @@ mod tests {
         assert!(error.message.contains("S3"));
         assert!(!error.message.contains("secret-token"));
         assert!(!error.message.contains("private.gif"));
+        clear_plugin_registry_for_test();
+    }
+
+    #[test]
+    fn s3_fetcher_executor_signs_and_fetches_through_runtime_transport() {
+        let _registry_guard = plugin_registry_test_guard();
+        clear_plugin_registry_for_test();
+        let body = minimal_gif(1, 0);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: image/gif\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes()
+        .into_iter()
+        .chain(body.iter().copied())
+        .collect::<Vec<u8>>();
+        let server = OneShotHttpServer::spawn(response);
+        let endpoint = server.url.trim_end_matches("/image.gif").to_string();
+
+        let mut capabilities = RuntimePluginCapabilities::hot_path();
+        capabilities.fetcher = true;
+        register_plugin_module_with_executor(
+            RuntimePluginModule::built_in("pixa.fetcher.s3", capabilities).with_routes(
+                RuntimePluginRoutes {
+                    fetcher_source_kinds: vec!["s3".to_string(), "s3-object".to_string()],
+                    ..RuntimePluginRoutes::default()
+                },
+            ),
+            Arc::new(crate::S3RuntimePluginExecutor),
+        )
+        .expect("S3 runtime fetcher should register with an executor");
+        let mut request = bytes_request(RuntimeLimits::default());
+        request.source = RuntimeSource::RuntimePlugin {
+            source_kind: "s3".to_string(),
+            locator: "s3://bucket/photos/cat.gif".to_string(),
+        };
+        request
+            .headers
+            .insert("x-pixa-s3-region".to_string(), "us-east-1".to_string());
+        request.headers.insert(
+            "x-pixa-s3-access-key-id".to_string(),
+            "AKIDEXAMPLE".to_string(),
+        );
+        request.headers.insert(
+            "x-pixa-s3-secret-access-key".to_string(),
+            "SECRETEXAMPLE".to_string(),
+        );
+        request.headers.insert(
+            "x-pixa-s3-session-token".to_string(),
+            "SESSIONEXAMPLE".to_string(),
+        );
+        request
+            .headers
+            .insert("x-pixa-s3-endpoint".to_string(), endpoint);
+        request
+            .headers
+            .insert("x-pixa-s3-force-path-style".to_string(), "true".to_string());
+
+        let outcome = load_image("", request, None).expect("S3 fetcher should load object bytes");
+
+        assert_eq!(outcome.bytes.as_ref(), body.as_slice());
+        assert_eq!(outcome.source_label, "runtime-plugin:s3");
+        let observed = server.join();
+        assert!(
+            observed.starts_with("GET /bucket/photos/cat.gif HTTP/1.1"),
+            "unexpected request: {observed}"
+        );
+        assert!(observed.contains("authorization: AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/"));
+        assert!(observed.contains("/us-east-1/s3/aws4_request"));
+        assert!(observed
+            .contains("SignedHeaders=host;x-amz-content-sha256;x-amz-date;x-amz-security-token"));
+        assert!(observed.contains("x-amz-content-sha256: e3b0c44298fc1c149afbf4c8996fb924"));
+        assert!(observed.contains("x-amz-security-token: SESSIONEXAMPLE"));
+        assert!(!observed.contains("SECRETEXAMPLE"));
         clear_plugin_registry_for_test();
     }
 

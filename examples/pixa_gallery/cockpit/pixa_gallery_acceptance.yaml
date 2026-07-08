@@ -1,0 +1,318 @@
+schemaVersion: 1
+sessionId: pixa-gallery-example
+taskId: pixa-gallery-acceptance
+platform: macos
+failFast: true
+steps:
+  - stepId: wait-gallery-workbench
+    stepType: retry
+    maxAttempts: 6
+    delayMs: 500
+    step:
+      stepType: command
+      command:
+        commandId: assert-gallery-workbench
+        commandType: assertText
+        parameters:
+          text: Gallery Workbench
+
+  - stepId: assert-gallery-controls
+    stepType: command
+    command:
+      commandId: assert-source-control
+      commandType: assertText
+      parameters:
+        text: SOURCE
+
+  - stepId: open-learn
+    stepType: command
+    command:
+      commandId: tap-learn-tab
+      commandType: tap
+      locator:
+        text: Learn
+        fallbacks:
+          - tooltip: Learn
+
+  - stepId: wait-learn-page
+    stepType: retry
+    maxAttempts: 6
+    delayMs: 500
+    step:
+      stepType: command
+      command:
+        commandId: assert-learn-pixa
+        commandType: assertText
+        parameters:
+          text: Learn Pixa
+
+  - stepId: assert-display-api
+    stepType: command
+    command:
+      commandId: assert-pixa-image
+      commandType: assertText
+      parameters:
+        text: PixaImage
+
+  - stepId: focus-learn-search
+    stepType: command
+    command:
+      commandId: focus-learn-search
+      commandType: focusTextInput
+      locator:
+        type: TextField
+
+  - stepId: search-sources
+    stepType: command
+    command:
+      commandId: search-sources
+      commandType: setTextEditingValue
+      locator:
+        type: TextField
+      parameters:
+        text: source
+
+  - stepId: assert-source-scenario
+    stepType: retry
+    maxAttempts: 4
+    delayMs: 250
+    step:
+      stepType: command
+      command:
+        commandId: assert-source-scenario
+        commandType: assertText
+        parameters:
+          text: Network & asset
+
+  - stepId: search-cache
+    stepType: command
+    command:
+      commandId: search-cache
+      commandType: setTextEditingValue
+      locator:
+        type: TextField
+      parameters:
+        text: cache
+
+  - stepId: assert-cache-policy
+    stepType: retry
+    maxAttempts: 4
+    delayMs: 250
+    step:
+      stepType: command
+      command:
+        commandId: assert-cache-policy
+        commandType: assertText
+        parameters:
+          text: Cache policy
+
+  - stepId: search-processor
+    stepType: command
+    command:
+      commandId: search-processor
+      commandType: setTextEditingValue
+      locator:
+        type: TextField
+      parameters:
+        text: processor
+
+  - stepId: assert-processor-lab
+    stepType: retry
+    maxAttempts: 4
+    delayMs: 250
+    step:
+      stepType: command
+      command:
+        commandId: assert-processor-lab
+        commandType: assertText
+        parameters:
+          text: Processor lab
+
+  - stepId: search-progressive
+    stepType: command
+    command:
+      commandId: search-progressive
+      commandType: setTextEditingValue
+      locator:
+        type: TextField
+      parameters:
+        text: progressive
+
+  - stepId: assert-progressive-jpeg
+    stepType: retry
+    maxAttempts: 4
+    delayMs: 250
+    step:
+      stepType: command
+      command:
+        commandId: assert-progressive-jpeg
+        commandType: assertText
+        parameters:
+          text: Progressive JPEG
+
+  - stepId: search-animated
+    stepType: command
+    command:
+      commandId: search-animated
+      commandType: setTextEditingValue
+      locator:
+        type: TextField
+      parameters:
+        text: animated
+
+  - stepId: assert-animated-gif
+    stepType: retry
+    maxAttempts: 4
+    delayMs: 250
+    step:
+      stepType: command
+      command:
+        commandId: assert-animated-gif
+        commandType: assertText
+        parameters:
+          text: Animated GIF
+
+  - stepId: search-video
+    stepType: command
+    command:
+      commandId: search-video
+      commandType: setTextEditingValue
+      locator:
+        type: TextField
+      parameters:
+        text: video
+
+  - stepId: assert-video-frame
+    stepType: retry
+    maxAttempts: 4
+    delayMs: 250
+    step:
+      stepType: command
+      command:
+        commandId: assert-video-frame
+        commandType: assertText
+        parameters:
+          text: Video frame
+
+  - stepId: search-warmup
+    stepType: command
+    command:
+      commandId: search-warmup
+      commandType: setTextEditingValue
+      locator:
+        type: TextField
+      parameters:
+        text: warmup
+
+  - stepId: assert-warmup-manifest
+    stepType: retry
+    maxAttempts: 4
+    delayMs: 250
+    step:
+      stepType: command
+      command:
+        commandId: assert-warmup-manifest
+        commandType: assertText
+        parameters:
+          text: Warmup manifest
+
+  - stepId: search-retry
+    stepType: command
+    command:
+      commandId: search-retry
+      commandType: setTextEditingValue
+      locator:
+        type: TextField
+      parameters:
+        text: retry
+
+  - stepId: assert-retry
+    stepType: retry
+    maxAttempts: 4
+    delayMs: 250
+    step:
+      stepType: command
+      command:
+        commandId: assert-retry
+        commandType: assertText
+        parameters:
+          text: Retry
+
+  - stepId: dismiss-learn-keyboard
+    stepType: command
+    command:
+      commandId: dismiss-learn-keyboard
+      commandType: dismissKeyboard
+
+  - stepId: open-runtime
+    stepType: command
+    command:
+      commandId: tap-runtime-tab
+      commandType: tap
+      locator:
+        text: Runtime
+        fallbacks:
+          - tooltip: Runtime
+
+  - stepId: wait-runtime-console
+    stepType: retry
+    maxAttempts: 6
+    delayMs: 500
+    step:
+      stepType: command
+      command:
+        commandId: assert-runtime-console
+        commandType: assertText
+        parameters:
+          text: Runtime Console
+
+  - stepId: reveal-decoded-cache
+    stepType: command
+    command:
+      commandId: scroll-decoded-image-cache
+      commandType: scrollUntilVisible
+      locator:
+        text: Decoded ImageCache
+      parameters:
+        scrollableLocator:
+          key: pixa-diagnostics-scroll
+        maxScrolls: 6
+        viewportFraction: 0.75
+        continuous: true
+        durationPerStepMs: 160
+        revealAlignment: center
+
+  - stepId: reveal-runtime-formats
+    stepType: command
+    command:
+      commandId: scroll-runtime-formats
+      commandType: scrollUntilVisible
+      locator:
+        text: Formats and plugins
+      parameters:
+        scrollableLocator:
+          key: pixa-diagnostics-scroll
+        maxScrolls: 8
+        viewportFraction: 0.75
+        continuous: true
+        durationPerStepMs: 160
+        revealAlignment: center
+
+  - stepId: assert-runtime-capability-state
+    stepType: command
+    command:
+      commandId: assert-video-frame-backends
+      commandType: assertText
+      parameters:
+        text: Video-frame backends
+
+  - stepId: capture-runtime-proof
+    stepType: command
+    command:
+      commandId: capture-runtime-proof
+      commandType: captureScreenshot
+      screenshotRequest:
+        reason: acceptance
+        name: pixa-gallery-runtime-proof
+        includeSnapshot: true
+        attachToStep: true

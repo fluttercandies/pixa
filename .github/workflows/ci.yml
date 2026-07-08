@@ -118,7 +118,6 @@ jobs:
     needs:
       - flutter-stable
       - platform-build
-      - example-platform
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
@@ -133,16 +132,10 @@ jobs:
           pattern: pixa-platform*check-*
           path: build/reports
           merge-multiple: true
-      - name: Download example smoke reports
-        uses: actions/download-artifact@v4
-        with:
-          pattern: pixa-example-smoke-*
-          path: build/reports
-          merge-multiple: true
       - name: Self-test platform evidence verifier
         run: dart run tool/pixa_platform_evidence_self_test.dart
       - name: Validate hosted platform evidence
-        run: dart run tool/pixa_platform_evidence.dart --require-platforms=android,ios,linux,macos,windows --require-run-mode=integration-test --require-native-modules=jpeg-turbo-roi,webp-roi --require-example-smoke
+        run: dart run tool/pixa_platform_evidence.dart --require-platforms=android,ios,linux,macos,windows --require-run-mode=integration-test --require-native-modules=jpeg-turbo-roi,webp-roi
 
   platform-build:
     name: Platform build ${{ matrix.platform }}
@@ -221,7 +214,9 @@ jobs:
           heap-size: 512M
           emulator-boot-timeout: 900
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: dart run tool/pixa_platform_build.dart --platform=android --enable-native-roi --run-self-check --device=emulator-5554 --device-kind=emulator --connection=local --signing=debug --report-output=build/reports/pixa_platform_probe_self_check_android.json
+          script: |
+            dart run tool/pixa_platform_build.dart --platform=android --enable-native-roi --run-self-check --device=emulator-5554 --device-kind=emulator --connection=local --signing=debug --report-output=build/reports/pixa_platform_probe_self_check_android.json
+            dart run tool/pixa_gallery_cockpit_acceptance.dart --platform=android --device-id=emulator-5554 --output-root=build/reports/pixa_gallery_cockpit_android
       - name: Boot iOS simulator
         if: matrix.platform == 'ios'
         shell: bash
@@ -248,12 +243,21 @@ jobs:
       - name: Build and run iOS simulator platform probe
         if: matrix.platform == 'ios'
         run: dart run tool/pixa_platform_build.dart --platform=ios --enable-native-roi --run-self-check --device=${{ env.PIXA_IOS_SIMULATOR_ID }} --device-kind=simulator --connection=local --signing=debug --report-output=build/reports/pixa_platform_probe_self_check_ios.json
+      - name: Run iOS simulator gallery cockpit acceptance
+        if: matrix.platform == 'ios'
+        run: dart run tool/pixa_gallery_cockpit_acceptance.dart --platform=ios --device-id=${{ env.PIXA_IOS_SIMULATOR_ID }} --output-root=build/reports/pixa_gallery_cockpit_ios
       - name: Build and run Linux platform probe
         if: matrix.platform == 'linux'
         run: xvfb-run -a dart run tool/pixa_platform_build.dart --platform=linux --enable-native-roi --run-self-check --report-output=build/reports/pixa_platform_probe_self_check_linux.json --device-kind=desktop --connection=local --signing=not-applicable
+      - name: Run Linux gallery cockpit acceptance
+        if: matrix.platform == 'linux'
+        run: xvfb-run -a dart run tool/pixa_gallery_cockpit_acceptance.dart --platform=linux --device-id=linux --output-root=build/reports/pixa_gallery_cockpit_linux
       - name: Build and run desktop platform probe
         if: matrix.platform == 'macos' || matrix.platform == 'windows'
         run: dart run tool/pixa_platform_build.dart --platform=${{ matrix.platform }} --enable-native-roi --run-self-check --report-output=build/reports/pixa_platform_probe_self_check_${{ matrix.platform }}.json --device-kind=desktop --connection=local --signing=not-applicable
+      - name: Run desktop gallery cockpit acceptance
+        if: matrix.platform == 'macos' || matrix.platform == 'windows'
+        run: dart run tool/pixa_gallery_cockpit_acceptance.dart --platform=${{ matrix.platform }} --device-id=${{ matrix.platform }} --output-root=build/reports/pixa_gallery_cockpit_${{ matrix.platform }}
       - name: Upload desktop platform probe self-check
         if: matrix.platform == 'linux' || matrix.platform == 'macos' || matrix.platform == 'windows'
         uses: actions/upload-artifact@v4
@@ -266,112 +270,8 @@ jobs:
         with:
           name: pixa-platform-probe-self-check-${{ matrix.platform }}
           path: build/reports/pixa_platform_probe_self_check_${{ matrix.platform }}.json
-
-  example-platform:
-    name: Example smoke ${{ matrix.platform }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: android
-            os: ubuntu-latest
-            rust-targets: aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
-          - platform: ios
-            os: macos-latest
-            rust-targets: aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
-          - platform: linux
-            os: ubuntu-latest
-            rust-targets: x86_64-unknown-linux-gnu
-          - platform: macos
-            os: macos-latest
-            rust-targets: aarch64-apple-darwin x86_64-apple-darwin
-          - platform: windows
-            os: windows-latest
-            rust-targets: x86_64-pc-windows-msvc
-    steps:
-      - uses: actions/checkout@v7
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-      - name: Install Rust stable
-        shell: bash
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup target add ${{ matrix.rust-targets }}
-      - name: Install Linux example dependencies
-        if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev xvfb
-      - name: Install Android example dependencies
-        if: matrix.platform == 'android'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config
-      - uses: android-actions/setup-android@v3
-        if: matrix.platform == 'android'
-      - name: Install Android NDK
-        if: matrix.platform == 'android'
-        shell: bash
-        run: |
-          sdkmanager "ndk;27.0.12077973"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
-      - name: Install root dependencies
-        run: dart pub get
-      - name: Enable Swift Package Manager
-        if: matrix.platform == 'ios' || matrix.platform == 'macos'
-        run: flutter config --enable-swift-package-manager
-      - name: Build and run Android example smoke
-        if: matrix.platform == 'android'
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          arch: x86_64
-          target: google_atd
-          profile: pixel_2
-          ram-size: 2048M
-          heap-size: 512M
-          emulator-boot-timeout: 900
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: dart run tool/pixa_example_smoke.dart --platform=android --device=emulator-5554 --device-kind=emulator --connection=local --signing=debug --report-output=build/reports/pixa_example_smoke_android.json
-      - name: Boot iOS simulator
-        if: matrix.platform == 'ios'
-        shell: bash
-        run: |
-          set -euo pipefail
-          device_name="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ && /Shutdown/ {gsub(/^[ \t]+|[ \t]+$/, "", $1); print $1; exit}')"
-          if [[ -z "$device_name" ]]; then
-            device_name="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ {gsub(/^[ \t]+|[ \t]+$/, "", $1); print $1; exit}')"
-          fi
-          if [[ -z "$device_name" ]]; then
-            echo "No available iOS simulator device found." >&2
-            xcrun simctl list devices available >&2
-            exit 1
-          fi
-          xcrun simctl boot "$device_name" || true
-          xcrun simctl bootstatus booted -b
-          device_id="$(xcrun simctl list devices booted | awk -F '[()]' '/Booted/ {print $2; exit}')"
-          if [[ -z "$device_id" ]]; then
-            echo "No booted iOS simulator id found." >&2
-            xcrun simctl list devices booted >&2
-            exit 1
-          fi
-          echo "PIXA_IOS_EXAMPLE_SIMULATOR_ID=$device_id" >> "$GITHUB_ENV"
-      - name: Build and run iOS simulator example smoke
-        if: matrix.platform == 'ios'
-        run: dart run tool/pixa_example_smoke.dart --platform=ios --device=${{ env.PIXA_IOS_EXAMPLE_SIMULATOR_ID }} --device-kind=simulator --connection=local --signing=debug --report-output=build/reports/pixa_example_smoke_ios.json
-      - name: Build and run Linux example smoke
-        if: matrix.platform == 'linux'
-        run: xvfb-run -a dart run tool/pixa_example_smoke.dart --platform=linux --device-kind=desktop --connection=local --signing=not-applicable --report-output=build/reports/pixa_example_smoke_linux.json
-      - name: Build and run desktop example smoke
-        if: matrix.platform == 'macos' || matrix.platform == 'windows'
-        run: dart run tool/pixa_example_smoke.dart --platform=${{ matrix.platform }} --device-kind=desktop --connection=local --signing=not-applicable --report-output=build/reports/pixa_example_smoke_${{ matrix.platform }}.json
-      - name: Upload example smoke report
+      - name: Upload gallery cockpit acceptance
         uses: actions/upload-artifact@v4
         with:
-          name: pixa-example-smoke-${{ matrix.platform }}
-          path: build/reports/pixa_example_smoke_${{ matrix.platform }}.json
+          name: pixa-gallery-cockpit-${{ matrix.platform }}
+          path: build/reports/pixa_gallery_cockpit_${{ matrix.platform }}

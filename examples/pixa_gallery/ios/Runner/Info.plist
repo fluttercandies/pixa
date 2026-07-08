@@ -32,7 +32,7 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Pixa Gallery uses local networking for runtime smoke checks.</string>
+	<string>Pixa Gallery uses local networking for runtime acceptance checks.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

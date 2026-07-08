@@ -1,5 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pixa/pixa.dart';
 import 'package:pixa/pixa_plugins.dart';
+import 'package:pixa/src/redaction.dart';
 import 'package:pixa_fetcher_s3/pixa_fetcher_s3.dart';
 
 void main() {
@@ -18,5 +20,63 @@ void main() {
     expect(runtime.deployment, PixaRuntimeDeployment.builtInHostModule);
     expect(runtime.canLinkIntoHostBinary, isTrue);
     expect(runtime.hostManagedRuntime, isTrue);
+  });
+
+  test('S3 helpers keep credentials out of locators and cache labels', () {
+    const PixaS3Credentials alpha = PixaS3Credentials(
+      accessKeyId: 'AKIDEXAMPLE',
+      secretAccessKey: 'alpha-secret',
+      sessionToken: 'alpha-session',
+    );
+    const PixaS3Credentials bravo = PixaS3Credentials(
+      accessKeyId: 'AKIDEXAMPLE',
+      secretAccessKey: 'bravo-secret',
+      sessionToken: 'bravo-session',
+    );
+
+    final PixaSource source = PixaS3.source(
+      bucket: 'bucket',
+      key: 'photos/private cat.gif',
+    );
+    final PixaRuntimePluginSource runtimeSource =
+        source as PixaRuntimePluginSource;
+    expect(runtimeSource.sourceKind, 's3');
+    expect(runtimeSource.locator, 's3://bucket/photos/private%20cat.gif');
+    expect(runtimeSource.locator, isNot(contains('alpha-secret')));
+    expect(runtimeSource.locator, isNot(contains('AKIDEXAMPLE')));
+
+    final Map<String, String> headers = PixaS3.headers(
+      region: 'us-east-1',
+      credentials: alpha,
+      endpoint: Uri.parse('http://127.0.0.1:9000'),
+      forcePathStyle: true,
+    );
+    expect(headers[PixaS3Headers.region], 'us-east-1');
+    expect(headers[PixaS3Headers.endpoint], 'http://127.0.0.1:9000');
+    expect(headers[PixaS3Headers.forcePathStyle], 'true');
+    expect(
+      PixaRedactor.redactHeaders(headers)[PixaS3Headers.secretAccessKey],
+      '<redacted>',
+    );
+    expect(
+      PixaRedactor.redactHeaders(headers)[PixaS3Headers.sessionToken],
+      '<redacted>',
+    );
+
+    final PixaRequest first = PixaS3.request(
+      bucket: 'bucket',
+      key: 'photos/private cat.gif',
+      region: 'us-east-1',
+      credentials: alpha,
+    );
+    final PixaRequest second = PixaS3.request(
+      bucket: 'bucket',
+      key: 'photos/private cat.gif',
+      region: 'us-east-1',
+      credentials: bravo,
+    );
+    expect(first.encodedCacheKey, isNot(second.encodedCacheKey));
+    expect(first.encodedCacheKey.debugLabel, isNot(contains('alpha-secret')));
+    expect(second.encodedCacheKey.debugLabel, isNot(contains('bravo-secret')));
   });
 }

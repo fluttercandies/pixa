@@ -329,7 +329,8 @@ void main() {
       expect(plan.modules.first.link.searchPaths, <String>[
         userDirectory.uri.resolve('runtime/lib').toFilePath(),
       ]);
-      expect(plan.dependencies, hasLength(3));
+      expect(plan.dependencies, hasLength(4));
+      expect(plan.dependencies, contains(userDirectory.uri));
     },
   );
 

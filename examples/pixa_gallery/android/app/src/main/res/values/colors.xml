@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Pixa neumorphic brand colours used by the launch splash. -->
+    <color name="pixa_brand_base">#FFE4E9F2</color>
+    <color name="pixa_brand_accent">#FF4252E8</color>
+</resources>

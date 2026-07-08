@@ -6,7 +6,9 @@ import 'package:path_provider/path_provider.dart';
 
 import 'cache/cache_stats.dart';
 import 'cache/decoded_cache_registry.dart';
+import 'cache_warmup.dart';
 import 'config.dart';
+import 'image_analysis.dart';
 import 'runtime/capabilities.dart';
 import 'runtime/runtime_bridge.dart';
 import 'observer.dart';
@@ -30,7 +32,7 @@ final class Pixa {
   Pixa._();
 
   /// Current core package version used for plugin compatibility checks.
-  static const String version = '0.1.0-dev.1';
+  static const String version = '1.0.0';
 
   static PixaConfig _config = const PixaConfig();
   static PixaPipeline? _pipeline;
@@ -118,6 +120,27 @@ final class Pixa {
     }
     await ensureConfigured();
     await pipeline.prefetch(request, target: target);
+  }
+
+  /// Runs a cache warmup manifest through [prefetch].
+  static Future<PixaCacheWarmupReport> warmup(
+    PixaCacheWarmupManifest manifest, {
+    bool continueOnError = true,
+  }) {
+    return manifest.run((PixaCacheWarmupEntry entry) {
+      return prefetch(entry.request, target: entry.target);
+    }, continueOnError: continueOnError);
+  }
+
+  /// Loads a request and analyzes its encoded image bytes through the runtime.
+  static Future<PixaImageAnalysis> analyze(PixaRequest request) async {
+    await ensureConfigured();
+    final PixaPipelineLoad load = await pipeline.load(request);
+    try {
+      return PixaImageAnalysis.parseEncoded(load.bytes);
+    } finally {
+      load.dispose();
+    }
   }
 
   /// Prewarms Flutter decoded cache for a request.

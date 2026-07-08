@@ -1,4 +1,7 @@
 use crate::cache::SharedBytes;
+use crate::cancel::RuntimeCancelToken;
+use crate::progress::RuntimeProgressSink;
+use crate::request::RuntimeRequest;
 use crate::{RuntimeError, RuntimeResult};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -16,12 +19,46 @@ static RUNTIME_PLUGIN_REGISTRY_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 pub type RuntimePluginExecutorRef = Arc<dyn RuntimePluginExecutor>;
 
 /// Request passed to a runtime fetcher executor.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct RuntimePluginFetchRequest<'a> {
     pub source_kind: &'a str,
     pub locator: &'a str,
     pub video_frame: Option<RuntimePluginVideoFrameSpec<'a>>,
     pub max_output_bytes: usize,
+    pub context: Option<RuntimePluginFetchContext<'a>>,
+}
+
+impl fmt::Debug for RuntimePluginFetchRequest<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimePluginFetchRequest")
+            .field("source_kind", &self.source_kind)
+            .field("locator", &self.locator)
+            .field("video_frame", &self.video_frame)
+            .field("max_output_bytes", &self.max_output_bytes)
+            .field("has_context", &self.context.is_some())
+            .finish()
+    }
+}
+
+/// Host pipeline context available to built-in runtime fetcher executors.
+#[derive(Clone, Copy)]
+pub struct RuntimePluginFetchContext<'a> {
+    pub request: &'a RuntimeRequest,
+    pub network_concurrency: usize,
+    pub cancel_token: Option<&'a RuntimeCancelToken>,
+    pub progress_sink: Option<&'a dyn RuntimeProgressSink>,
+}
+
+impl fmt::Debug for RuntimePluginFetchContext<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimePluginFetchContext")
+            .field("network_concurrency", &self.network_concurrency)
+            .field("has_cancel_token", &self.cancel_token.is_some())
+            .field("has_progress_sink", &self.progress_sink.is_some())
+            .finish()
+    }
 }
 
 /// Structured video frame parameters passed to a runtime fetcher executor.
