@@ -30,10 +30,11 @@ Future<void> main(List<String> args) async {
   outputRoot.createSync(recursive: true);
 
   if (!options.skipPubGet) {
-    final pubGetCode = await _run('flutter', const <String>[
-      'pub',
-      'get',
-    ], workingDirectory: projectDir.path);
+    final pubGetCode = await _run(
+      flutterExecutableForPlatform(),
+      const <String>['pub', 'get'],
+      workingDirectory: projectDir.path,
+    );
     if (pubGetCode != 0) {
       exit(pubGetCode);
     }
@@ -77,34 +78,52 @@ Future<void> main(List<String> args) async {
   final stdoutText = result.stdout as String;
   final stderrText = result.stderr as String;
   stderr.write(stderrText);
+
+  File? resultFile;
+  Map<String, Object?>? decoded;
+  if (stdoutText.trim().isNotEmpty) {
+    resultFile = writeValidationResult(
+      outputRoot: outputRoot,
+      stdoutText: stdoutText,
+    );
+    try {
+      decoded = _decodeValidationResult(stdoutText);
+    } on FormatException {
+      stdout.write(stdoutText);
+      if (result.exitCode != 0) {
+        exit(result.exitCode);
+      }
+      rethrow;
+    }
+  }
+
+  if (resultFile != null) {
+    stdout.writeln('  result: ${resultFile.path}');
+  }
+  final classification = decoded?['classification'];
+  final next = decoded?['recommendedNextStep'];
+  if (classification != null) {
+    stdout.writeln('  classification: $classification');
+  }
+  if (next != null) {
+    stdout.writeln('  next: $next');
+  }
+
   if (result.exitCode != 0) {
-    stdout.write(stdoutText);
+    _writeFailureSummary(decoded);
+    if (stdoutText.trim().isNotEmpty && decoded == null) {
+      stdout.write(stdoutText);
+    }
     exit(result.exitCode);
   }
 
-  final resultFile = File(
-    '${outputRoot.path}${Platform.pathSeparator}validation_result.json',
-  );
-  resultFile.writeAsStringSync(stdoutText);
-  final decoded = const JsonDecoder().convert(stdoutText);
-  if (decoded is! Map<String, Object?>) {
-    stdout.write(stdoutText);
+  if (decoded == null) {
     throw const FormatException(
       'Cockpit validation result must be a JSON map.',
     );
   }
-  final classification = decoded['classification'];
-  final next = decoded['recommendedNextStep'];
-  stdout.writeln('  result: ${resultFile.path}');
-  stdout.writeln('  classification: $classification');
-  if (next != null) {
-    stdout.writeln('  next: $next');
-  }
   if (classification != 'completed') {
-    final failureSummary = _failureSummary(decoded);
-    if (failureSummary != null) {
-      stderr.writeln('Cockpit acceptance failed: $failureSummary');
-    }
+    _writeFailureSummary(decoded);
     exit(1);
   }
 }
@@ -131,7 +150,94 @@ Future<ProcessResult> _runCaptured(
   return Process.run(executable, arguments, workingDirectory: workingDirectory);
 }
 
-String? _failureSummary(Map<String, Object?> result) {
+String flutterExecutableForPlatform({
+  Map<String, String>? environment,
+  bool? isWindows,
+}) {
+  final resolvedEnvironment = environment ?? Platform.environment;
+  final resolvedIsWindows = isWindows ?? Platform.isWindows;
+  final flutterRoot = resolvedEnvironment['FLUTTER_ROOT'];
+  if (resolvedIsWindows) {
+    if (flutterRoot != null && flutterRoot.trim().isNotEmpty) {
+      return '${flutterRoot.replaceAll(r'\', '/')}/bin/flutter.bat';
+    }
+    return 'flutter.bat';
+  }
+  if (flutterRoot != null && flutterRoot.trim().isNotEmpty) {
+    return '$flutterRoot/bin/flutter';
+  }
+  return 'flutter';
+}
+
+File writeValidationResult({
+  required Directory outputRoot,
+  required String stdoutText,
+}) {
+  outputRoot.createSync(recursive: true);
+  final resultFile = File(
+    '${outputRoot.path}${Platform.pathSeparator}validation_result.json',
+  );
+  resultFile.writeAsStringSync(stdoutText);
+  return resultFile;
+}
+
+Map<String, Object?> _decodeValidationResult(String stdoutText) {
+  final decoded = const JsonDecoder().convert(stdoutText);
+  if (decoded is! Map<String, Object?>) {
+    throw const FormatException(
+      'Cockpit validation result must be a JSON map.',
+    );
+  }
+  return decoded;
+}
+
+void _writeFailureSummary(Map<String, Object?>? decoded) {
+  if (decoded == null) {
+    return;
+  }
+  final failureSummary = validationFailureSummary(decoded);
+  if (failureSummary != null) {
+    stderr.writeln('Cockpit acceptance failed: $failureSummary');
+  }
+}
+
+String? validationFailureSummary(Map<String, Object?> result) {
+  final parts = <String>[];
+  void addPart(Object? value) {
+    if (value is String && value.trim().isNotEmpty) {
+      parts.add(value.trim());
+    }
+  }
+
+  addPart(_manifestFailureSummary(result));
+  addPart(_readString(result, 'blockedReason'));
+
+  final runTaskResult = result['runTaskResult'];
+  if (runTaskResult is Map<String, Object?>) {
+    final blockedReason = _readString(runTaskResult, 'blockedReason');
+    if (blockedReason != _readString(result, 'blockedReason')) {
+      addPart(blockedReason);
+    }
+    _appendGateSummary(parts, runTaskResult['bundleSummary']);
+  }
+
+  final validationFailures = result['validationFailures'];
+  if (validationFailures is List<Object?>) {
+    for (final failure in validationFailures.take(5)) {
+      if (failure is Map<String, Object?>) {
+        final code = _readString(failure, 'code');
+        final message = _readString(failure, 'message');
+        if (code != null || message != null) {
+          parts.add(<String>[?code, ?message].join(': '));
+        }
+      }
+    }
+  }
+
+  return parts.isEmpty ? null : parts.join(' | ');
+}
+
+String? _manifestFailureSummary(Map<String, Object?> result) {
   final runTaskResult = result['runTaskResult'];
   if (runTaskResult is! Map<String, Object?>) {
     return null;
@@ -146,6 +252,53 @@ String? _failureSummary(Map<String, Object?> result) {
   }
   final summary = manifest['failureSummary'];
   return summary is String && summary.isNotEmpty ? summary : null;
+}
+
+void _appendGateSummary(List<String> parts, Object? bundleSummary) {
+  if (bundleSummary is! Map<String, Object?>) {
+    return;
+  }
+  final gateSummary = bundleSummary['gateSummary'];
+  if (gateSummary is! Map<String, Object?>) {
+    return;
+  }
+  final gates = gateSummary['gates'];
+  if (gates is Map<String, Object?>) {
+    final failedGates = <String>[
+      for (final entry in gates.entries)
+        if (entry.value == false) '${entry.key}=false',
+    ];
+    if (failedGates.isNotEmpty) {
+      parts.add('failed gates: ${failedGates.join(', ')}');
+    }
+  }
+  final failureCodes = gateSummary['failureCodes'];
+  if (failureCodes is Map<String, Object?>) {
+    final gateCodes = <String>[
+      for (final entry in failureCodes.entries)
+        if (_formatFailureCodes(entry.value) != null)
+          '${entry.key}=${_formatFailureCodes(entry.value)}',
+    ];
+    if (gateCodes.isNotEmpty) {
+      parts.add('gate failure codes: ${gateCodes.join(', ')}');
+    }
+  }
+}
+
+String? _formatFailureCodes(Object? value) {
+  if (value is List<Object?>) {
+    final values = <String>[
+      for (final item in value)
+        if (item is String && item.isNotEmpty) item,
+    ];
+    return values.isEmpty ? null : values.join('+');
+  }
+  return value is String && value.isNotEmpty ? value : null;
+}
+
+String? _readString(Map<String, Object?> value, String key) {
+  final raw = value[key];
+  return raw is String && raw.isNotEmpty ? raw : null;
 }
 
 String _workflowForPlatform(String source, String platform) {

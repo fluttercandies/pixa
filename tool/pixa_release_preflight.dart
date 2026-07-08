@@ -72,6 +72,10 @@ List<_Step> _releaseSteps() {
       'run',
       'tool/pixa_platform_evidence_self_test.dart',
     ]),
+    _Step('Run gallery cockpit wrapper self-test', 'dart', <String>[
+      'run',
+      'tool/pixa_gallery_cockpit_acceptance_self_test.dart',
+    ]),
     _Step('Run benchmark report self-test', 'dart', <String>[
       'run',
       'tool/pixa_benchmark_report_self_test.dart',
