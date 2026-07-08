@@ -13,7 +13,7 @@ use http::header::{
 use http::{HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode, Uri};
 use http_body_util::{BodyExt, Empty};
 use hyper::rt::{Read as HyperRead, ReadBufCursor, Write as HyperWrite};
-use hyper_rustls::HttpsConnectorBuilder;
+use hyper_rustls::{builderstates::WantsSchemes, HttpsConnectorBuilder};
 use hyper_util::client::legacy::connect::proxy::Tunnel;
 use hyper_util::client::legacy::connect::{Connected, Connection, HttpConnector};
 use hyper_util::client::legacy::Client;
@@ -707,21 +707,30 @@ fn build_http_connector(connect_timeout_ms: u64) -> HttpConnector {
 }
 
 fn build_https_connector<C>(connector: C) -> RuntimeResult<hyper_rustls::HttpsConnector<C>> {
-    let connector = HttpsConnectorBuilder::new()
-        .with_native_roots()
-        .map_err(|error| {
-            RuntimeError::new(
-                "fetch",
-                true,
-                format!("failed to load system TLS roots: {error}"),
-            )
-        })?
-        .https_or_http()
-        .enable_http1()
-        .enable_http2()
-        .wrap_connector(connector);
+    let connector =
+        https_connector_builder_with_roots(HttpsConnectorBuilder::new().with_native_roots())?
+            .https_or_http()
+            .enable_http1()
+            .enable_http2()
+            .wrap_connector(connector);
 
     Ok(connector)
+}
+
+fn https_connector_builder_with_roots(
+    native_roots: std::io::Result<HttpsConnectorBuilder<WantsSchemes>>,
+) -> RuntimeResult<HttpsConnectorBuilder<WantsSchemes>> {
+    match native_roots {
+        Ok(builder) => Ok(builder),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(HttpsConnectorBuilder::new().with_webpki_roots())
+        }
+        Err(error) => Err(RuntimeError::new(
+            "fetch",
+            true,
+            format!("failed to load system TLS roots: {error}"),
+        )),
+    }
 }
 
 async fn send_get(
@@ -1173,7 +1182,7 @@ mod tests {
     use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
     use rustls::{ServerConfig, ServerConnection, StreamOwned};
     use std::collections::BTreeMap;
-    use std::io::{Read, Write};
+    use std::io::{Error, ErrorKind, Read, Write};
     use std::net::TcpListener;
     use std::sync::Mutex;
     use std::thread;
@@ -1591,6 +1600,32 @@ mod tests {
                 || server_message.contains("unknown"),
             "{server_message}"
         );
+    }
+
+    #[test]
+    fn https_connector_falls_back_to_webpki_roots_when_native_roots_are_missing() {
+        let builder = https_connector_builder_with_roots(Err(Error::new(
+            ErrorKind::NotFound,
+            "no native root CA certificates found",
+        )));
+
+        assert!(builder.is_ok());
+    }
+
+    #[test]
+    fn https_connector_reports_non_missing_native_root_errors() {
+        let error = match https_connector_builder_with_roots(Err(Error::new(
+            ErrorKind::PermissionDenied,
+            "system keychain is not readable",
+        ))) {
+            Ok(_) => panic!("non-missing native root failures should stay explicit"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.stage, "fetch");
+        assert!(error.retryable);
+        assert!(error.message.contains("failed to load system TLS roots"));
+        assert!(error.message.contains("system keychain is not readable"));
     }
 
     #[test]
