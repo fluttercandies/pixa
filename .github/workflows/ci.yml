@@ -177,7 +177,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build nasm pkg-config libgtk-3-dev liblzma-dev xvfb
+          sudo apt-get install -y --no-install-recommends clang cmake ninja-build nasm pkg-config libgtk-3-dev liblzma-dev xvfb x11-utils libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-libav
       - name: Install Android native ROI build dependencies
         if: matrix.platform == 'android'
         run: |
