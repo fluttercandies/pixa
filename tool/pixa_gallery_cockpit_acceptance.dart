@@ -10,6 +10,9 @@ Future<void> main(List<String> args) async {
 
   final platform = options.platform ?? _hostDesktopPlatform();
   final deviceId = options.deviceId ?? _defaultDeviceId(platform);
+  final launchTimeoutSeconds =
+      options.launchTimeoutSeconds ??
+      defaultLaunchTimeoutSecondsForPlatform(platform);
   final projectDir = Directory(options.projectDir).absolute;
   final workflowFile = File(options.workflow).absolute;
   final outputRoot = Directory(
@@ -53,7 +56,7 @@ Future<void> main(List<String> args) async {
       platform: platform,
       deviceId: deviceId,
       sessionPort: options.sessionPort,
-      launchTimeoutSeconds: options.launchTimeoutSeconds,
+      launchTimeoutSeconds: launchTimeoutSeconds,
       outputRoot: outputRoot.path,
       scriptPath:
           '${outputRoot.path}${Platform.pathSeparator}pixa_gallery_acceptance.yaml',
@@ -179,6 +182,13 @@ File writeValidationResult({
   );
   resultFile.writeAsStringSync(stdoutText);
   return resultFile;
+}
+
+int defaultLaunchTimeoutSecondsForPlatform(String platform) {
+  return switch (platform) {
+    'android' || 'ios' => 720,
+    _ => 240,
+  };
 }
 
 Map<String, Object?> _decodeValidationResult(String stdoutText) {
@@ -400,7 +410,7 @@ final class _Options {
   final String? deviceId;
   final String? outputRoot;
   final int sessionPort;
-  final int launchTimeoutSeconds;
+  final int? launchTimeoutSeconds;
   final bool skipPubGet;
 
   factory _Options.parse(List<String> args) {
@@ -429,9 +439,9 @@ final class _Options {
       deviceId: values['device-id'],
       outputRoot: values['output-root'],
       sessionPort: int.parse(values['session-port'] ?? '47331'),
-      launchTimeoutSeconds: int.parse(
-        values['launch-timeout-seconds'] ?? '240',
-      ),
+      launchTimeoutSeconds: values.containsKey('launch-timeout-seconds')
+          ? int.parse(values['launch-timeout-seconds']!)
+          : null,
       skipPubGet: skipPubGet,
     );
   }
@@ -449,6 +459,6 @@ Options:
   --workflow=<path>                    Defaults to the committed acceptance YAML.
   --output-root=<path>                 Defaults to build/reports/pixa_gallery_cockpit_<platform>.
   --session-port=<port>                Defaults to 47331.
-  --launch-timeout-seconds=<seconds>   Defaults to 240.
+  --launch-timeout-seconds=<seconds>   Defaults to 720 on Android/iOS, 240 elsewhere.
   --skip-pub-get                       Do not run flutter pub get first.
 ''';

@@ -4,10 +4,26 @@ import 'dart:io';
 import 'pixa_gallery_cockpit_acceptance.dart' as acceptance;
 
 void main() {
+  _mobilePlatformsUseCiSizedLaunchBudget();
   _windowsFlutterRootResolvesBat();
   _nonWindowsFlutterRootResolvesBinary();
   _failedValidationResultKeepsEvidence();
   stdout.writeln('Pixa gallery cockpit acceptance self-test passed.');
+}
+
+void _mobilePlatformsUseCiSizedLaunchBudget() {
+  _expect(
+    acceptance.defaultLaunchTimeoutSecondsForPlatform('android') == 720,
+    'Android cockpit acceptance should allow CI cold build and install.',
+  );
+  _expect(
+    acceptance.defaultLaunchTimeoutSecondsForPlatform('ios') == 720,
+    'iOS cockpit acceptance should allow CI cold simulator build.',
+  );
+  _expect(
+    acceptance.defaultLaunchTimeoutSecondsForPlatform('macos') == 240,
+    'Desktop cockpit acceptance should keep the normal launch budget.',
+  );
 }
 
 void _windowsFlutterRootResolvesBat() {
