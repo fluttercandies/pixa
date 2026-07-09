@@ -6,8 +6,8 @@ failFast: true
 steps:
   - stepId: wait-gallery-workbench
     stepType: retry
-    maxAttempts: 6
-    delayMs: 500
+    maxAttempts: 120
+    delayMs: 1000
     step:
       stepType: command
       command:

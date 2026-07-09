@@ -8,6 +8,8 @@ void main() {
   _androidCiUsesFreshEmulatorForCockpitAcceptance();
   _androidCiUsesCiSizedEmulatorBootBudget();
   _androidCiCapturesCockpitDiagnosticsOnFailure();
+  _cockpitEntrypointStartsRemoteBeforeGalleryBootstrap();
+  _workflowAllowsSlowGalleryBootstrap();
   _windowsFlutterRootResolvesBat();
   _nonWindowsFlutterRootResolvesBinary();
   _failedValidationResultKeepsEvidence();
@@ -26,6 +28,36 @@ void _mobilePlatformsUseCiSizedLaunchBudget() {
   _expect(
     acceptance.defaultLaunchTimeoutSecondsForPlatform('macos') == 240,
     'Desktop cockpit acceptance should keep the normal launch budget.',
+  );
+}
+
+void _cockpitEntrypointStartsRemoteBeforeGalleryBootstrap() {
+  final source = File(
+    'examples/pixa_gallery/cockpit/main.dart',
+  ).readAsStringSync();
+  _expect(
+    !source.contains('runApp(await'),
+    'Cockpit entrypoint should not await gallery bootstrap before runApp.',
+  );
+  _expect(
+    source.contains('FutureBuilder'),
+    'Cockpit entrypoint should bootstrap the gallery inside the running app.',
+  );
+}
+
+void _workflowAllowsSlowGalleryBootstrap() {
+  final workflow = File(
+    'examples/pixa_gallery/cockpit/pixa_gallery_acceptance.yaml',
+  ).readAsStringSync();
+  final match = RegExp(
+    r'stepId:\s*wait-gallery-workbench[\s\S]*?maxAttempts:\s*(\d+)[\s\S]*?delayMs:\s*(\d+)',
+  ).firstMatch(workflow);
+  _expect(match != null, 'Cockpit workflow should wait for Gallery Workbench.');
+  final attempts = int.parse(match!.group(1)!);
+  final delayMs = int.parse(match.group(2)!);
+  _expect(
+    attempts * delayMs >= 120000,
+    'Cockpit workflow should allow slow Android gallery bootstrap.',
   );
 }
 
