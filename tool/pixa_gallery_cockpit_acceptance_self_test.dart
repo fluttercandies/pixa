@@ -14,6 +14,7 @@ void main() {
   _androidCiCapturesLiveCockpitDiagnostics();
   _androidAcceptanceUsesRemoteOnlyHostCapture();
   _androidAcceptanceDelaysBaselineUntilWorkbench();
+  _androidAcceptanceStabilizesRemoteCommandsBeforeWorkflow();
   _cockpitEntrypointStartsRemoteBeforeGalleryBootstrap();
   _workflowAllowsSlowGalleryBootstrap();
   _windowsFlutterRootResolvesBat();
@@ -298,6 +299,27 @@ String _sampleValidateTaskConfig({
     scriptPath: '/tmp/pixa_gallery_cockpit/workflow.yaml',
     workflow: workflow,
   );
+}
+
+void _androidAcceptanceStabilizesRemoteCommandsBeforeWorkflow() {
+  final source = File(
+    'tool/pixa_gallery_cockpit_acceptance.dart',
+  ).readAsStringSync();
+  for (final required in <String>[
+    'androidRemoteCommandSurfaceStableSeconds',
+    '_launchWithAndroidRemoteCommandSurfaceStabilization',
+    'waitForAndroidRemoteCommandSurface',
+    'client.ping()',
+    'client.ready()',
+    'client.readStatus()',
+    'client.readSnapshot()',
+    'client.waitForUiIdle(',
+  ]) {
+    _expect(
+      source.contains(required),
+      'Android cockpit acceptance should stabilize remote commands with $required.',
+    );
+  }
 }
 
 void _windowsFlutterRootResolvesBat() {

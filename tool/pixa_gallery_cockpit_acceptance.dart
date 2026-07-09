@@ -193,11 +193,15 @@ Future<_ValidationCommandResult> _runValidationWithRemoteOnlyHostCapture({
   required String workflow,
 }) async {
   try {
+    final launchService = cockpit.CockpitLaunchRemoteSessionService();
     final runScriptService = cockpit.CockpitRunRemoteControlScriptService(
       captureStrategyResolver: _remoteOnlyAndroidCaptureStrategyResolver(),
     );
     final service = cockpit.CockpitValidateTaskService(
       runTaskService: cockpit.CockpitRunTaskService(
+        launch: _launchWithAndroidRemoteCommandSurfaceStabilization(
+          launchService,
+        ),
         runScriptService: runScriptService,
       ),
     );
@@ -249,6 +253,121 @@ Future<_ValidationCommandResult> _runValidationWithRemoteOnlyHostCapture({
 
 bool usesRemoteOnlyHostCaptureForPlatform(String platform) {
   return platform == 'android';
+}
+
+const int androidRemoteCommandSurfaceStableSeconds = 20;
+const int androidRemoteCommandSurfaceTimeoutSeconds = 180;
+const int androidRemoteCommandSurfacePollMilliseconds = 1000;
+const int _androidRemoteCommandSurfaceRequestTimeoutSeconds = 5;
+
+cockpit.CockpitLaunchTaskFunction
+_launchWithAndroidRemoteCommandSurfaceStabilization(
+  cockpit.CockpitLaunchRemoteSessionService launchService,
+) {
+  return (request) async {
+    final result = await launchService.launch(request);
+    if (request.platform == 'android') {
+      stdout.writeln(
+        '  android remote command surface: waiting for stable readiness',
+      );
+      await waitForAndroidRemoteCommandSurface(result.sessionHandle);
+      stdout.writeln('  android remote command surface: stable');
+    }
+    return result;
+  };
+}
+
+Future<void> waitForAndroidRemoteCommandSurface(
+  cockpit.CockpitRemoteSessionHandle sessionHandle, {
+  Duration stableWindow = const Duration(
+    seconds: androidRemoteCommandSurfaceStableSeconds,
+  ),
+  Duration timeout = const Duration(
+    seconds: androidRemoteCommandSurfaceTimeoutSeconds,
+  ),
+  Duration pollInterval = const Duration(
+    milliseconds: androidRemoteCommandSurfacePollMilliseconds,
+  ),
+}) async {
+  final client = cockpit.CockpitRemoteSessionClient(
+    baseUri: sessionHandle.baseUri,
+    requestTimeout: const Duration(
+      seconds: _androidRemoteCommandSurfaceRequestTimeoutSeconds,
+    ),
+  );
+  final deadline = DateTime.now().toUtc().add(timeout);
+  DateTime? stableSince;
+  var attempts = 0;
+  Object? lastError;
+
+  while (true) {
+    attempts += 1;
+    try {
+      final ready = await _androidRemoteCommandSurfaceReady(client);
+      final now = DateTime.now().toUtc();
+      if (ready) {
+        stableSince ??= now;
+        if (now.difference(stableSince) >= stableWindow) {
+          return;
+        }
+      } else {
+        stableSince = null;
+      }
+    } on Object catch (error) {
+      stableSince = null;
+      lastError = error;
+    }
+
+    final now = DateTime.now().toUtc();
+    if (!now.isBefore(deadline)) {
+      throw cockpit.CockpitApplicationServiceException(
+        code: 'androidRemoteCommandSurfaceUnstable',
+        message:
+            'Android remote command surface did not stay stable before workflow execution.',
+        details: <String, Object?>{
+          'baseUrl': sessionHandle.baseUrl,
+          'attempts': attempts,
+          'stableWindowMs': stableWindow.inMilliseconds,
+          'timeoutMs': timeout.inMilliseconds,
+          if (lastError != null) 'lastError': lastError.toString(),
+        },
+      );
+    }
+
+    final remaining = deadline.difference(now);
+    final delay = remaining < pollInterval ? remaining : pollInterval;
+    if (delay > Duration.zero) {
+      await Future<void>.delayed(delay);
+    }
+  }
+}
+
+Future<bool> _androidRemoteCommandSurfaceReady(
+  cockpit.CockpitRemoteSessionClient client,
+) async {
+  if (!await client.ping()) {
+    return false;
+  }
+  if (!await client.ready()) {
+    return false;
+  }
+  final status = await client.readStatus();
+  final statusJson = status.toJson();
+  final capabilities = statusJson['capabilities'];
+  if (capabilities is! Map<String, Object?>) {
+    return false;
+  }
+  final commands = capabilities['supportedCommands'];
+  if (commands is! List<Object?> ||
+      !commands.contains('assertText') ||
+      !commands.contains('captureScreenshot')) {
+    return false;
+  }
+  await client.readSnapshot();
+  return client.waitForUiIdle(
+    timeout: const Duration(milliseconds: 1200),
+    includeNetworkIdle: false,
+  );
 }
 
 cockpit.CockpitCaptureStrategyResolver
