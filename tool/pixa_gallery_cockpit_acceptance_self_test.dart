@@ -5,6 +5,7 @@ import 'pixa_gallery_cockpit_acceptance.dart' as acceptance;
 
 void main() {
   _mobilePlatformsUseCiSizedLaunchBudget();
+  _androidCiUsesFreshEmulatorForCockpitAcceptance();
   _windowsFlutterRootResolvesBat();
   _nonWindowsFlutterRootResolvesBinary();
   _failedValidationResultKeepsEvidence();
@@ -23,6 +24,30 @@ void _mobilePlatformsUseCiSizedLaunchBudget() {
   _expect(
     acceptance.defaultLaunchTimeoutSecondsForPlatform('macos') == 240,
     'Desktop cockpit acceptance should keep the normal launch budget.',
+  );
+}
+
+void _androidCiUsesFreshEmulatorForCockpitAcceptance() {
+  final workflow = File('.github/workflows/ci.yml').readAsStringSync();
+  const probeStep = '- name: Build and run Android platform probe';
+  const cockpitStep = '- name: Run Android gallery cockpit acceptance';
+  final probeIndex = workflow.indexOf(probeStep);
+  final cockpitIndex = workflow.indexOf(cockpitStep);
+
+  _expect(probeIndex >= 0, 'Android platform probe step should exist.');
+  _expect(
+    cockpitIndex > probeIndex,
+    'Android cockpit acceptance should run after the platform probe.',
+  );
+
+  final nextStepIndex = workflow.indexOf('\n      - name:', probeIndex + 1);
+  final probeBlock = workflow.substring(
+    probeIndex,
+    nextStepIndex == -1 ? workflow.length : nextStepIndex,
+  );
+  _expect(
+    !probeBlock.contains('pixa_gallery_cockpit_acceptance.dart'),
+    'Android platform probe should not reuse its emulator for cockpit acceptance.',
   );
 }
 

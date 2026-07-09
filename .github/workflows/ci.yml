@@ -218,6 +218,19 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           script: |
             dart run tool/pixa_platform_build.dart --platform=android --enable-native-roi --run-self-check --device=emulator-5554 --device-kind=emulator --connection=local --signing=debug --report-output=build/reports/pixa_platform_probe_self_check_android.json
+      - name: Run Android gallery cockpit acceptance
+        if: matrix.platform == 'android'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_atd
+          profile: pixel_2
+          ram-size: 2048M
+          heap-size: 512M
+          emulator-boot-timeout: 900
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: |
             dart run tool/pixa_gallery_cockpit_acceptance.dart --platform=android --device-id=emulator-5554 --output-root=build/reports/pixa_gallery_cockpit_android
       - name: Boot iOS simulator
         if: matrix.platform == 'ios'
