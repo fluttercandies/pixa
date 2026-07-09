@@ -195,7 +195,9 @@ void _androidAcceptanceUsesRemoteOnlyHostCapture() {
   for (final required in <String>[
     'usesRemoteOnlyHostCaptureForPlatform',
     'CockpitCaptureStrategyResolver',
-    '_RemoteOnlyHostCaptureAdapter',
+    '_remoteOnlyAndroidCaptureStrategyResolver',
+    'CockpitRemoteCaptureAdapter',
+    'adbAdapterFactory',
   ]) {
     _expect(
       source.contains(required),

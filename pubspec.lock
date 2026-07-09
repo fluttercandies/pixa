@@ -167,7 +167,7 @@ packages:
     source: sdk
     version: "0.0.0"
   flutter_cockpit_protocol:
-    dependency: "direct dev"
+    dependency: transitive
     description:
       name: flutter_cockpit_protocol
       sha256: "714126efa0a26ac085b26203ffcdc9438f40194a1867890c10863374d04234a8"

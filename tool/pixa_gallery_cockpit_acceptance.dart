@@ -2,8 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cockpit/cockpit.dart' as cockpit;
-import 'package:flutter_cockpit_protocol/flutter_cockpit_protocol.dart'
-    as protocol;
 
 Future<void> main(List<String> args) async {
   final options = _Options.parse(args);
@@ -196,9 +194,7 @@ Future<_ValidationCommandResult> _runValidationWithRemoteOnlyHostCapture({
 }) async {
   try {
     final runScriptService = cockpit.CockpitRunRemoteControlScriptService(
-      captureStrategyResolver: cockpit.CockpitCaptureStrategyResolver(
-        adbAdapterFactory: (_) => const _RemoteOnlyHostCaptureAdapter(),
-      ),
+      captureStrategyResolver: _remoteOnlyAndroidCaptureStrategyResolver(),
     );
     final service = cockpit.CockpitValidateTaskService(
       runTaskService: cockpit.CockpitRunTaskService(
@@ -255,6 +251,25 @@ bool usesRemoteOnlyHostCaptureForPlatform(String platform) {
   return platform == 'android';
 }
 
+cockpit.CockpitCaptureStrategyResolver
+_remoteOnlyAndroidCaptureStrategyResolver() {
+  cockpit.CockpitCaptureAdapter? remoteAdapter;
+  return cockpit.CockpitCaptureStrategyResolver(
+    remoteAdapterFactory: (client) {
+      final adapter = cockpit.CockpitRemoteCaptureAdapter(client: client);
+      remoteAdapter = adapter;
+      return adapter;
+    },
+    adbAdapterFactory: (_) {
+      final adapter = remoteAdapter;
+      if (adapter == null) {
+        throw StateError('Remote capture adapter was not initialized.');
+      }
+      return adapter;
+    },
+  );
+}
+
 String flutterExecutableForPlatform({
   Map<String, String>? environment,
   bool? isWindows,
@@ -284,20 +299,6 @@ File writeValidationResult({
   );
   resultFile.writeAsStringSync(stdoutText);
   return resultFile;
-}
-
-final class _RemoteOnlyHostCaptureAdapter
-    implements cockpit.CockpitCaptureAdapter {
-  const _RemoteOnlyHostCaptureAdapter();
-
-  @override
-  Future<protocol.CockpitCommandExecution> capture(
-    protocol.CockpitCommand command,
-  ) {
-    throw StateError(
-      'Android host screencap is disabled for CI; use remote Flutter capture.',
-    );
-  }
 }
 
 final class _ValidationCommandResult {
