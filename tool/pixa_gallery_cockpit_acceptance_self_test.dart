@@ -6,6 +6,7 @@ import 'pixa_gallery_cockpit_acceptance.dart' as acceptance;
 void main() {
   _mobilePlatformsUseCiSizedLaunchBudget();
   _androidCiUsesFreshEmulatorForCockpitAcceptance();
+  _androidCiUsesCiSizedEmulatorBootBudget();
   _windowsFlutterRootResolvesBat();
   _nonWindowsFlutterRootResolvesBinary();
   _failedValidationResultKeepsEvidence();
@@ -14,11 +15,11 @@ void main() {
 
 void _mobilePlatformsUseCiSizedLaunchBudget() {
   _expect(
-    acceptance.defaultLaunchTimeoutSecondsForPlatform('android') == 720,
+    acceptance.defaultLaunchTimeoutSecondsForPlatform('android') == 2160,
     'Android cockpit acceptance should allow CI cold build and install.',
   );
   _expect(
-    acceptance.defaultLaunchTimeoutSecondsForPlatform('ios') == 720,
+    acceptance.defaultLaunchTimeoutSecondsForPlatform('ios') == 2160,
     'iOS cockpit acceptance should allow CI cold simulator build.',
   );
   _expect(
@@ -48,6 +49,22 @@ void _androidCiUsesFreshEmulatorForCockpitAcceptance() {
   _expect(
     !probeBlock.contains('pixa_gallery_cockpit_acceptance.dart'),
     'Android platform probe should not reuse its emulator for cockpit acceptance.',
+  );
+}
+
+void _androidCiUsesCiSizedEmulatorBootBudget() {
+  final workflow = File('.github/workflows/ci.yml').readAsStringSync();
+  final matches = RegExp(
+    r'emulator-boot-timeout:\s*(\d+)',
+  ).allMatches(workflow);
+  final timeouts = <int>[for (final m in matches) int.parse(m.group(1)!)];
+  _expect(
+    timeouts.length == 2,
+    'Android CI should declare boot timeouts for both emulator runs.',
+  );
+  _expect(
+    timeouts.every((timeout) => timeout == 2700),
+    'Android emulator boot timeouts should allow slow CI boot.',
   );
 }
 

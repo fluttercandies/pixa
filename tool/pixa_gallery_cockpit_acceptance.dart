@@ -186,7 +186,7 @@ File writeValidationResult({
 
 int defaultLaunchTimeoutSecondsForPlatform(String platform) {
   return switch (platform) {
-    'android' || 'ios' => 720,
+    'android' || 'ios' => 2160,
     _ => 240,
   };
 }
@@ -459,6 +459,6 @@ Options:
   --workflow=<path>                    Defaults to the committed acceptance YAML.
   --output-root=<path>                 Defaults to build/reports/pixa_gallery_cockpit_<platform>.
   --session-port=<port>                Defaults to 47331.
-  --launch-timeout-seconds=<seconds>   Defaults to 720 on Android/iOS, 240 elsewhere.
+  --launch-timeout-seconds=<seconds>   Defaults to 2160 on Android/iOS, 240 elsewhere.
   --skip-pub-get                       Do not run flutter pub get first.
 ''';
