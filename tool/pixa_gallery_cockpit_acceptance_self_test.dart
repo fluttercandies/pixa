@@ -71,6 +71,7 @@ void _androidCiUsesCiSizedEmulatorBootBudget() {
 
 void _androidCiCapturesCockpitDiagnosticsOnFailure() {
   final workflow = File('.github/workflows/ci.yml').readAsStringSync();
+  final script = File('tool/pixa_android_cockpit_ci.sh').readAsStringSync();
   const cockpitStep = '- name: Run Android gallery cockpit acceptance';
   final cockpitIndex = workflow.indexOf(cockpitStep);
   _expect(cockpitIndex >= 0, 'Android cockpit acceptance step should exist.');
@@ -78,6 +79,10 @@ void _androidCiCapturesCockpitDiagnosticsOnFailure() {
   final cockpitBlock = workflow.substring(
     cockpitIndex,
     nextStepIndex == -1 ? workflow.length : nextStepIndex,
+  );
+  _expect(
+    cockpitBlock.contains('bash tool/pixa_android_cockpit_ci.sh'),
+    'Android cockpit acceptance should run through a single shell script.',
   );
   for (final required in <String>[
     'android-diagnostics',
@@ -89,10 +94,14 @@ void _androidCiCapturesCockpitDiagnosticsOnFailure() {
     'logcat -d -v time -t 2000',
   ]) {
     _expect(
-      cockpitBlock.contains(required),
+      script.contains(required),
       'Android cockpit failure diagnostics should collect $required.',
     );
   }
+  _expect(
+    script.contains(r'exit "$status"'),
+    'Android cockpit CI script should preserve the acceptance exit code.',
+  );
 }
 
 void _windowsFlutterRootResolvesBat() {
