@@ -1,6 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cockpit/cockpit.dart' as cockpit;
+import 'package:flutter_cockpit_protocol/flutter_cockpit_protocol.dart'
+    as protocol;
+
 Future<void> main(List<String> args) async {
   final options = _Options.parse(args);
   if (options.help) {
@@ -69,17 +73,24 @@ Future<void> main(List<String> args) async {
   stdout.writeln('  deviceId: $deviceId');
   stdout.writeln('  config: ${configFile.path}');
 
-  final result = await _runCaptured(Platform.resolvedExecutable, <String>[
-    'run',
-    'cockpit',
-    'validate-task',
-    '--config',
-    configFile.path,
-    '--stdout-format',
-    'json',
-  ], workingDirectory: projectDir.path);
-  final stdoutText = result.stdout as String;
-  final stderrText = result.stderr as String;
+  final result = usesRemoteOnlyHostCaptureForPlatform(platform)
+      ? await _runValidationWithRemoteOnlyHostCapture(
+          projectDir: projectDir.path,
+          platform: platform,
+          deviceId: deviceId,
+          sessionPort: options.sessionPort,
+          launchTimeoutSeconds: launchTimeoutSeconds,
+          outputRoot: outputRoot.path,
+          scriptPath:
+              '${outputRoot.path}${Platform.pathSeparator}pixa_gallery_acceptance.yaml',
+          workflow: workflow,
+        )
+      : await _runCockpitValidateTaskCli(
+          configFile: configFile,
+          workingDirectory: projectDir.path,
+        );
+  final stdoutText = result.stdout;
+  final stderrText = result.stderr;
   stderr.write(stderrText);
 
   File? resultFile;
@@ -153,6 +164,97 @@ Future<ProcessResult> _runCaptured(
   return Process.run(executable, arguments, workingDirectory: workingDirectory);
 }
 
+Future<_ValidationCommandResult> _runCockpitValidateTaskCli({
+  required File configFile,
+  required String workingDirectory,
+}) async {
+  final result = await _runCaptured(Platform.resolvedExecutable, <String>[
+    'run',
+    'cockpit',
+    'validate-task',
+    '--config',
+    configFile.path,
+    '--stdout-format',
+    'json',
+  ], workingDirectory: workingDirectory);
+  return _ValidationCommandResult(
+    exitCode: result.exitCode,
+    stdout: result.stdout as String,
+    stderr: result.stderr as String,
+  );
+}
+
+Future<_ValidationCommandResult> _runValidationWithRemoteOnlyHostCapture({
+  required String projectDir,
+  required String platform,
+  required String deviceId,
+  required int sessionPort,
+  required int launchTimeoutSeconds,
+  required String outputRoot,
+  required String scriptPath,
+  required String workflow,
+}) async {
+  try {
+    final runScriptService = cockpit.CockpitRunRemoteControlScriptService(
+      captureStrategyResolver: cockpit.CockpitCaptureStrategyResolver(
+        adbAdapterFactory: (_) => const _RemoteOnlyHostCaptureAdapter(),
+      ),
+    );
+    final service = cockpit.CockpitValidateTaskService(
+      runTaskService: cockpit.CockpitRunTaskService(
+        runScriptService: runScriptService,
+      ),
+    );
+    final result = await service.validate(
+      cockpit.CockpitValidateTaskRequest(
+        runTask: cockpit.CockpitRunTaskRequest(
+          launch: cockpit.CockpitRunTaskLaunchRequest(
+            projectDir: projectDir,
+            target: 'cockpit/main.dart',
+            platform: platform,
+            deviceId: deviceId,
+            sessionPort: sessionPort,
+            launchTimeout: Duration(seconds: launchTimeoutSeconds),
+          ),
+          outputRoot: outputRoot,
+          persistScriptPath: scriptPath,
+          liveRunDisplayName: 'Pixa gallery cockpit acceptance',
+          baseline: const cockpit.CockpitRunTaskBaselineRequest(
+            captureScreenshot: true,
+            screenshotName: 'pixa-gallery-baseline',
+            includeSnapshot: true,
+          ),
+          requirements: const cockpit.CockpitRunTaskEvidenceRequirements(
+            requireScreenshotEvidence: true,
+          ),
+          script: cockpit.cockpitControlScriptFromText(workflow),
+        ),
+        validation: const cockpit.CockpitValidateTaskRequirements(
+          expectedClassification:
+              cockpit.CockpitRunTaskClassification.completed,
+          requirePrimaryScreenshot: true,
+          requireArtifactFiles: true,
+        ),
+      ),
+    );
+    return _ValidationCommandResult(
+      exitCode: 0,
+      stdout: const JsonEncoder.withIndent('  ').convert(result.toJson()),
+      stderr: '',
+    );
+  } on Object catch (error, stackTrace) {
+    return _ValidationCommandResult(
+      exitCode: 1,
+      stdout: '',
+      stderr: '$error\n$stackTrace\n',
+    );
+  }
+}
+
+bool usesRemoteOnlyHostCaptureForPlatform(String platform) {
+  return platform == 'android';
+}
+
 String flutterExecutableForPlatform({
   Map<String, String>? environment,
   bool? isWindows,
@@ -182,6 +284,32 @@ File writeValidationResult({
   );
   resultFile.writeAsStringSync(stdoutText);
   return resultFile;
+}
+
+final class _RemoteOnlyHostCaptureAdapter
+    implements cockpit.CockpitCaptureAdapter {
+  const _RemoteOnlyHostCaptureAdapter();
+
+  @override
+  Future<protocol.CockpitCommandExecution> capture(
+    protocol.CockpitCommand command,
+  ) {
+    throw StateError(
+      'Android host screencap is disabled for CI; use remote Flutter capture.',
+    );
+  }
+}
+
+final class _ValidationCommandResult {
+  const _ValidationCommandResult({
+    required this.exitCode,
+    required this.stdout,
+    required this.stderr,
+  });
+
+  final int exitCode;
+  final String stdout;
+  final String stderr;
 }
 
 int defaultLaunchTimeoutSecondsForPlatform(String platform) {

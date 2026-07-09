@@ -10,6 +10,7 @@ void main() {
   _androidCiUsesCiSizedEmulatorBootBudget();
   _androidCiCapturesCockpitDiagnosticsOnFailure();
   _androidCiCapturesLiveCockpitDiagnostics();
+  _androidAcceptanceUsesRemoteOnlyHostCapture();
   _cockpitEntrypointStartsRemoteBeforeGalleryBootstrap();
   _workflowAllowsSlowGalleryBootstrap();
   _windowsFlutterRootResolvesBat();
@@ -172,6 +173,33 @@ void _androidCiCapturesLiveCockpitDiagnostics() {
     _expect(
       script.contains(required),
       'Android cockpit live diagnostics should include $required.',
+    );
+  }
+}
+
+void _androidAcceptanceUsesRemoteOnlyHostCapture() {
+  _expect(
+    acceptance.usesRemoteOnlyHostCaptureForPlatform('android'),
+    'Android cockpit acceptance should use remote-only host capture.',
+  );
+  for (final platform in <String>['ios', 'linux', 'macos', 'windows']) {
+    _expect(
+      !acceptance.usesRemoteOnlyHostCaptureForPlatform(platform),
+      '$platform cockpit acceptance should keep the default capture strategy.',
+    );
+  }
+
+  final source = File(
+    'tool/pixa_gallery_cockpit_acceptance.dart',
+  ).readAsStringSync();
+  for (final required in <String>[
+    'usesRemoteOnlyHostCaptureForPlatform',
+    'CockpitCaptureStrategyResolver',
+    '_RemoteOnlyHostCaptureAdapter',
+  ]) {
+    _expect(
+      source.contains(required),
+      'Android cockpit acceptance should force remote Flutter screenshot capture.',
     );
   }
 }
