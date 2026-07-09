@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pixa/pixa.dart';
 import 'package:pixa/pixa_plugins.dart';
@@ -520,6 +520,8 @@ void main() {
         source: PixaSource.custom('plugin', () async {
           throw StateError('fallback loader must not run');
         }),
+        pluginExecutionPolicy:
+            const PixaPluginExecutionPolicy.runtimeFirstWithDart(),
         cachePolicy: const PixaCachePolicy.noStore(),
       );
 
@@ -558,9 +560,409 @@ void main() {
       expect(requestComplete, greaterThan(pluginComplete));
       expect(events[pluginComplete].attributes['fetcherId'], 'plugin-fetcher');
       expect(events[pluginComplete].attributes['sourceKind'], 'plugin');
+      expect(events[pluginComplete].attributes['executionKind'], 'dart');
       expect(events[pluginComplete].attributes['bytes'], _minimalGif().length);
     },
   );
+
+  test('registered Dart fetcher fails without explicit opt-in', () async {
+    final _CountingFetcher fetcher = _CountingFetcher();
+    final PixaRegistry registry = PixaRegistry()
+      ..registerFetcher(
+        _DartFetcherDescriptor(
+          id: 'plugin-fetcher',
+          sourceKinds: const <String>{'plugin'},
+          fetcher: fetcher,
+        ),
+      );
+    final PixaPipeline pipeline = PixaPipeline(
+      cacheRootPath: '',
+      maxConcurrentRuntimeLoads: 1,
+      registry: registry,
+    );
+    final PixaRequest request = PixaRequest(
+      source: PixaSource.custom('plugin', () async {
+        throw StateError('fallback loader must not run');
+      }),
+      cachePolicy: const PixaCachePolicy.noStore(),
+    );
+
+    await expectLater(
+      pipeline.load(request),
+      throwsA(
+        isA<PixaFailure>()
+            .having(
+              (PixaFailure failure) => failure.stage,
+              'stage',
+              PixaStage.fetch,
+            )
+            .having(
+              (PixaFailure failure) => failure.safeMessage,
+              'safeMessage',
+              contains('plugin execution policy'),
+            ),
+      ),
+    );
+    expect(fetcher.calls, 0);
+  });
+
+  test(
+    'registered platform fetcher requires opt-in and emits lane diagnostics',
+    () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final _CountingFetcher fetcher = _CountingFetcher();
+      final List<PixaEvent> events = <PixaEvent>[];
+      final List<PixaProgress> progressEvents = <PixaProgress>[];
+      final PixaRegistry registry = PixaRegistry()
+        ..registerFetcher(
+          _PlatformFetcherDescriptor(
+            id: 'platform-fetcher',
+            sourceKinds: const <String>{'platform-source'},
+            fetcher: fetcher,
+            supportedPlatforms: const <PixaHostPlatform>{
+              PixaHostPlatform.android,
+            },
+            maxOutputBytes: 1024,
+          ),
+        );
+      final PixaPipeline pipeline = PixaPipeline(
+        cacheRootPath: '',
+        maxConcurrentRuntimeLoads: 1,
+        registry: registry,
+        observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+      );
+      final PixaRequest request = PixaRequest(
+        source: PixaSource.custom('platform-source', () async {
+          throw StateError('fallback loader must not run');
+        }),
+        pluginExecutionPolicy:
+            const PixaPluginExecutionPolicy.runtimeFirstWithPlatform(),
+        cachePolicy: const PixaCachePolicy.noStore(),
+      );
+
+      final PixaPipelineHandle handle = pipeline.startLoad(
+        request,
+        onProgress: progressEvents.add,
+      );
+      final PixaPipelineLoad load = await handle.future;
+      load.dispose();
+
+      expect(fetcher.calls, 1);
+      expect(progressEvents, isNotEmpty);
+      final PixaEvent start = events.singleWhere(
+        (PixaEvent event) => event.name == 'plugin.fetch.start',
+      );
+      final PixaEvent complete = events.singleWhere(
+        (PixaEvent event) => event.name == 'plugin.fetch.complete',
+      );
+      expect(start.attributes['executionKind'], 'platform');
+      expect(start.attributes['platformChannel'], 'dev.pixa/platform-source');
+      expect(complete.attributes['executionKind'], 'platform');
+      expect(complete.attributes['bytes'], _minimalGif().length);
+    },
+  );
+
+  test(
+    'platform fetcher cache hit does not cross the platform boundary',
+    () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-platform-hit-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      final _CountingFetcher fetcher = _CountingFetcher();
+      final List<PixaEvent> events = <PixaEvent>[];
+      final PixaRegistry registry = PixaRegistry()
+        ..registerFetcher(
+          _PlatformFetcherDescriptor(
+            id: 'platform-fetcher',
+            sourceKinds: const <String>{'platform-hit'},
+            fetcher: fetcher,
+            supportedPlatforms: const <PixaHostPlatform>{
+              PixaHostPlatform.android,
+            },
+          ),
+        );
+      final PixaPipeline pipeline = PixaPipeline(
+        cacheRootPath: cacheRoot.path,
+        maxConcurrentRuntimeLoads: 1,
+        registry: registry,
+        observers: <PixaObserver>[PixaCallbackObserver(events.add)],
+      );
+      final PixaRequest request = PixaRequest(
+        source: PixaSource.custom('platform-hit', () async {
+          throw StateError('fallback loader must not run');
+        }),
+        pluginExecutionPolicy:
+            const PixaPluginExecutionPolicy.runtimeFirstWithPlatform(),
+      );
+      final bool seeded = PixaRuntimeDiskCache(rootPath: cacheRoot.path).write(
+        namespace: request.cacheNamespace,
+        key: request.encodedCacheKey,
+        bytes: _minimalGif(),
+      );
+      expect(seeded, isTrue);
+
+      final PixaPipelineLoad load = await pipeline.load(request);
+      load.dispose();
+
+      expect(fetcher.calls, 0);
+      expect(
+        events.any(
+          (PixaEvent event) => event.name == 'inline.bytes.skippedForCacheHit',
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test('platform fetcher enforces bounded output bytes', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final _CountingFetcher fetcher = _CountingFetcher();
+    final PixaRegistry registry = PixaRegistry()
+      ..registerFetcher(
+        _PlatformFetcherDescriptor(
+          id: 'platform-fetcher',
+          sourceKinds: const <String>{'platform-large'},
+          fetcher: fetcher,
+          supportedPlatforms: const <PixaHostPlatform>{
+            PixaHostPlatform.android,
+          },
+          maxOutputBytes: 4,
+        ),
+      );
+    final PixaPipeline pipeline = PixaPipeline(
+      cacheRootPath: '',
+      maxConcurrentRuntimeLoads: 1,
+      registry: registry,
+    );
+    final PixaRequest request = PixaRequest(
+      source: PixaSource.custom('platform-large', () async => _minimalGif()),
+      pluginExecutionPolicy:
+          const PixaPluginExecutionPolicy.runtimeFirstWithPlatform(),
+      cachePolicy: const PixaCachePolicy.noStore(),
+    );
+
+    await expectLater(
+      pipeline.load(request),
+      throwsA(
+        isA<PixaFailure>()
+            .having(
+              (PixaFailure failure) => failure.stage,
+              'stage',
+              PixaStage.fetch,
+            )
+            .having(
+              (PixaFailure failure) => failure.safeMessage,
+              'safeMessage',
+              contains('platform output exceeded byte limit'),
+            ),
+      ),
+    );
+    expect(fetcher.calls, 1);
+  });
+
+  test('platform fetcher fails fast on unsupported host platform', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final _CountingFetcher fetcher = _CountingFetcher();
+    final PixaRegistry registry = PixaRegistry()
+      ..registerFetcher(
+        _PlatformFetcherDescriptor(
+          id: 'platform-fetcher',
+          sourceKinds: const <String>{'platform-ios-only'},
+          fetcher: fetcher,
+          supportedPlatforms: const <PixaHostPlatform>{PixaHostPlatform.ios},
+        ),
+      );
+    final PixaPipeline pipeline = PixaPipeline(
+      cacheRootPath: '',
+      maxConcurrentRuntimeLoads: 1,
+      registry: registry,
+    );
+    final PixaRequest request = PixaRequest(
+      source: PixaSource.custom('platform-ios-only', () async => _minimalGif()),
+      pluginExecutionPolicy:
+          const PixaPluginExecutionPolicy.runtimeFirstWithPlatform(),
+      cachePolicy: const PixaCachePolicy.noStore(),
+    );
+
+    await expectLater(
+      pipeline.load(request),
+      throwsA(
+        isA<PixaFailure>()
+            .having(
+              (PixaFailure failure) => failure.stage,
+              'stage',
+              PixaStage.fetch,
+            )
+            .having(
+              (PixaFailure failure) => failure.safeMessage,
+              'safeMessage',
+              contains('unsupported host platform'),
+            ),
+      ),
+    );
+    expect(fetcher.calls, 0);
+  });
+
+  test('platform fetcher receives cancellation signal', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final _BlockingFetcher fetcher = _BlockingFetcher();
+    final PixaRegistry registry = PixaRegistry()
+      ..registerFetcher(
+        _PlatformFetcherDescriptor(
+          id: 'platform-fetcher',
+          sourceKinds: const <String>{'platform-blocking'},
+          fetcher: fetcher,
+          supportedPlatforms: const <PixaHostPlatform>{
+            PixaHostPlatform.android,
+          },
+        ),
+      );
+    final PixaPipeline pipeline = PixaPipeline(
+      cacheRootPath: '',
+      maxConcurrentRuntimeLoads: 1,
+      registry: registry,
+    );
+    final PixaPipelineHandle handle = pipeline.startLoad(
+      PixaRequest(
+        source: PixaSource.custom(
+          'platform-blocking',
+          () async => _minimalGif(),
+        ),
+        pluginExecutionPolicy:
+            const PixaPluginExecutionPolicy.runtimeFirstWithPlatform(),
+        cachePolicy: const PixaCachePolicy.noStore(),
+      ),
+    );
+
+    await fetcher.started.future;
+    handle.cancel();
+    await expectLater(
+      handle.future,
+      throwsA(
+        isA<PixaFailure>().having(
+          (PixaFailure failure) => failure.stage,
+          'stage',
+          PixaStage.cancel,
+        ),
+      ),
+    );
+    await fetcher.cancelled.future.timeout(const Duration(seconds: 5));
+    fetcher.complete();
+  });
+
+  test('platform fetcher respects request timeout', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final _BlockingFetcher fetcher = _BlockingFetcher();
+    final PixaRegistry registry = PixaRegistry()
+      ..registerFetcher(
+        _PlatformFetcherDescriptor(
+          id: 'platform-fetcher',
+          sourceKinds: const <String>{'platform-timeout'},
+          fetcher: fetcher,
+          supportedPlatforms: const <PixaHostPlatform>{
+            PixaHostPlatform.android,
+          },
+        ),
+      );
+    final PixaPipeline pipeline = PixaPipeline(
+      cacheRootPath: '',
+      maxConcurrentRuntimeLoads: 1,
+      registry: registry,
+    );
+    final Future<PixaPipelineLoad> load = pipeline.load(
+      PixaRequest(
+        source: PixaSource.custom(
+          'platform-timeout',
+          () async => _minimalGif(),
+        ),
+        pluginExecutionPolicy:
+            const PixaPluginExecutionPolicy.runtimeFirstWithPlatform(),
+        cachePolicy: const PixaCachePolicy.noStore(),
+        limits: const PixaRequestLimits(timeout: Duration(milliseconds: 10)),
+      ),
+    );
+
+    await fetcher.started.future;
+    await expectLater(
+      load,
+      throwsA(
+        isA<PixaFailure>()
+            .having(
+              (PixaFailure failure) => failure.stage,
+              'stage',
+              PixaStage.fetch,
+            )
+            .having(
+              (PixaFailure failure) => failure.safeMessage,
+              'safeMessage',
+              contains('timed out'),
+            ),
+      ),
+    );
+    await fetcher.cancelled.future.timeout(const Duration(seconds: 5));
+    fetcher.complete();
+  });
+
+  test('platform fetcher respects platform concurrency lane budget', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final _SequencedBlockingFetcher fetcher = _SequencedBlockingFetcher();
+    final PixaRegistry registry = PixaRegistry()
+      ..registerFetcher(
+        _PlatformFetcherDescriptor(
+          id: 'platform-fetcher',
+          sourceKinds: const <String>{'platform-one', 'platform-two'},
+          fetcher: fetcher,
+          supportedPlatforms: const <PixaHostPlatform>{
+            PixaHostPlatform.android,
+          },
+          maxConcurrentCalls: 1,
+        ),
+      );
+    final PixaPipeline pipeline = PixaPipeline(
+      cacheRootPath: '',
+      maxConcurrentRuntimeLoads: 2,
+      registry: registry,
+    );
+
+    final PixaPipelineHandle first = pipeline.startLoad(
+      PixaRequest(
+        source: PixaSource.custom('platform-one', () async => _minimalGif()),
+        pluginExecutionPolicy:
+            const PixaPluginExecutionPolicy.runtimeFirstWithPlatform(),
+        cachePolicy: const PixaCachePolicy.noStore(),
+      ),
+    );
+    final PixaPipelineHandle second = pipeline.startLoad(
+      PixaRequest(
+        source: PixaSource.custom('platform-two', () async => _minimalGif()),
+        pluginExecutionPolicy:
+            const PixaPluginExecutionPolicy.runtimeFirstWithPlatform(),
+        cachePolicy: const PixaCachePolicy.noStore(),
+      ),
+    );
+
+    await fetcher.firstStarted.future.timeout(const Duration(seconds: 5));
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(fetcher.secondStarted.isCompleted, isFalse);
+    fetcher.release(0);
+    await fetcher.secondStarted.future.timeout(const Duration(seconds: 5));
+    expect(fetcher.maxActive, 1);
+    fetcher.release(1);
+
+    final PixaPipelineLoad firstLoad = await first.future;
+    final PixaPipelineLoad secondLoad = await second.future;
+    firstLoad.dispose();
+    secondLoad.dispose();
+  });
 
   test(
     'registered Dart processor runs and reuses processed memory cache',
@@ -1002,6 +1404,46 @@ final class _DartFetcherDescriptor implements PixaDartFetcherDescriptor {
   final PixaFetcher fetcher;
 }
 
+final class _PlatformFetcherDescriptor
+    implements PixaPlatformFetcherDescriptor {
+  const _PlatformFetcherDescriptor({
+    required this.id,
+    required this.sourceKinds,
+    required this.fetcher,
+    required this.supportedPlatforms,
+    this.maxConcurrentCalls = 1,
+    this.maxOutputBytes,
+  });
+
+  @override
+  final String id;
+
+  @override
+  PixaPluginExecutionKind get executionKind => PixaPluginExecutionKind.platform;
+
+  @override
+  final Set<String> sourceKinds;
+
+  @override
+  final PixaFetcher fetcher;
+
+  final Set<PixaHostPlatform> supportedPlatforms;
+
+  final int maxConcurrentCalls;
+
+  final int? maxOutputBytes;
+
+  @override
+  PixaPlatformContract get platform => PixaPlatformContract(
+    channel: 'dev.pixa/${sourceKinds.length == 1 ? sourceKinds.single : id}',
+    supportedPlatforms: supportedPlatforms,
+    maxConcurrentCalls: maxConcurrentCalls,
+    supportsCancellation: true,
+    hotPathSafe: false,
+    maxOutputBytes: maxOutputBytes,
+  );
+}
+
 final class _DartProcessorDescriptor implements PixaDartProcessorDescriptor {
   const _DartProcessorDescriptor({
     required this.id,
@@ -1071,6 +1513,92 @@ final class _PluginFetcher implements PixaFetcher {
       ),
     );
     return PixaBytePayload(bytes: bytes, mimeType: 'image/gif');
+  }
+}
+
+final class _CountingFetcher implements PixaFetcher {
+  int calls = 0;
+
+  @override
+  PixaBytePayload fetch(PixaSource source, PixaExecutionContext context) {
+    calls++;
+    context.cancellationSignal.throwIfCancellationRequested();
+    final Uint8List bytes = _minimalGif();
+    context.emit(
+      PixaProgress(
+        requestId: context.requestId,
+        stage: PixaStage.fetch,
+        receivedBytes: bytes.length,
+        expectedBytes: bytes.length,
+      ),
+    );
+    return PixaBytePayload(bytes: bytes, mimeType: 'image/gif');
+  }
+}
+
+final class _BlockingFetcher implements PixaFetcher {
+  final Completer<void> started = Completer<void>();
+  final Completer<void> cancelled = Completer<void>();
+  final Completer<void> released = Completer<void>();
+
+  @override
+  Future<PixaBytePayload> fetch(
+    PixaSource source,
+    PixaExecutionContext context,
+  ) async {
+    started.complete();
+    context.cancellationSignal.whenCancelled.then((_) {
+      if (!cancelled.isCompleted) {
+        cancelled.complete();
+      }
+    });
+    await released.future;
+    context.cancellationSignal.throwIfCancellationRequested();
+    return PixaBytePayload(bytes: _minimalGif(), mimeType: 'image/gif');
+  }
+
+  void complete() {
+    if (!released.isCompleted) {
+      released.complete();
+    }
+  }
+}
+
+final class _SequencedBlockingFetcher implements PixaFetcher {
+  final Completer<void> firstStarted = Completer<void>();
+  final Completer<void> secondStarted = Completer<void>();
+  final List<Completer<void>> _releases = <Completer<void>>[
+    Completer<void>(),
+    Completer<void>(),
+  ];
+  int calls = 0;
+  int active = 0;
+  int maxActive = 0;
+
+  @override
+  Future<PixaBytePayload> fetch(
+    PixaSource source,
+    PixaExecutionContext context,
+  ) async {
+    final int index = calls++;
+    active++;
+    if (active > maxActive) {
+      maxActive = active;
+    }
+    if (index == 0) {
+      firstStarted.complete();
+    } else if (index == 1) {
+      secondStarted.complete();
+    }
+    await _releases[index].future;
+    active--;
+    return PixaBytePayload(bytes: _minimalGif(), mimeType: 'image/gif');
+  }
+
+  void release(int index) {
+    if (!_releases[index].isCompleted) {
+      _releases[index].complete();
+    }
   }
 }
 

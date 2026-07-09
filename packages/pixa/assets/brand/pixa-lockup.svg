@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 220" role="img" aria-labelledby="title desc">
+  <title id="title">Pixa logo</title>
+  <desc id="desc">The Pixa library logo with a pixel-shaped P mark and wordmark.</desc>
+  <defs>
+    <linearGradient id="bg" x1="24" y1="24" x2="736" y2="196" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#EEF7F5"/>
+    </linearGradient>
+    <linearGradient id="markBg" x1="57" y1="43" x2="173" y2="177" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#132338"/>
+      <stop offset="0.55" stop-color="#0F766E"/>
+      <stop offset="1" stop-color="#0B1220"/>
+    </linearGradient>
+    <linearGradient id="stem" x1="67" y1="57" x2="107" y2="157" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#DFFCF4"/>
+      <stop offset="1" stop-color="#62E0CF"/>
+    </linearGradient>
+    <linearGradient id="bowl" x1="88" y1="57" x2="162" y2="123" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38BDF8"/>
+      <stop offset="0.48" stop-color="#24D3B5"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="104" y1="134" x2="160" y2="167" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FDE68A"/>
+      <stop offset="1" stop-color="#F97316"/>
+    </linearGradient>
+  </defs>
+  <rect x="14" y="18" width="732" height="184" rx="44" fill="url(#bg)" stroke="#D7E7E4" stroke-width="2"/>
+  <rect x="46" y="38" width="144" height="144" rx="34" fill="url(#markBg)"/>
+  <path d="M77.5 87c0-14.5 11.8-26.2 26.2-26.2h34.4c19.7 0 35.6 15.9 35.6 35.6S157.8 132 138.1 132h-34.4v31.2H77.5V87Z" fill="#07111F" opacity="0.34"/>
+  <rect x="75" y="62" width="26" height="100" rx="9" fill="url(#stem)"/>
+  <rect x="96" y="62" width="51" height="26" rx="9" fill="url(#bowl)"/>
+  <rect x="96" y="106" width="51" height="26" rx="9" fill="url(#bowl)"/>
+  <rect x="138" y="77" width="26" height="40" rx="9" fill="url(#bowl)"/>
+  <circle cx="128" cy="97" r="19" fill="#07111F" opacity="0.28"/>
+  <circle cx="128" cy="97" r="13" fill="#F8FAFC"/>
+  <path d="M128 84a13 13 0 0 1 11.3 6.5L128 97V84Z" fill="#38BDF8"/>
+  <path d="M139.3 90.5a13 13 0 0 1 0 13L128 97l11.3-6.5Z" fill="#22C55E"/>
+  <path d="M139.3 103.5A13 13 0 0 1 128 110V97l11.3 6.5Z" fill="#F59E0B"/>
+  <path d="M128 110a13 13 0 0 1-11.3-6.5L128 97v13Z" fill="#F97316"/>
+  <path d="M116.7 103.5a13 13 0 0 1 0-13L128 97l-11.3 6.5Z" fill="#0EA5A5"/>
+  <path d="M116.7 90.5A13 13 0 0 1 128 84v13l-11.3-6.5Z" fill="#A7F3D0"/>
+  <circle cx="128" cy="97" r="4.4" fill="#0B1220"/>
+  <rect x="110" y="138" width="18" height="18" rx="6" fill="#38BDF8"/>
+  <rect x="135" y="132" width="26" height="26" rx="9" fill="url(#accent)"/>
+  <rect x="158" y="60" width="10" height="10" rx="3" fill="#F8FAFC" opacity="0.9"/>
+  <text x="226" y="125" fill="#0B1220" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="76" font-weight="780" letter-spacing="0">Pixa</text>
+  <text x="231" y="161" fill="#38635F" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="23" font-weight="560" letter-spacing="0">Flutter image pipeline</text>
+  <rect x="664" y="58" width="18" height="18" rx="6" fill="#38BDF8"/>
+  <rect x="690" y="76" width="14" height="14" rx="5" fill="#22C55E"/>
+  <rect x="670" y="100" width="28" height="28" rx="9" fill="#F59E0B"/>
+  <rect x="642" y="134" width="16" height="16" rx="5" fill="#0EA5A5"/>
+  <rect x="666" y="148" width="12" height="12" rx="4" fill="#F97316"/>
+</svg>

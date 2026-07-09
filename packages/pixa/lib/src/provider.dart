@@ -188,6 +188,78 @@ final class PixaProvider extends ImageProvider<PixaProvider> {
     );
   }
 
+  /// Creates a custom-source provider.
+  factory PixaProvider.custom(
+    String id,
+    PixaCustomSourceLoader loader, {
+    int? targetWidth,
+    int? targetHeight,
+    double scale = 1.0,
+    PixaCachePolicy cachePolicy = const PixaCachePolicy(),
+    PixaPriority priority = PixaPriority.normal,
+    PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
+    PixaPluginExecutionPolicy pluginExecutionPolicy =
+        const PixaPluginExecutionPolicy.runtimeOnly(),
+    PixaAnimationController? animationController,
+    PixaAnimationOptions animationOptions = const PixaAnimationOptions(),
+    ValueChanged<PixaProgress>? onProgress,
+  }) {
+    return PixaProvider(
+      request: PixaRequest.custom(
+        id,
+        loader,
+        targetSize: PixaTargetSize(width: targetWidth, height: targetHeight),
+        scale: scale,
+        cachePolicy: cachePolicy,
+        priority: priority,
+        retryPolicy: retryPolicy,
+        pluginExecutionPolicy: pluginExecutionPolicy,
+      ),
+      onProgress: onProgress,
+      animationController: animationController,
+      animationOptions: animationOptions,
+    );
+  }
+
+  /// Creates a provider routed through a runtime fetcher source kind.
+  factory PixaProvider.runtimePlugin({
+    required String sourceKind,
+    required String locator,
+    int? targetWidth,
+    int? targetHeight,
+    double scale = 1.0,
+    Map<String, String> headers = const <String, String>{},
+    PixaHeadersPolicy headersPolicy = const PixaHeadersPolicy(),
+    PixaCachePolicy cachePolicy = const PixaCachePolicy(),
+    PixaPriority priority = PixaPriority.normal,
+    PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
+    PixaRedirectPolicy redirectPolicy = const PixaRedirectPolicy(),
+    PixaPluginExecutionPolicy pluginExecutionPolicy =
+        const PixaPluginExecutionPolicy.runtimeOnly(),
+    PixaAnimationController? animationController,
+    PixaAnimationOptions animationOptions = const PixaAnimationOptions(),
+    ValueChanged<PixaProgress>? onProgress,
+  }) {
+    return PixaProvider(
+      request: PixaRequest.runtimePlugin(
+        sourceKind: sourceKind,
+        locator: locator,
+        headers: headers,
+        headersPolicy: headersPolicy,
+        targetSize: PixaTargetSize(width: targetWidth, height: targetHeight),
+        scale: scale,
+        cachePolicy: cachePolicy,
+        priority: priority,
+        retryPolicy: retryPolicy,
+        redirectPolicy: redirectPolicy,
+        pluginExecutionPolicy: pluginExecutionPolicy,
+      ),
+      onProgress: onProgress,
+      animationController: animationController,
+      animationOptions: animationOptions,
+    );
+  }
+
   /// Creates a provider for a still frame extracted from a video.
   factory PixaProvider.videoFrame(
     String locator, {

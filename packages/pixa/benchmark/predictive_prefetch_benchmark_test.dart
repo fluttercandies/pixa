@@ -9,6 +9,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pixa/pixa.dart';
 import 'package:pixa/pixa_debug.dart';
+import 'package:pixa/pixa_plugins.dart';
 import 'package:pixa/src/image_format_catalog.dart';
 
 void main() {
@@ -270,6 +271,42 @@ void main() {
       '${avgNs.toStringAsFixed(1)},$runtimeDefaults',
     );
     expect(runtimeDefaults, iterations ~/ 2);
+    expect(avgNs, lessThan(maxAvgNs));
+  });
+
+  test('runtime-only route plan hot path benchmark', () {
+    final int iterations = _envInt('PIXA_BENCH_ROUTE_PLAN_ITERS', 200000);
+    final int maxAvgNs = _envInt('PIXA_BENCH_ROUTE_PLAN_MAX_AVG_NS', 500);
+    final PixaCompiledRoutePlan routePlan = PixaRegistry().compileRoutePlan();
+    final PixaRequest request = PixaRequest.network(
+      'https://images.example.test/gallery/runtime-only.jpg',
+    );
+
+    expect(routePlan.defaultHotPathUsesRuntimeOnly, isTrue);
+    expect(request.pluginExecutionPolicy.usesRuntimeOnly, isTrue);
+
+    var checksum = 0;
+    final Stopwatch stopwatch = Stopwatch()..start();
+    for (var iteration = 0; iteration < iterations; iteration++) {
+      final PixaFetcherDescriptor? route = routePlan.fetcherForSourceKind(
+        iteration.isEven ? 'network' : 'file',
+      );
+      if (route != null) {
+        fail('default runtime-only gallery routes must not resolve to plugins');
+      }
+      if (request.pluginExecutionPolicy.usesRuntimeOnly) {
+        checksum += routePlan.platformHandlers + routePlan.fetcherRoutes;
+      }
+    }
+    stopwatch.stop();
+
+    final int totalMicros = stopwatch.elapsedMicroseconds;
+    final double avgNs = totalMicros * 1000 / iterations;
+    // ignore: avoid_print
+    print(
+      'runtime_only_route_plan_hot_path,$iterations,$totalMicros,'
+      '${avgNs.toStringAsFixed(1)},$checksum',
+    );
     expect(avgNs, lessThan(maxAvgNs));
   });
 

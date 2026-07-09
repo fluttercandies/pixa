@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
+import 'package:flutter/services.dart';
 
 import 'cache_key.dart';
 import 'redaction.dart';
@@ -70,25 +71,36 @@ final class PixaPluginExecutionPolicy {
   const PixaPluginExecutionPolicy({
     this.runtime = true,
     this.dart = false,
+    this.platform = false,
     this.external = false,
-  }) : assert(runtime || dart || external);
+  }) : assert(runtime || dart || platform || external);
 
   /// Uses only runtime modules on the hot path.
   const PixaPluginExecutionPolicy.runtimeOnly()
     : runtime = true,
       dart = false,
+      platform = false,
       external = false;
 
   /// Prefers runtime modules but permits explicit Dart plugins.
   const PixaPluginExecutionPolicy.runtimeFirstWithDart()
     : runtime = true,
       dart = true,
+      platform = false,
+      external = false;
+
+  /// Prefers runtime modules but permits explicit platform-channel plugins.
+  const PixaPluginExecutionPolicy.runtimeFirstWithPlatform()
+    : runtime = true,
+      dart = false,
+      platform = true,
       external = false;
 
   /// Allows an external boundary for requests that explicitly opt into it.
   const PixaPluginExecutionPolicy.withExternal({
     this.runtime = true,
     this.dart = false,
+    this.platform = false,
   }) : external = true;
 
   /// Runtime modules may run through the shared Pixa host.
@@ -97,22 +109,26 @@ final class PixaPluginExecutionPolicy {
   /// Dart plugin handlers may run for this request.
   final bool dart;
 
+  /// Platform-channel plugin handlers may run for this request.
+  final bool platform;
+
   /// External plugin boundaries may run for this request.
   final bool external;
 
   /// True for the default production gallery hot path.
-  bool get usesRuntimeOnly => runtime && !dart && !external;
+  bool get usesRuntimeOnly => runtime && !dart && !platform && !external;
 
   @override
   bool operator ==(Object other) {
     return other is PixaPluginExecutionPolicy &&
         other.runtime == runtime &&
         other.dart == dart &&
+        other.platform == platform &&
         other.external == external;
   }
 
   @override
-  int get hashCode => Object.hash(runtime, dart, external);
+  int get hashCode => Object.hash(runtime, dart, platform, external);
 }
 
 /// Cache policy attached to a request.
@@ -492,6 +508,201 @@ final class PixaRequest {
     );
   }
 
+  /// Creates an asset request.
+  factory PixaRequest.asset(
+    String name, {
+    String? package,
+    AssetBundle? bundle,
+    String cacheNamespace = 'default',
+    PixaTargetSize? targetSize,
+    double scale = 1.0,
+    BoxFit? fit,
+    List<String> processors = const <String>[],
+    Map<String, Object?> decoderOptions = const <String, Object?>{},
+    PixaPluginExecutionPolicy pluginExecutionPolicy =
+        const PixaPluginExecutionPolicy.runtimeOnly(),
+    PixaCachePolicy cachePolicy = const PixaCachePolicy(),
+    PixaPriority priority = PixaPriority.normal,
+    PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
+    PixaRequestLimits limits = const PixaRequestLimits(),
+    Map<String, Object?> metadata = const <String, Object?>{},
+    PixaRequest? lowRes,
+  }) {
+    return PixaRequest(
+      source: PixaSource.asset(name, package: package, bundle: bundle),
+      cacheNamespace: cacheNamespace,
+      targetSize: targetSize,
+      scale: scale,
+      fit: fit,
+      processors: processors,
+      decoderOptions: decoderOptions,
+      pluginExecutionPolicy: pluginExecutionPolicy,
+      cachePolicy: cachePolicy,
+      priority: priority,
+      retryPolicy: retryPolicy,
+      limits: limits,
+      metadata: metadata,
+      lowRes: lowRes,
+    );
+  }
+
+  /// Creates a memory-object request with a caller-provided stable id.
+  factory PixaRequest.memory(
+    String id,
+    Uint8List bytes, {
+    String cacheNamespace = 'default',
+    PixaTargetSize? targetSize,
+    double scale = 1.0,
+    BoxFit? fit,
+    List<String> processors = const <String>[],
+    Map<String, Object?> decoderOptions = const <String, Object?>{},
+    PixaPluginExecutionPolicy pluginExecutionPolicy =
+        const PixaPluginExecutionPolicy.runtimeOnly(),
+    PixaCachePolicy cachePolicy = const PixaCachePolicy(),
+    PixaPriority priority = PixaPriority.normal,
+    PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
+    PixaRequestLimits limits = const PixaRequestLimits(),
+    Map<String, Object?> metadata = const <String, Object?>{},
+    PixaRequest? lowRes,
+  }) {
+    return PixaRequest(
+      source: PixaSource.memory(id, bytes),
+      cacheNamespace: cacheNamespace,
+      targetSize: targetSize,
+      scale: scale,
+      fit: fit,
+      processors: processors,
+      decoderOptions: decoderOptions,
+      pluginExecutionPolicy: pluginExecutionPolicy,
+      cachePolicy: cachePolicy,
+      priority: priority,
+      retryPolicy: retryPolicy,
+      limits: limits,
+      metadata: metadata,
+      lowRes: lowRes,
+    );
+  }
+
+  /// Creates a raw encoded bytes request.
+  factory PixaRequest.bytes(
+    Uint8List bytes, {
+    String? id,
+    String cacheNamespace = 'default',
+    PixaTargetSize? targetSize,
+    double scale = 1.0,
+    BoxFit? fit,
+    List<String> processors = const <String>[],
+    Map<String, Object?> decoderOptions = const <String, Object?>{},
+    PixaPluginExecutionPolicy pluginExecutionPolicy =
+        const PixaPluginExecutionPolicy.runtimeOnly(),
+    PixaCachePolicy cachePolicy = const PixaCachePolicy(),
+    PixaPriority priority = PixaPriority.normal,
+    PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
+    PixaRequestLimits limits = const PixaRequestLimits(),
+    Map<String, Object?> metadata = const <String, Object?>{},
+    PixaRequest? lowRes,
+  }) {
+    return PixaRequest(
+      source: PixaSource.bytes(bytes, id: id),
+      cacheNamespace: cacheNamespace,
+      targetSize: targetSize,
+      scale: scale,
+      fit: fit,
+      processors: processors,
+      decoderOptions: decoderOptions,
+      pluginExecutionPolicy: pluginExecutionPolicy,
+      cachePolicy: cachePolicy,
+      priority: priority,
+      retryPolicy: retryPolicy,
+      limits: limits,
+      metadata: metadata,
+      lowRes: lowRes,
+    );
+  }
+
+  /// Creates a custom-source request routed by the source id.
+  factory PixaRequest.custom(
+    String id,
+    PixaCustomSourceLoader loader, {
+    String cacheNamespace = 'default',
+    PixaTargetSize? targetSize,
+    double scale = 1.0,
+    BoxFit? fit,
+    List<String> processors = const <String>[],
+    Map<String, Object?> decoderOptions = const <String, Object?>{},
+    PixaPluginExecutionPolicy pluginExecutionPolicy =
+        const PixaPluginExecutionPolicy.runtimeOnly(),
+    PixaCachePolicy cachePolicy = const PixaCachePolicy(),
+    PixaPriority priority = PixaPriority.normal,
+    PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
+    PixaRequestLimits limits = const PixaRequestLimits(),
+    Map<String, Object?> metadata = const <String, Object?>{},
+    PixaRequest? lowRes,
+  }) {
+    return PixaRequest(
+      source: PixaSource.custom(id, loader),
+      cacheNamespace: cacheNamespace,
+      targetSize: targetSize,
+      scale: scale,
+      fit: fit,
+      processors: processors,
+      decoderOptions: decoderOptions,
+      pluginExecutionPolicy: pluginExecutionPolicy,
+      cachePolicy: cachePolicy,
+      priority: priority,
+      retryPolicy: retryPolicy,
+      limits: limits,
+      metadata: metadata,
+      lowRes: lowRes,
+    );
+  }
+
+  /// Creates a request routed through a runtime fetcher source kind.
+  factory PixaRequest.runtimePlugin({
+    required String sourceKind,
+    required String locator,
+    Map<String, String> headers = const <String, String>{},
+    PixaHeadersPolicy headersPolicy = const PixaHeadersPolicy(),
+    String cacheNamespace = 'default',
+    PixaTargetSize? targetSize,
+    double scale = 1.0,
+    BoxFit? fit,
+    List<String> processors = const <String>[],
+    Map<String, Object?> decoderOptions = const <String, Object?>{},
+    PixaPluginExecutionPolicy pluginExecutionPolicy =
+        const PixaPluginExecutionPolicy.runtimeOnly(),
+    PixaCachePolicy cachePolicy = const PixaCachePolicy(),
+    PixaPriority priority = PixaPriority.normal,
+    PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
+    PixaRequestLimits limits = const PixaRequestLimits(),
+    PixaRedirectPolicy redirectPolicy = const PixaRedirectPolicy(),
+    Map<String, Object?> metadata = const <String, Object?>{},
+    PixaRequest? lowRes,
+  }) {
+    return PixaRequest(
+      source: PixaSource.runtimePlugin(
+        sourceKind: sourceKind,
+        locator: locator,
+      ),
+      headers: headers,
+      headersPolicy: headersPolicy,
+      cacheNamespace: cacheNamespace,
+      targetSize: targetSize,
+      scale: scale,
+      fit: fit,
+      processors: processors,
+      decoderOptions: decoderOptions,
+      pluginExecutionPolicy: pluginExecutionPolicy,
+      cachePolicy: cachePolicy,
+      priority: priority,
+      retryPolicy: retryPolicy,
+      limits: limits,
+      redirectPolicy: redirectPolicy,
+      metadata: metadata,
+      lowRes: lowRes,
+    );
+  }
+
   /// Creates a file request.
   factory PixaRequest.file(
     String path, {
@@ -679,6 +890,7 @@ final class PixaRequest {
       decoderOptions,
       pluginExecutionPolicy.runtime,
       pluginExecutionPolicy.dart,
+      pluginExecutionPolicy.platform,
       pluginExecutionPolicy.external,
       cachePolicy.privateDiskCache,
       redirectPolicy.allowCrossHostRedirects,

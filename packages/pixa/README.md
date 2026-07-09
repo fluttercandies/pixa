@@ -1,19 +1,32 @@
+<p align="center">
+  <img src="assets/brand/pixa-lockup.svg" alt="Pixa logo" width="420">
+</p>
+
 # Pixa
 
 Pixa is a production-oriented Flutter image loading library for Android, iOS,
 macOS, Windows, and Linux. It provides `PixaImage`, `PixaProvider`,
-`PixaController`, and `PixaPipeline` on top of one Rust-backed image pipeline for
-request normalization, network/file/asset/bytes loading, encoded memory cache,
-encoded disk cache, processed variants, in-flight coalescing, cancellation,
-progress, retry, resource limits, observability, and plugin routing.
+`PixaController`, `PixaRequest`, prefetch helpers, diagnostics, and plugin
+extension points on top of one Rust-backed image pipeline.
 
-Web is not part of this package target. Pixa is designed around native Flutter
-platforms, platform cache directories, native assets, Rust IO, and a single
-runtime hot path.
+Pixa focuses on native Flutter apps. Web is not part of this package target.
+
+## Install
+
+```yaml
+dependencies:
+  pixa: ^1.0.0
+```
+
+```yaml
+dependencies:
+  pixa:
+    path: ../pixa
+```
 
 ## Quick Start
 
-Configure Pixa once before loading images:
+Configure Pixa before loading images:
 
 ```dart
 await Pixa.configure(const PixaConfig(
@@ -24,7 +37,7 @@ await Pixa.configure(const PixaConfig(
 ));
 ```
 
-Use `PixaImage.network` where you would usually use `Image.network`:
+Use `PixaImage.network` for normal image widgets:
 
 ```dart
 PixaImage.network(
@@ -42,30 +55,7 @@ PixaImage.network(
 )
 ```
 
-## Production Configuration
-
-Start with explicit budgets instead of relying on device defaults:
-
-```dart
-await Pixa.configure(const PixaConfig(
-  memoryCacheBytes: 160 * 1024 * 1024,
-  diskCacheBytes: 1024 * 1024 * 1024,
-  networkConcurrency: 6,
-  decodeConcurrency: 2,
-  maxImageCompletionsPerFrame: 3,
-  maxQueuedRuntimeLoads: 256,
-  maxQueuedDecodes: 32,
-  decodedCacheMaximumSize: 1200,
-  decodedCacheMaximumSizeBytes: 180 * 1024 * 1024,
-));
-```
-
-For dense galleries, tune budgets from the screen shape and image size. Keep
-network/runtime concurrency bounded, keep Flutter decode concurrency low, and
-pace image completions so a burst of cache hits cannot upload hundreds of
-decoded images in one frame.
-
-Use `PixaProvider` when a Flutter API expects an `ImageProvider`:
+Use `PixaProvider` with Flutter APIs that expect an `ImageProvider`:
 
 ```dart
 Image(
@@ -74,22 +64,10 @@ Image(
 )
 ```
 
-## Product APIs
+## Requests And Sources
 
-`PixaSourceSet` and `PixaResponsiveImage` select responsive image candidates by
-layout width, device pixel ratio, and MIME preference.
-
-`PixaCacheWarmupManifest` and `Pixa.warmup` run startup, first-viewport, or
-offline-gallery prefetch batches with per-entry reports.
-
-`PixaImageAnalysis` and `Pixa.analyze(request)` use the Rust runtime to compute
-average color, dominant color, and a small palette for placeholders and
-diagnostics.
-
-## Advanced Request
-
-`PixaRequest` is the stable model used by widgets, providers, prefetch, and the
-lower-level pipeline:
+`PixaRequest` is the stable model shared by widgets, providers, prefetch, and
+the lower-level pipeline:
 
 ```dart
 final request = PixaRequest.network(
@@ -105,44 +83,49 @@ final request = PixaRequest.network(
 PixaImage(request: request)
 ```
 
-Use `PixaLargeImage.network` for zoomable large images. It plans visible tiles
-and near-viewport prefetch tiles through the same pipeline, so original encoded
-bytes, processed tile variants, and in-flight work are shared instead of
-duplicated.
+Common source helpers are symmetric across request, provider, and widget APIs:
+`PixaRequest.asset`, `PixaRequest.bytes`, `PixaRequest.custom`,
+`PixaProvider.custom`, `PixaImage.runtimePlugin`, and source-set candidates for
+file, asset, and runtime-plugin sources reuse the same request model.
 
-## Gallery Performance Model
+## Responsive Images, Warmup, And Analysis
 
-Pixa separates high-frequency scrolling work from low-frequency diagnostics and
-configuration.
+Use `PixaSourceSet` with `PixaResponsiveImage` when a CDN exposes multiple
+candidate widths or MIME variants. The selected candidate keeps target size in
+the request identity, so cache and prefetch behavior stays predictable.
 
-High-frequency paths are kept bounded and memoized:
+Use `PixaCacheWarmupManifest` and `Pixa.warmup` for startup, first-viewport, or
+offline-gallery prefetch batches with per-entry reports.
 
-- `PixaRequest.cacheKey` and `encodedCacheKey` are memoized per request object.
-- Format route and runtime capability lookup are memoized for display selector
-  hot paths.
-- In-flight coalescing shares origin fetch/read/decode work across visible
-  requests, prefetch, and repeated uses of the same image.
-- Predictive prefetch lazily skips stale generations during rapid scrolling
-  instead of repeatedly scanning old pending queues.
-- Recent prefetch dedupe uses recency-set eviction instead of linear list
-  removal under high churn.
-- Image completions are released behind a frame-aware gate, so batches of
-  completed loads are paced across Flutter frames.
+Use `PixaImageAnalysis` or `Pixa.analyze(request)` to compute average color,
+dominant color, and a small palette for placeholders, surfaces, or diagnostics.
 
-Low-frequency paths keep richer behavior: debug snapshots expose cache,
-scheduler, format, platform, and plugin state; typed failures keep stage,
-retryability, and safe messages; release tools write local benchmark and
-platform reports.
+## Production Configuration
 
-The benchmark report gate covers normal planning, rapid-overlap planning,
-recent-completion eviction, request-key lookup, format-route lookup, cache hit,
-disk hit, network coalescing, decode/resize, region decode, animation, and
-runtime ABI overhead.
+Dense galleries should use explicit budgets instead of relying on device
+defaults:
 
-## Cache Policy
+```dart
+await Pixa.configure(const PixaConfig(
+  memoryCacheBytes: 160 * 1024 * 1024,
+  diskCacheBytes: 1024 * 1024 * 1024,
+  networkConcurrency: 6,
+  decodeConcurrency: 2,
+  maxImageCompletionsPerFrame: 3,
+  maxQueuedRuntimeLoads: 256,
+  maxQueuedDecodes: 32,
+  decodedCacheMaximumSize: 1200,
+  decodedCacheMaximumSizeBytes: 180 * 1024 * 1024,
+));
+```
+
+Keep network/runtime concurrency bounded, keep Flutter decode concurrency low,
+and pace image completions so batches of cache hits are spread across frames.
+
+## Cache And Prefetch
 
 Pixa cooperates with Flutter's decoded `ImageCache`; it does not replace it.
-The complete cache stack is:
+The cache stack is:
 
 - in-flight request coalescing
 - Rust encoded memory cache
@@ -158,79 +141,35 @@ The complete cache stack is:
 - `networkOnly` skips cache reads but can still write by policy.
 - `refresh` forces a new source load.
 - `staleWhileRevalidate` returns stale cache while refreshing in the background.
-- `noStore` avoids Pixa encoded cache writes.
+- `noStore` avoids encoded cache writes.
 
 Use `Pixa.prefetch` or `PixaPredictivePrefetcher` for scrollable galleries.
-Prefetch and visible requests share the same origin and final variant keys, so
-the runtime does one download/read/decode/processing step when keys overlap.
+Prefetch and visible requests share origin and final variant keys, so overlapping
+loads reuse the same work.
 
-## Large Images
+## Large Images And Processors
 
-Use `PixaLargeImage.network` for zoomable large images. The default adaptive
-tile mode uses direct display for smaller images and tile requests only when the
-source is large enough to justify region work. `always` is available for
-explicit tile validation, and `never` is available when a product only needs a
-simple overview.
+Use `PixaLargeImage.network` for zoomable large images. The adaptive tile mode
+uses direct display for smaller images and tile requests only when the source is
+large enough to justify region work.
 
-PNG, BMP, and Farbfeld expose built-in region decode capability. JPEG and WebP
-ROI use optional native modules only when the final app explicitly enables and
-verifies those modules on its target platforms. Without a declared ROI backend,
-oversized tile-only requests fail safely instead of silently full-decoding a huge
-image.
-
-## Processors
-
-`PixaProcessors` creates stable processor descriptors for the Rust runtime
-processor chain. Supported helpers include resize, exact resize, resize-to-fill
-or center-crop, thumbnail, exact thumbnail, crop, tile crop/resize, rotate, blur,
-fast blur, unsharpen, filter3x3, flip, grayscale, invert, brighten, contrast,
-hue rotate.
-
-Processor output is keyed as a processed variant and reuses the same encoded
-origin cache, scheduler, resource limits, and runtime display selector.
+`PixaProcessors` creates stable runtime processor descriptors for resize,
+center-crop, thumbnail, crop, tile crop/resize, rotate, blur, unsharpen,
+filter3x3, flip, grayscale, invert, brighten, contrast, and hue rotate.
+Processor output is cached as a processed variant and reuses the same origin
+cache, scheduler, resource limits, and display selector.
 
 ## Privacy And Limits
 
 Pixa redacts sensitive URL query values, authorization headers, cookies, signed
 URL material, file path details, observer payloads, and safe error messages.
-Authenticated or private images should keep `privateDiskCache` disabled unless
+Authenticated or private images should keep private disk cache disabled unless
 the request explicitly allows private disk storage.
 
 Every request is bounded by encoded bytes, decoded pixels, animation frame
 count, animation duration, processor output bytes, redirect count, connect
 timeout, idle timeout, and total timeout. Oversized or unsafe inputs fail with
-typed `PixaFailure` values rather than being silently decoded.
-
-## Plugins
-
-Plugins register through `PixaConfig(plugins: [...])` and `PixaRegistry`.
-Default gallery hot paths use `PixaPluginExecutionPolicy.runtimeOnly()`: native
-fetchers, decoders, processors, and cache stores must run inside Pixa's shared
-runtime ABI with binary messages, runtime-owned buffers, stream handles,
-cancellation, progress, observer events, and the same cache/scheduler.
-
-Pure Dart plugins are supported for explicit opt-in requests:
-
-```dart
-final request = PixaRequest.network(
-  imageUrl,
-  pluginExecutionPolicy: const PixaPluginExecutionPolicy.runtimeFirstWithDart(),
-);
-```
-
-Decoder plugins can declare MIME routes, stable format ids, bounded-header byte
-signatures, and capability flags such as metadata probe, region decode,
-streaming input, zero-copy input, owned output buffers, and stability. Runtime
-decoder descriptors that are not stable or do not preserve the ownership
-contract fail during registration.
-
-Plugin authors should follow [PLUGIN_AUTHORING.md](PLUGIN_AUTHORING.md) when
-publishing packages from their own repositories. The guide covers pubspec
-dependencies, stable plugin ids and routes, `PixaPlugin` implementation,
-consumer setup through `PixaConfig(plugins: [...])`, pub.dev publishing checks,
-Pure Dart mode, Standalone FFI mode, and app-selected Host-merge mode through a
-Pixa runtime manifest. Third-party host-linked runtime modules are not
-automatically injected into Pixa's shared Rust host by publishing a package.
+typed `PixaFailure` values instead of being silently decoded.
 
 ## Supported Formats
 
@@ -239,31 +178,89 @@ animated WebP, BMP, WBMP, and ICO. The runtime-backed stable raster matrix also
 covers TIFF, PNM, QOI, TGA, DDS, HDR, Farbfeld, PCX, SGI, XBM, and XPM when the
 runtime capability matrix reports real decoder support.
 
-Advanced vector, camera raw, document-preview, and next-generation codec
-formats remain outside the public support matrix until stable decoders,
-fixtures, pixel/golden tests, resource limits, capability detection, benchmark
-coverage, and platform evidence exist. Unknown formats fail with typed
-unsupported errors instead of being advertised as supported.
+Formats outside the declared matrix return typed unsupported errors until
+stable decoders, fixtures, pixel/golden tests, resource limits, capability
+detection, benchmark coverage, and platform evidence exist.
 
-## Platform Support
+## Plugins
 
-Supported Flutter targets are Android, iOS, macOS, Windows, and Linux. Runtime
-platform self-check reports cover library load, symbol resolution, threaded
-runtime capability, cache directory resolution, and HTTP transport availability:
+Plugins register through `PixaConfig(plugins: [...])` and `PixaRegistry`.
+Default gallery hot paths use `PixaPluginExecutionPolicy.runtimeOnly()`: native
+fetchers, decoders, processors, and cache stores stay inside Pixa's shared
+runtime path and reuse the same cache, scheduler, cancellation, progress, and
+observer model.
+
+Pure Dart plugins are available only for explicit opt-in requests:
+
+```dart
+final request = PixaRequest.network(
+  imageUrl,
+  pluginExecutionPolicy: const PixaPluginExecutionPolicy.runtimeFirstWithDart(),
+);
+```
+
+Platform-channel plugins use `PixaPluginExecutionKind.platform`,
+`PixaPlatformContract`, and
+`PixaPluginExecutionPolicy.runtimeFirstWithPlatform()`. Pixa compiles a compiled
+route plan during configuration, including source routes, decoder routes,
+processor routes, cache namespaces, execution lanes, and the platform capability matrix.
+Gallery hot paths use that precomputed plan, so they do not scan plugins or
+query platform channels per tile; a cache hit does not cross Dart, platform, or
+external plugin boundaries again.
+
+Published plugins that support more than one boundary can use automatic integration selection with `PixaPluginIntegrationCandidate` and
+`PixaRegistry.registerAdaptiveIntegration`. Pixa selects one available
+candidate during `Pixa.configure`, records it in `adaptivePluginIntegrations`,
+and keeps unselected routes out of the compiled route plan.
+
+Plugin authors should follow [PLUGIN_AUTHORING.md](PLUGIN_AUTHORING.md). A pub.dev package cannot auto-link runtime host code into Pixa's shared runtime just by being added as a transitive dependency.
+
+## Official Plugin Packages
+
+The official S3 package exposes `PixaS3.provider` and `PixaS3.image` helpers so
+S3 objects use the same runtime-only fetcher path without leaking credentials in
+locators or cache labels.
+
+Video-frame extraction follows the same plugin boundary. Core Pixa exposes
+`PixaRequest.videoFrame`, `PixaImage.videoFrame`, backend descriptors, and typed
+unsupported failures, but it does not ship a default video-frame backend. The
+official MJPEG backend lives in `pixa_video_frame_mjpeg`; apps register
+`PixaMjpegVideoFramePlugin(hostRuntimeAvailable: true)` only after explicitly
+enabling that package's `pixa_plugin.json` through `plugin_manifest` or
+`plugin_manifest_directory`.
+
+## Diagnostics
+
+Use redacted diagnostics when filing issues or supporting users:
 
 ```dart
 final snapshot = PixaDebugInspector.snapshot();
-print(snapshot.platformSelfCheck?.toJson());
+debugPrint(snapshot.toDiagnosticString());
+
+await Pixa.configure(const PixaConfig(
+  observers: <PixaObserver>[PixaLogObserver()],
+));
 ```
 
-The repository also includes `melos run platform:self-check` for local runner
-evidence.
+`PixaDebugSnapshot.toDiagnosticString()` and `PixaLogObserver()` avoid raw
+authorization headers, signed URL material, private paths, and original tokens.
 
-iOS and macOS declare both Swift Package Manager and CocoaPods plugin wrappers.
-The wrappers are registration-only; the image runtime is still built by the
-Native Assets hook and stays on the same shared Rust runtime path.
+## Example Gallery
 
-## Release Preflight
+`examples/pixa_gallery` demonstrates real network requests, grid loading,
+predictive prefetch, placeholder/error/retry states, low-res to high-res
+requests, progressive preview, animated images, cache-only loading, memory trim,
+runtime processing, `PixaProvider`, and `PixaLargeImage`.
+
+Run from the repository root:
+
+```bash
+melos bootstrap
+cd examples/pixa_gallery
+flutter run -d macos
+```
+
+## Release And Stability
 
 Before publishing or cutting a release branch, run:
 
@@ -272,38 +269,9 @@ dart run tool/pixa_release_preflight.dart --dry-run
 melos run release:preflight
 ```
 
-The preflight applies Dart fixes, formats sources, analyzes the workspace, runs
-Flutter tests, Rust formatting, Rust clippy, Rust tests, architecture guard,
-platform self-check, platform evidence self-test, benchmark report self-test,
-gallery example analyze, cockpit acceptance, and smoke benchmark report
-generation. The architecture
-guard also verifies the Darwin SwiftPM manifests,
-CocoaPods podspecs, and CI SPM build switch.
-
-## Stability Policy
-
 The stable public entry points are `package:pixa/pixa.dart`,
 `package:pixa/pixa_plugins.dart`, and `package:pixa/pixa_debug.dart`. Internal
 runtime bindings, generated code, cache internals, and scheduler internals are
 not public API.
-
-Pixa follows semantic versioning. Breaking public API changes require a major
-version. Deprecated APIs must name a replacement and remain available for at
-least one minor release before removal. Migration examples belong in this README
-or the package changelog before a breaking release is cut.
-
-## Example Gallery
-
-`examples/pixa_gallery` demonstrates real network requests, grid loading,
-predictive prefetch, placeholder/error/retry states, low-res to high-res
-requests, progressive preview, animated GIF/WebP, cache-only loading, memory
-trim, runtime processing, `PixaProvider`, and `PixaLargeImage`.
-
-Run:
-
-```bash
-melos bootstrap
-melos run example
-```
 
 Chinese documentation: [README_ZH.md](README_ZH.md).

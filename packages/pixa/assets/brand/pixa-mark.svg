@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Pixa mark</title>
+  <desc id="desc">A pixel-shaped P with a lens aperture, representing Pixa's image loading pipeline and cache tiles.</desc>
+  <defs>
+    <linearGradient id="bg" x1="35" y1="25" x2="221" y2="229" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#132338"/>
+      <stop offset="0.55" stop-color="#0F766E"/>
+      <stop offset="1" stop-color="#0B1220"/>
+    </linearGradient>
+    <linearGradient id="stem" x1="54" y1="45" x2="118" y2="205" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#DFFCF4"/>
+      <stop offset="1" stop-color="#62E0CF"/>
+    </linearGradient>
+    <linearGradient id="bowl" x1="84" y1="45" x2="203" y2="150" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38BDF8"/>
+      <stop offset="0.48" stop-color="#24D3B5"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="100" y1="150" x2="190" y2="202" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FDE68A"/>
+      <stop offset="1" stop-color="#F97316"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <path d="M56 88c0-23.2 18.8-42 42-42h55c31.5 0 57 25.5 57 57s-25.5 57-57 57h-55v50H56V88Z" fill="#07111F" opacity="0.34"/>
+  <rect x="52" y="48" width="42" height="160" rx="14" fill="url(#stem)"/>
+  <rect x="86" y="48" width="82" height="42" rx="14" fill="url(#bowl)"/>
+  <rect x="86" y="118" width="82" height="42" rx="14" fill="url(#bowl)"/>
+  <rect x="154" y="72" width="42" height="64" rx="14" fill="url(#bowl)"/>
+  <circle cx="137" cy="104" r="31" fill="#07111F" opacity="0.28"/>
+  <circle cx="137" cy="104" r="21" fill="#F8FAFC"/>
+  <path d="M137 83a21 21 0 0 1 18.2 10.5l-18.2 10.5V83Z" fill="#38BDF8"/>
+  <path d="M155.2 93.5A21 21 0 0 1 155.2 114.5L137 104l18.2-10.5Z" fill="#22C55E"/>
+  <path d="M155.2 114.5A21 21 0 0 1 137 125v-21l18.2 10.5Z" fill="#F59E0B"/>
+  <path d="M137 125a21 21 0 0 1-18.2-10.5L137 104v21Z" fill="#F97316"/>
+  <path d="M118.8 114.5A21 21 0 0 1 118.8 93.5L137 104l-18.2 10.5Z" fill="#0EA5A5"/>
+  <path d="M118.8 93.5A21 21 0 0 1 137 83v21l-18.2-10.5Z" fill="#A7F3D0"/>
+  <circle cx="137" cy="104" r="7" fill="#0B1220"/>
+  <rect x="108" y="170" width="28" height="28" rx="9" fill="#38BDF8"/>
+  <rect x="148" y="160" width="42" height="42" rx="14" fill="url(#accent)"/>
+  <rect x="184" y="44" width="16" height="16" rx="5" fill="#F8FAFC" opacity="0.9"/>
+  <rect x="201" y="61" width="10" height="10" rx="3" fill="#FDE68A"/>
+</svg>

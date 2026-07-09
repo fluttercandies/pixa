@@ -5,7 +5,14 @@ import 'package:pixa/pixa.dart';
 import 'package:pixa/pixa_plugins.dart';
 import 'package:pixa/src/image_format_catalog.dart';
 
+const PixaVersionConstraint _compatiblePixa1 = PixaVersionConstraint(
+  minimumInclusive: '1.0.0',
+  maximumExclusive: '2.0.0',
+);
+
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('Pixa exposes the package version used for plugin compatibility', () {
     expect(Pixa.version, '1.0.0');
   });
@@ -17,6 +24,7 @@ void main() {
         id: 'future-plugin',
         compatiblePixaVersions: const PixaVersionConstraint(
           minimumInclusive: '99.0.0',
+          maximumExclusive: '100.0.0',
         ),
       );
 
@@ -182,11 +190,386 @@ void main() {
       pluginExecutionPolicy:
           const PixaPluginExecutionPolicy.runtimeFirstWithDart(),
     );
+    final PixaRequest platformAllowed = runtimeOnly.copyWith(
+      pluginExecutionPolicy:
+          const PixaPluginExecutionPolicy.runtimeFirstWithPlatform(),
+    );
 
     expect(runtimeOnly.pluginExecutionPolicy.usesRuntimeOnly, isTrue);
     expect(dartAllowed.pluginExecutionPolicy.dart, isTrue);
+    expect(platformAllowed.pluginExecutionPolicy.platform, isTrue);
     expect(dartAllowed.cacheKey, isNot(runtimeOnly.cacheKey));
+    expect(platformAllowed.cacheKey, isNot(runtimeOnly.cacheKey));
     expect(dartAllowed.encodedCacheKey, runtimeOnly.encodedCacheKey);
+    expect(platformAllowed.encodedCacheKey, runtimeOnly.encodedCacheKey);
+  });
+
+  test(
+    'PixaRegistry supports platform descriptors and compiled route plan',
+    () {
+      final PixaRegistry registry = PixaRegistry()
+        ..registerFetcher(const _PlatformFetcherDescriptor());
+
+      final PixaRegistryArchitectureSnapshot snapshot = registry
+          .architectureSnapshot();
+      expect(snapshot.platformHandlers, 1);
+      expect(snapshot.defaultHotPathUsesRuntimeOnly, isFalse);
+      expect(snapshot.toJson()['platformHandlers'], 1);
+
+      final PixaCompiledRoutePlan routePlan = registry.compileRoutePlan();
+      expect(routePlan.fetcherRoutes, 1);
+      expect(routePlan.platformHandlers, 1);
+      expect(
+        routePlan.fetcherForSourceKind('PLATFORM-SOURCE')?.id,
+        'platform-fetcher',
+      );
+      expect(routePlan.platformSourceKinds, <String>{'platform-source'});
+      expect(routePlan.toJson()['platformHandlers'], 1);
+    },
+  );
+
+  test('PixaRegistry adaptive integration prefers available runtime host', () {
+    final PixaRegistry registry = PixaRegistry()
+      ..registerAdaptiveIntegration(
+        pluginId: 'com.example.pixa.adaptive',
+        candidates: <PixaPluginIntegrationCandidate>[
+          PixaPluginIntegrationCandidate.pureDart(
+            id: 'dart',
+            packageName: 'pixa_adaptive_example',
+            register: _registerAdaptiveDartFetcher,
+          ),
+          PixaPluginIntegrationCandidate.platformChannel(
+            id: 'platform',
+            packageName: 'pixa_adaptive_example',
+            platformAvailable: true,
+            register: _registerAdaptivePlatformFetcher,
+          ),
+          PixaPluginIntegrationCandidate.runtimeHost(
+            id: 'runtime',
+            packageName: 'pixa_adaptive_example',
+            hostRuntimeAvailable: true,
+            register: _registerAdaptiveRuntimeFetcher,
+          ),
+        ],
+      );
+
+    final PixaPluginIntegrationSelection selection =
+        registry.adaptiveIntegrationSelections.single;
+    expect(selection.pluginId, 'com.example.pixa.adaptive');
+    expect(selection.candidateId, 'runtime');
+    expect(selection.mode, PixaPluginIntegrationMode.runtimeHost);
+    expect(selection.packageName, 'pixa_adaptive_example');
+
+    final PixaCompiledRoutePlan routePlan = registry.compileRoutePlan();
+    expect(
+      routePlan.fetcherForSourceKind('adaptive-source')?.executionKind,
+      PixaPluginExecutionKind.runtime,
+    );
+    expect(routePlan.fetcherRoutes, 1);
+    expect(
+      (routePlan.toJson()['adaptivePluginIntegrations']! as List<Object?>)
+          .single,
+      containsPair('candidateId', 'runtime'),
+    );
+  });
+
+  test(
+    'PixaRegistry adaptive integration falls back when runtime host is absent',
+    () {
+      final PixaRegistry registry = PixaRegistry()
+        ..registerAdaptiveIntegration(
+          pluginId: 'com.example.pixa.adaptive',
+          candidates: <PixaPluginIntegrationCandidate>[
+            PixaPluginIntegrationCandidate.runtimeHost(
+              id: 'runtime',
+              packageName: 'pixa_adaptive_example',
+              hostRuntimeAvailable: false,
+              unavailableMessage:
+                  'Root app did not enable plugin_manifest for this module.',
+              register: _registerAdaptiveRuntimeFetcher,
+            ),
+            PixaPluginIntegrationCandidate.platformChannel(
+              id: 'platform',
+              packageName: 'pixa_adaptive_example',
+              platformAvailable: true,
+              register: _registerAdaptivePlatformFetcher,
+            ),
+          ],
+        );
+
+      expect(
+        registry.adaptiveIntegrationSelections.single.mode,
+        PixaPluginIntegrationMode.platformChannel,
+      );
+      expect(
+        registry.fetcherForSourceKind('adaptive-source')?.executionKind,
+        PixaPluginExecutionKind.platform,
+      );
+    },
+  );
+
+  test('PixaRegistry adaptive integration can fall back to pure Dart', () {
+    final PixaRegistry registry = PixaRegistry()
+      ..registerAdaptiveIntegration(
+        pluginId: 'com.example.pixa.adaptive',
+        candidates: <PixaPluginIntegrationCandidate>[
+          PixaPluginIntegrationCandidate.runtimeHost(
+            id: 'runtime',
+            packageName: 'pixa_adaptive_example',
+            hostRuntimeAvailable: false,
+            register: _registerAdaptiveRuntimeFetcher,
+          ),
+          PixaPluginIntegrationCandidate.platformChannel(
+            id: 'platform',
+            packageName: 'pixa_adaptive_example',
+            platformAvailable: false,
+            register: _registerAdaptivePlatformFetcher,
+          ),
+          PixaPluginIntegrationCandidate.pureDart(
+            id: 'dart',
+            packageName: 'pixa_adaptive_example',
+            register: _registerAdaptiveDartFetcher,
+          ),
+        ],
+      );
+
+    expect(
+      registry.adaptiveIntegrationSelections.single.mode,
+      PixaPluginIntegrationMode.pureDart,
+    );
+    expect(
+      registry.fetcherForSourceKind('adaptive-source')?.executionKind,
+      PixaPluginExecutionKind.dart,
+    );
+  });
+
+  test('PixaRegistry adaptive integration can select external fallback', () {
+    final PixaRegistry registry = PixaRegistry()
+      ..registerAdaptiveIntegration(
+        pluginId: 'com.example.pixa.adaptive',
+        candidates: <PixaPluginIntegrationCandidate>[
+          PixaPluginIntegrationCandidate.runtimeHost(
+            id: 'runtime',
+            packageName: 'pixa_adaptive_example',
+            hostRuntimeAvailable: false,
+            register: _registerAdaptiveRuntimeFetcher,
+          ),
+          PixaPluginIntegrationCandidate.platformChannel(
+            id: 'platform',
+            packageName: 'pixa_adaptive_example',
+            platformAvailable: false,
+            register: _registerAdaptivePlatformFetcher,
+          ),
+          PixaPluginIntegrationCandidate.pureDart(
+            id: 'dart',
+            packageName: 'pixa_adaptive_example',
+            available: false,
+            register: _registerAdaptiveDartFetcher,
+          ),
+          PixaPluginIntegrationCandidate.external(
+            id: 'external',
+            packageName: 'pixa_adaptive_example',
+            register: _registerAdaptiveExternalFetcher,
+          ),
+        ],
+      );
+
+    final PixaPluginIntegrationSelection selection =
+        registry.adaptiveIntegrationSelections.single;
+    expect(selection.mode, PixaPluginIntegrationMode.external);
+    expect(selection.candidateId, 'external');
+    expect(
+      registry.fetcherForSourceKind('adaptive-source')?.executionKind,
+      PixaPluginExecutionKind.external,
+    );
+  });
+
+  test(
+    'PixaRegistry adaptive integration fails for required missing runtime',
+    () {
+      final PixaRegistry registry = PixaRegistry();
+
+      expect(
+        () => registry.registerAdaptiveIntegration(
+          pluginId: 'com.example.pixa.required_runtime',
+          candidates: <PixaPluginIntegrationCandidate>[
+            PixaPluginIntegrationCandidate.runtimeHost(
+              id: 'runtime',
+              packageName: 'pixa_required_runtime',
+              hostRuntimeAvailable: false,
+              requiredIntegration: true,
+              unavailableMessage:
+                  'Root app must provide plugin_manifest for this pub package.',
+              register: _registerAdaptiveRuntimeFetcher,
+            ),
+            PixaPluginIntegrationCandidate.pureDart(
+              id: 'dart',
+              packageName: 'pixa_required_runtime',
+              register: _registerAdaptiveDartFetcher,
+            ),
+          ],
+        ),
+        throwsA(
+          isA<StateError>()
+              .having(
+                (StateError error) => error.message,
+                'message',
+                contains('pixa_required_runtime'),
+              )
+              .having(
+                (StateError error) => error.message,
+                'message',
+                contains('plugin_manifest'),
+              ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'PixaRegistry adaptive integration can be optional when unavailable',
+    () {
+      final PixaRegistry registry = PixaRegistry()
+        ..registerAdaptiveIntegration(
+          pluginId: 'com.example.pixa.optional',
+          requireAvailableCandidate: false,
+          candidates: <PixaPluginIntegrationCandidate>[
+            PixaPluginIntegrationCandidate.runtimeHost(
+              id: 'runtime',
+              packageName: 'pixa_optional',
+              hostRuntimeAvailable: false,
+              register: _registerAdaptiveRuntimeFetcher,
+            ),
+          ],
+        );
+
+      expect(registry.adaptiveIntegrationSelections, isEmpty);
+      expect(registry.fetchers, isEmpty);
+      expect(registry.compileRoutePlan().adaptiveIntegrations, isEmpty);
+    },
+  );
+
+  test(
+    'PixaRegistry adaptive integration does not register unselected routes',
+    () {
+      final PixaRegistry registry = PixaRegistry()
+        ..registerFetcher(
+          const _FetcherDescriptor(
+            id: 'existing-runtime-only-route',
+            sourceKinds: <String>{'runtime-only-adaptive-source'},
+          ),
+        )
+        ..registerAdaptiveIntegration(
+          pluginId: 'com.example.pixa.adaptive',
+          candidates: <PixaPluginIntegrationCandidate>[
+            PixaPluginIntegrationCandidate.runtimeHost(
+              id: 'runtime',
+              packageName: 'pixa_adaptive_example',
+              hostRuntimeAvailable: false,
+              register: _registerAdaptiveRuntimeOnlyConflictFetcher,
+            ),
+            PixaPluginIntegrationCandidate.pureDart(
+              id: 'dart',
+              packageName: 'pixa_adaptive_example',
+              register: _registerAdaptiveDartFetcher,
+            ),
+          ],
+        );
+
+      final PixaCompiledRoutePlan routePlan = registry.compileRoutePlan();
+      expect(routePlan.fetcherForSourceKind('adaptive-source')?.id, 'dart');
+      expect(
+        routePlan.fetcherForSourceKind('runtime-only-adaptive-source')?.id,
+        'existing-runtime-only-route',
+      );
+      expect(routePlan.fetcherRoutes, 2);
+    },
+  );
+
+  test(
+    'PixaRegistry adaptive integration rejects mismatched candidate handlers',
+    () {
+      final PixaRegistry registry = PixaRegistry();
+
+      expect(
+        () => registry.registerAdaptiveIntegration(
+          pluginId: 'com.example.pixa.bad_adaptive',
+          candidates: <PixaPluginIntegrationCandidate>[
+            PixaPluginIntegrationCandidate.runtimeHost(
+              id: 'runtime',
+              packageName: 'pixa_bad_adaptive',
+              hostRuntimeAvailable: true,
+              register: _registerAdaptiveDartFetcher,
+            ),
+          ],
+        ),
+        throwsA(
+          isA<StateError>()
+              .having(
+                (StateError error) => error.message,
+                'message',
+                contains('runtimeHost'),
+              )
+              .having(
+                (StateError error) => error.message,
+                'message',
+                contains('runtime'),
+              ),
+        ),
+      );
+      expect(registry.fetchers, isEmpty);
+      expect(registry.adaptiveIntegrationSelections, isEmpty);
+    },
+  );
+
+  test(
+    'PixaRegistry adaptive integration requires selected route descriptors',
+    () {
+      final PixaRegistry registry = PixaRegistry();
+
+      expect(
+        () => registry.registerAdaptiveIntegration(
+          pluginId: 'com.example.pixa.empty_adaptive',
+          candidates: <PixaPluginIntegrationCandidate>[
+            PixaPluginIntegrationCandidate.pureDart(
+              id: 'dart',
+              packageName: 'pixa_empty_adaptive',
+              register: (_) {},
+            ),
+          ],
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (StateError error) => error.message,
+            'message',
+            contains('must register at least one'),
+          ),
+        ),
+      );
+      expect(registry.fetchers, isEmpty);
+      expect(registry.adaptiveIntegrationSelections, isEmpty);
+    },
+  );
+
+  test('Pixa.configure accepts adaptive plugins through PixaConfig', () async {
+    await Pixa.configure(
+      const PixaConfig(
+        cacheRootPath: 'unused',
+        plugins: <PixaPlugin>[
+          _AdaptivePlugin(
+            hostRuntimeAvailable: false,
+            platformAvailable: false,
+          ),
+        ],
+      ),
+    );
+
+    final PixaCompiledRoutePlan routePlan = Pixa.pipeline.routePlan;
+    expect(routePlan.adaptiveIntegrations.single.candidateId, 'dart');
+    expect(
+      routePlan.fetcherForSourceKind('adaptive-source')?.executionKind,
+      PixaPluginExecutionKind.dart,
+    );
   });
 
   test(
@@ -257,6 +640,24 @@ void main() {
       PixaPluginExecutionKind.dart,
     );
   });
+
+  test(
+    'PixaRegistry rejects platform descriptors without platform contract',
+    () {
+      final PixaRegistry registry = PixaRegistry();
+
+      expect(
+        () => registry.registerFetcher(const _BadPlatformFetcherDescriptor()),
+        throwsA(
+          isA<StateError>().having(
+            (StateError error) => error.message,
+            'message',
+            contains('platform contract'),
+          ),
+        ),
+      );
+    },
+  );
 
   test('PixaRegistry architecture snapshot separates plugin runtimes', () {
     final PixaRegistry registry = PixaRegistry()
@@ -694,10 +1095,45 @@ void main() {
   });
 }
 
+void _registerAdaptiveRuntimeFetcher(PixaRegistry registry) {
+  registry.registerFetcher(
+    const _AdaptiveRuntimeFetcherDescriptor(
+      id: 'runtime',
+      sourceKinds: <String>{'adaptive-source'},
+    ),
+  );
+}
+
+void _registerAdaptiveRuntimeOnlyConflictFetcher(PixaRegistry registry) {
+  registry.registerFetcher(
+    const _AdaptiveRuntimeFetcherDescriptor(
+      id: 'runtime-conflict',
+      sourceKinds: <String>{'runtime-only-adaptive-source'},
+    ),
+  );
+}
+
+void _registerAdaptivePlatformFetcher(PixaRegistry registry) {
+  registry.registerFetcher(const _AdaptivePlatformFetcherDescriptor());
+}
+
+void _registerAdaptiveDartFetcher(PixaRegistry registry) {
+  registry.registerFetcher(const _AdaptiveDartFetcherDescriptor());
+}
+
+void _registerAdaptiveExternalFetcher(PixaRegistry registry) {
+  registry.registerFetcher(
+    const _FetcherDescriptor(
+      id: 'external',
+      sourceKinds: <String>{'adaptive-source'},
+    ),
+  );
+}
+
 final class _TestPlugin implements PixaPlugin {
   const _TestPlugin({
     required this.id,
-    this.compatiblePixaVersions = const PixaVersionConstraint.any(),
+    this.compatiblePixaVersions = _compatiblePixa1,
   });
 
   @override
@@ -708,6 +1144,52 @@ final class _TestPlugin implements PixaPlugin {
 
   @override
   void register(PixaRegistry registry) {}
+}
+
+final class _AdaptivePlugin implements PixaPlugin {
+  const _AdaptivePlugin({
+    required this.hostRuntimeAvailable,
+    required this.platformAvailable,
+  });
+
+  final bool hostRuntimeAvailable;
+  final bool platformAvailable;
+
+  @override
+  String get id => 'com.example.pixa.adaptive';
+
+  @override
+  PixaVersionConstraint get compatiblePixaVersions =>
+      const PixaVersionConstraint(
+        minimumInclusive: '1.0.0',
+        maximumExclusive: '2.0.0',
+      );
+
+  @override
+  void register(PixaRegistry registry) {
+    registry.registerAdaptiveIntegration(
+      pluginId: id,
+      candidates: <PixaPluginIntegrationCandidate>[
+        PixaPluginIntegrationCandidate.runtimeHost(
+          id: 'runtime',
+          packageName: 'pixa_adaptive_example',
+          hostRuntimeAvailable: hostRuntimeAvailable,
+          register: _registerAdaptiveRuntimeFetcher,
+        ),
+        PixaPluginIntegrationCandidate.platformChannel(
+          id: 'platform',
+          packageName: 'pixa_adaptive_example',
+          platformAvailable: platformAvailable,
+          register: _registerAdaptivePlatformFetcher,
+        ),
+        PixaPluginIntegrationCandidate.pureDart(
+          id: 'dart',
+          packageName: 'pixa_adaptive_example',
+          register: _registerAdaptiveDartFetcher,
+        ),
+      ],
+    );
+  }
 }
 
 final class _FetcherDescriptor implements PixaFetcherDescriptor {
@@ -879,6 +1361,77 @@ final class _RuntimeDecoderDescriptor
   final int _priority;
 }
 
+final class _AdaptiveRuntimeFetcherDescriptor
+    implements PixaFetcherDescriptor, PixaRuntimeDescriptor {
+  const _AdaptiveRuntimeFetcherDescriptor({
+    required this.id,
+    required this.sourceKinds,
+  });
+
+  @override
+  final String id;
+
+  @override
+  PixaPluginExecutionKind get executionKind => PixaPluginExecutionKind.runtime;
+
+  @override
+  final Set<String> sourceKinds;
+
+  @override
+  PixaRuntimeContract get runtime => PixaRuntimeContract.hostLinkedPluginModule(
+    moduleId: 'com.example.pixa.$id',
+    packageName: 'pixa_adaptive_example',
+    implementationLanguage: 'rust',
+    entrypointSymbol: 'pixa_${id.replaceAll('-', '_')}_plugin_init',
+  );
+}
+
+final class _AdaptivePlatformFetcherDescriptor
+    implements PixaPlatformFetcherDescriptor {
+  const _AdaptivePlatformFetcherDescriptor();
+
+  @override
+  String get id => 'platform';
+
+  @override
+  PixaPluginExecutionKind get executionKind => PixaPluginExecutionKind.platform;
+
+  @override
+  Set<String> get sourceKinds => const <String>{'adaptive-source'};
+
+  @override
+  PixaPlatformContract get platform => const PixaPlatformContract(
+    channel: 'dev.pixa/adaptive_fetcher',
+    supportedPlatforms: <PixaHostPlatform>{
+      PixaHostPlatform.android,
+      PixaHostPlatform.ios,
+    },
+    maxConcurrentCalls: 2,
+    supportsCancellation: true,
+    hotPathSafe: false,
+  );
+
+  @override
+  PixaFetcher get fetcher => const _NoopFetcher();
+}
+
+final class _AdaptiveDartFetcherDescriptor
+    implements PixaDartFetcherDescriptor {
+  const _AdaptiveDartFetcherDescriptor();
+
+  @override
+  String get id => 'dart';
+
+  @override
+  PixaPluginExecutionKind get executionKind => PixaPluginExecutionKind.dart;
+
+  @override
+  Set<String> get sourceKinds => const <String>{'adaptive-source'};
+
+  @override
+  PixaFetcher get fetcher => const _NoopFetcher();
+}
+
 final class _DartFetcherDescriptor implements PixaDartFetcherDescriptor {
   const _DartFetcherDescriptor();
 
@@ -954,6 +1507,45 @@ final class _DartCacheStoreDescriptor implements PixaDartCacheStoreDescriptor {
 
   @override
   PixaCacheStore get cacheStore => const _NoopCacheStore();
+}
+
+final class _PlatformFetcherDescriptor
+    implements PixaPlatformFetcherDescriptor {
+  const _PlatformFetcherDescriptor();
+
+  @override
+  String get id => 'platform-fetcher';
+
+  @override
+  PixaPluginExecutionKind get executionKind => PixaPluginExecutionKind.platform;
+
+  @override
+  Set<String> get sourceKinds => const <String>{'platform-source'};
+
+  @override
+  PixaPlatformContract get platform => const PixaPlatformContract(
+    channel: 'dev.pixa/platform_fetcher',
+    supportedPlatforms: <PixaHostPlatform>{PixaHostPlatform.android},
+    maxConcurrentCalls: 2,
+    supportsCancellation: true,
+    hotPathSafe: false,
+  );
+
+  @override
+  PixaFetcher get fetcher => const _NoopFetcher();
+}
+
+final class _BadPlatformFetcherDescriptor implements PixaFetcherDescriptor {
+  const _BadPlatformFetcherDescriptor();
+
+  @override
+  String get id => 'bad-platform-fetcher';
+
+  @override
+  PixaPluginExecutionKind get executionKind => PixaPluginExecutionKind.platform;
+
+  @override
+  Set<String> get sourceKinds => const <String>{'bad-platform-source'};
 }
 
 final class _NoopFetcher implements PixaFetcher {

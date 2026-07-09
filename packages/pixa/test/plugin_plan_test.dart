@@ -199,7 +199,7 @@ void main() {
     },
   );
 
-  test('runtime plugin plan loads official optional native modules', () {
+  test('runtime plugin plan loads official optional native ROI modules', () {
     final PixaRuntimePluginBuildPlan plan = PixaRuntimePluginBuildPlan.load(
       coreManifest: Directory.current.uri.resolve('plugins/pixa_plugins.json'),
       additionalManifests: <Uri>[
@@ -209,15 +209,16 @@ void main() {
         Directory.current.uri.resolve(
           'plugins/optional/pixa_webp_processor.json',
         ),
-        Directory.current.uri.resolve(
-          'plugins/optional/pixa_mjpeg_video_frame.json',
-        ),
       ],
     );
 
-    expect(plan.modules, hasLength(6));
-    expect(plan.hostLinkedPluginModules, 4);
+    expect(plan.modules, hasLength(5));
+    expect(plan.hostLinkedPluginModules, 3);
     expect(plan.canUseSingleHostBinary, isTrue);
+    expect(
+      plan.modules.map((PixaRuntimePluginModulePlan module) => module.moduleId),
+      isNot(contains('pixa.video_frame.mjpeg')),
+    );
 
     final PixaRuntimePluginModulePlan jpeg = plan.modules.singleWhere(
       (PixaRuntimePluginModulePlan module) =>
@@ -236,11 +237,27 @@ void main() {
     expect(webp.processorOperations, <String>{'tile:webp'});
     expect(webp.capabilities, <String>{'processor'});
     expect(webp.link.isNotEmpty, isFalse);
+  });
+
+  test('runtime plugin plan loads official MJPEG video-frame package', () {
+    final PixaRuntimePluginBuildPlan plan = PixaRuntimePluginBuildPlan.load(
+      coreManifest: Directory.current.uri.resolve('plugins/pixa_plugins.json'),
+      additionalManifests: <Uri>[
+        Directory.current.uri.resolve(
+          '../pixa_video_frame_mjpeg/pixa_plugin.json',
+        ),
+      ],
+    );
+
+    expect(plan.modules, hasLength(4));
+    expect(plan.hostLinkedPluginModules, 2);
+    expect(plan.canUseSingleHostBinary, isTrue);
 
     final PixaRuntimePluginModulePlan mjpeg = plan.modules.singleWhere(
       (PixaRuntimePluginModulePlan module) =>
           module.moduleId == 'pixa.video_frame.mjpeg',
     );
+    expect(mjpeg.packageName, 'pixa_video_frame_mjpeg');
     expect(mjpeg.entrypointSymbol, 'pixa_mjpeg_video_frame_plugin_init');
     expect(mjpeg.fetcherSourceKinds, <String>{'video-frame:mjpeg'});
     expect(mjpeg.videoFrameOutputMimeTypes, <String>{'image/jpeg'});

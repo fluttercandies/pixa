@@ -36,6 +36,63 @@ final class PixaSourceSetCandidate {
     );
   }
 
+  /// Creates a filesystem candidate.
+  factory PixaSourceSetCandidate.file(
+    String path, {
+    required int width,
+    int? height,
+    String? mimeType,
+    String? id,
+  }) {
+    return PixaSourceSetCandidate(
+      source: PixaSource.file(path),
+      width: width,
+      height: height,
+      mimeType: mimeType,
+      id: id ?? 'file:$width',
+    );
+  }
+
+  /// Creates an asset candidate.
+  factory PixaSourceSetCandidate.asset(
+    String name, {
+    required int width,
+    String? package,
+    int? height,
+    String? mimeType,
+    String? id,
+  }) {
+    return PixaSourceSetCandidate(
+      source: PixaSource.asset(name, package: package),
+      width: width,
+      height: height,
+      mimeType: mimeType,
+      id: id ?? (package == null ? 'asset:$width' : 'asset:$package:$width'),
+    );
+  }
+
+  /// Creates a runtime-plugin candidate.
+  factory PixaSourceSetCandidate.runtimePlugin({
+    required String sourceKind,
+    required String locator,
+    required int width,
+    int? height,
+    String? mimeType,
+    String? id,
+  }) {
+    final String normalizedKind = sourceKind.trim().toLowerCase();
+    return PixaSourceSetCandidate(
+      source: PixaSource.runtimePlugin(
+        sourceKind: normalizedKind,
+        locator: locator,
+      ),
+      width: width,
+      height: height,
+      mimeType: mimeType,
+      id: id ?? '$normalizedKind:$width',
+    );
+  }
+
   /// Candidate image source.
   final PixaSource source;
 

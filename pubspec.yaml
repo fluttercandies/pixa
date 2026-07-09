@@ -9,6 +9,7 @@ environment:
 workspace:
   - packages/pixa
   - packages/pixa_fetcher_s3
+  - packages/pixa_video_frame_mjpeg
 
 dev_dependencies:
   cockpit: ^1.1.3

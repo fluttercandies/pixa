@@ -42,6 +42,7 @@ void main() {
       );
 
       expect(identical(payload.bytes, bytes), isTrue);
+      expect(payload.kind, PixaPayloadKind.encodedImage);
       expect(payload.mimeType, 'image/png');
       expect(payload.metadata, <String, Object?>{'source': 'test'});
     },

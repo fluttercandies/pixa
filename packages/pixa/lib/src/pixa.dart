@@ -61,6 +61,7 @@ final class Pixa {
   ]) async {
     _validateConfig(config);
     final PixaRegistry registry = _buildPluginRegistry(config.plugins);
+    registry.compileRoutePlan();
     final String rootPath = config.cacheRootPath ?? await _defaultCacheRoot();
     final PixaRuntimeCapabilities capabilities =
         PixaRuntimeCapabilities.current();

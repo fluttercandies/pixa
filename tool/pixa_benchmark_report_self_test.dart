@@ -11,6 +11,7 @@ void main() {
     'image_completion_frame_gate_burst',
     'request_cache_key_memoized_hot_path',
     'format_route_capability_lookup',
+    'runtime_only_route_plan_hot_path',
   ]) {
     _expect(
       coverage.contains(requiredName),

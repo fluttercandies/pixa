@@ -209,6 +209,7 @@ void main() {
         decodersWithStreamingInput: 2,
         runtimeHandlers: 7,
         dartHandlers: 0,
+        platformHandlers: 0,
         externalHandlers: 0,
         runtimeModules: 3,
         builtInHostModules: 2,
@@ -220,6 +221,17 @@ void main() {
         allRuntimeHandlersUseOwnedBuffers: true,
         allRuntimeHandlersUseStreamHandles: true,
       ),
+      registryRoutePlan: const <String, Object?>{
+        'fetcherRoutes': 1,
+        'platformHandlers': 1,
+        'platformSourceKinds': <String>['platform-source'],
+        'platformCapabilityMatrix': <Map<String, Object?>>[
+          <String, Object?>{
+            'handlerId': 'platform-fetcher',
+            'channel': 'dev.pixa/platform-source',
+          },
+        ],
+      },
       cacheStats: PixaCacheStats(
         memoryEntries: 1,
         memoryBytes: 128,
@@ -277,6 +289,8 @@ void main() {
         json['displayDecoder']! as Map<String, Object?>;
     final Map<String, Object?> registryArchitecture =
         json['registryArchitecture']! as Map<String, Object?>;
+    final Map<String, Object?> registryRoutePlan =
+        json['registryRoutePlan']! as Map<String, Object?>;
     final List<Object?> displayDecoderBackends =
         displayDecoder['backends']! as List<Object?>;
     final Map<String, Object?> engineDisplayBackend =
@@ -311,6 +325,15 @@ void main() {
     expect(registryArchitecture['videoFrameBackends'], 1);
     expect(registryArchitecture['videoFrameBackendsUseRuntimeOnly'], isTrue);
     expect(registryArchitecture['runtimeCanUseSingleHostBinary'], isTrue);
+    expect(registryRoutePlan['fetcherRoutes'], 1);
+    expect(registryRoutePlan['platformHandlers'], 1);
+    expect(registryRoutePlan['platformSourceKinds'], <String>[
+      'platform-source',
+    ]);
+    expect(
+      (registryRoutePlan['platformCapabilityMatrix']! as List<Object?>).single,
+      containsPair('channel', 'dev.pixa/platform-source'),
+    );
     expect(platformContract['platform'], 'macOS');
     expect(capabilities['runtimePluginAbiVersion'], 1);
     expect(pluginStats['hostLinkedModules'], 1);
@@ -336,6 +359,178 @@ void main() {
     expect(schedulerStats['totalCancelled'], 10);
     expect(schedulerStats['totalBackpressureDropped'], 11);
     expect(schedulerStats['dartToRuntimeInputCopies'], 14);
+  });
+
+  test('PixaDebugSnapshot exposes a redacted support diagnostic string', () {
+    final PixaDebugSnapshot snapshot = PixaDebugSnapshot(
+      isConfigured: true,
+      config: const PixaConfig(
+        memoryCacheBytes: 1024,
+        diskCacheBytes: 4096,
+        networkConcurrency: 3,
+        decodeConcurrency: 2,
+        maxQueuedRuntimeLoads: 1024,
+        maxQueuedDecodes: 256,
+      ),
+      displayDecoder: const PixaDisplayDecoderSnapshot(
+        selector: 'pixa-display-decoder-v1',
+        defaultBackend: 'engine',
+        hasRuntimeDisplayBackend: false,
+        completionQueueDepth: 0,
+        completionsReleasedThisFrame: 0,
+        completionFrameScheduled: false,
+        backends: <PixaDisplayDecoderBackendSnapshot>[],
+      ),
+      capabilities: PixaRuntimeCapabilities(
+        diskCache: true,
+        httpTransport: true,
+        exifParser: true,
+        pixelProcessors: true,
+        runtimePluginAbiVersion: 1,
+        platformStatus: PixaRuntimePlatformStatus(
+          platform: 'macOS',
+          isWeb: false,
+          isSupportedPlatform: true,
+          runtimeAvailable: true,
+          contract: PixaRuntimePlatformContract.macOS,
+          message: 'runtime core available with token=alpha',
+        ),
+      ),
+      platformSelfCheck: PixaRuntimePlatformSelfCheck.evaluate(
+        capabilities: PixaRuntimeCapabilities(
+          diskCache: true,
+          httpTransport: true,
+          exifParser: true,
+          pixelProcessors: true,
+          runtimePluginAbiVersion: 1,
+          platformStatus: PixaRuntimePlatformStatus(
+            platform: 'macOS',
+            isWeb: false,
+            isSupportedPlatform: true,
+            runtimeAvailable: true,
+            contract: PixaRuntimePlatformContract.macOS,
+            message: 'runtime core available with token=alpha',
+          ),
+        ),
+        cacheRootPath: '/Users/person/private/pixa-cache',
+      ),
+      registryArchitecture: const PixaRegistryArchitectureSnapshot(
+        fetchers: 1,
+        decoders: 0,
+        processors: 0,
+        cacheStores: 0,
+        videoFrameBackends: 0,
+        videoFrameBackendsUseRuntimeOnly: true,
+        videoFrameEncodedOutputBackends: 0,
+        decoderSignatureRoutes: 0,
+        decodersWithMetadataProbe: 0,
+        decodersWithRegionDecode: 0,
+        decodersWithStreamingInput: 0,
+        runtimeHandlers: 1,
+        dartHandlers: 0,
+        platformHandlers: 0,
+        externalHandlers: 0,
+        runtimeModules: 1,
+        builtInHostModules: 1,
+        hostLinkedPluginModules: 0,
+        assetModules: 0,
+        linkableRuntimeModules: 1,
+        allRuntimeHandlersUseHostRuntime: true,
+        allRuntimeHandlersUseBinaryMessages: true,
+        allRuntimeHandlersUseOwnedBuffers: true,
+        allRuntimeHandlersUseStreamHandles: true,
+      ),
+      registryRoutePlan: const <String, Object?>{
+        'fetcherRoutes': 1,
+        'adaptivePluginIntegrations': <Object?>[],
+      },
+      cacheStats: const PixaCacheStats(
+        memoryEntries: 1,
+        memoryBytes: 128,
+        memoryHits: 3,
+        memoryMisses: 1,
+        diskHits: 0,
+        diskMisses: 0,
+        diskWrites: 0,
+        evictions: 0,
+      ),
+      decodedCacheStats: const PixaDecodedCacheStats(
+        currentSize: 2,
+        currentSizeBytes: 512,
+        maximumSize: 100,
+        maximumSizeBytes: 2048,
+        liveImageCount: 1,
+      ),
+      schedulerStats: const PixaSchedulerStats(
+        maxConcurrentRuntimeLoads: 3,
+        maxQueuedRuntimeLoads: 1024,
+        activeRuntimeLoads: 1,
+        queueDepth: 2,
+        inflightRequests: 1,
+        listeners: 1,
+        totalQueued: 5,
+        totalStarted: 4,
+        totalCoalesced: 1,
+        totalCompleted: 3,
+        totalFailed: 1,
+        totalCancelled: 0,
+        totalBackpressureDropped: 0,
+        runtimeProgressEvents: 6,
+        runtimeProgressEventsDropped: 0,
+        observerEventsDroppedBySampling: 0,
+        dartToRuntimeInputCopies: 1,
+        dartToRuntimeInputBytesCopied: 64,
+      ),
+    );
+
+    final String diagnostic = snapshot.toDiagnosticString();
+
+    expect(diagnostic, contains('Pixa diagnostics'));
+    expect(diagnostic, contains('configured: true'));
+    expect(diagnostic, contains('platform: macOS'));
+    expect(diagnostic, contains('runtimeAvailable: true'));
+    expect(diagnostic, contains('cacheHitRate: 0.75'));
+    expect(diagnostic, contains('scheduler: active=1 queue=2'));
+    expect(diagnostic, contains('handlers: runtime=1 dart=0 platform=0'));
+    expect(diagnostic, isNot(contains('alpha')));
+    expect(diagnostic, isNot(contains('/Users/person/private')));
+  });
+
+  test('PixaLogObserver writes redacted event lines', () {
+    final List<String> lines = <String>[];
+    final PixaLogObserver observer = PixaLogObserver(lines.add);
+
+    observer.onPixaEvent(
+      PixaEvent(
+        requestId: 42,
+        stage: PixaStage.fetch,
+        name: 'request.failure',
+        request: PixaRequest.network(
+          'https://images.example.test/a.jpg?token=alpha',
+          headers: const <String, String>{
+            'Authorization': 'Bearer alpha',
+            'Accept': 'image/webp',
+          },
+        ),
+        failure: PixaFailure(
+          requestId: 42,
+          stage: PixaStage.fetch,
+          safeMessage: 'network token=alpha failed',
+          retryability: PixaRetryability.retryable,
+        ),
+        attributes: const <String, Object?>{
+          'retryAfter': 'token=alpha',
+          'safe': 'image/webp',
+        },
+      ),
+    );
+
+    expect(lines, hasLength(1));
+    expect(lines.single, contains('[fetch] request.failure #42'));
+    expect(lines.single, contains('retryable'));
+    expect(lines.single, contains('image/webp'));
+    expect(lines.single, isNot(contains('alpha')));
+    expect(lines.single, isNot(contains('Bearer')));
   });
 
   test('Pixa decoded cache stats reflect Flutter ImageCache budgets', () {
@@ -611,6 +806,165 @@ void main() {
     expect(changed.processors, <String>['resize(width=64,height=64)']);
     expect(changed.cacheKey, isNot(original.cacheKey));
   });
+
+  test(
+    'PixaRequest source helpers preserve advanced request policy fields',
+    () {
+      final Uint8List bytes = Uint8List.fromList(<int>[1, 2, 3]);
+      final PixaRequest asset = PixaRequest.asset(
+        'images/a.png',
+        package: 'demo',
+        cacheNamespace: 'assets',
+        targetSize: const PixaTargetSize(width: 20, height: 30),
+        scale: 2,
+        fit: BoxFit.cover,
+        processors: const <String>['grayscale()'],
+        decoderOptions: const <String, Object?>{'mimeType': 'image/png'},
+        pluginExecutionPolicy:
+            const PixaPluginExecutionPolicy.runtimeFirstWithDart(),
+        cachePolicy: const PixaCachePolicy(mode: PixaCacheMode.memoryOnly),
+        priority: PixaPriority.high,
+        retryPolicy: const PixaRetryPolicy.exponential(maxAttempts: 2),
+        limits: const PixaRequestLimits(maxEncodedBytes: 128),
+        metadata: const <String, Object?>{'trace': 'local'},
+      );
+      final PixaRequest memory = PixaRequest.memory('avatar', bytes);
+      final PixaRequest rawBytes = PixaRequest.bytes(bytes, id: 'inline');
+      final PixaRequest custom = PixaRequest.custom('inline-loader', () async {
+        return bytes;
+      });
+      final PixaRequest runtimePlugin = PixaRequest.runtimePlugin(
+        sourceKind: 'content',
+        locator: 'content://media/private/image.png?token=alpha',
+        pluginExecutionPolicy:
+            const PixaPluginExecutionPolicy.runtimeFirstWithPlatform(),
+      );
+
+      expect(asset.source, isA<PixaAssetSource>());
+      expect((asset.source as PixaAssetSource).package, 'demo');
+      expect(asset.cacheNamespace, 'assets');
+      expect(asset.targetSize, const PixaTargetSize(width: 20, height: 30));
+      expect(asset.scale, 2);
+      expect(asset.fit, BoxFit.cover);
+      expect(asset.processors, <String>['grayscale()']);
+      expect(asset.decoderOptions['mimeType'], 'image/png');
+      expect(asset.pluginExecutionPolicy.dart, isTrue);
+      expect(asset.cachePolicy.mode, PixaCacheMode.memoryOnly);
+      expect(asset.priority, PixaPriority.high);
+      expect(asset.retryPolicy.maxAttempts, 2);
+      expect(asset.limits.maxEncodedBytes, 128);
+      expect(asset.metadata['trace'], 'local');
+
+      expect(memory.source, isA<PixaMemorySource>());
+      expect(rawBytes.source, isA<PixaBytesSource>());
+      expect(custom.source, isA<PixaCustomSource>());
+      expect(runtimePlugin.source, isA<PixaRuntimePluginSource>());
+      expect(
+        runtimePlugin.encodedCacheKey.debugLabel,
+        isNot(contains('alpha')),
+      );
+    },
+  );
+
+  test('PixaSourceSetCandidate helpers cover non-network source kinds', () {
+    final PixaSourceSet set = PixaSourceSet(<PixaSourceSetCandidate>[
+      PixaSourceSetCandidate.asset(
+        'images/small.png',
+        width: 400,
+        package: 'demo',
+        mimeType: 'image/png',
+      ),
+      PixaSourceSetCandidate.file(
+        '/photos/large.jpg',
+        width: 900,
+        mimeType: 'image/jpeg',
+      ),
+      PixaSourceSetCandidate.runtimePlugin(
+        sourceKind: 'content',
+        locator: 'content://media/photo.webp?token=alpha',
+        width: 1200,
+        mimeType: 'image/webp',
+      ),
+    ]);
+
+    final PixaSourceSetCandidate selected = set.select(
+      logicalWidth: 300,
+      devicePixelRatio: 2,
+      acceptedMimeTypes: const <String>['image/webp', 'image/jpeg'],
+    );
+
+    expect(selected.source, isA<PixaRuntimePluginSource>());
+    expect(selected.id, 'content:1200');
+    expect(selected.source.cacheMaterial.toString(), isNot(contains('alpha')));
+  });
+
+  test(
+    'PixaProvider and PixaImage expose custom and runtime plugin helpers',
+    () {
+      final Uint8List bytes = Uint8List.fromList(<int>[0x47, 0x49, 0x46]);
+      final PixaProvider customProvider = PixaProvider.custom(
+        'custom-avatar',
+        () async => bytes,
+        targetWidth: 64,
+        targetHeight: 32,
+        pluginExecutionPolicy:
+            const PixaPluginExecutionPolicy.runtimeFirstWithDart(),
+      );
+      final PixaProvider runtimeProvider = PixaProvider.runtimePlugin(
+        sourceKind: 'content',
+        locator: 'content://media/private/image.png?token=alpha',
+        targetWidth: 96,
+        pluginExecutionPolicy:
+            const PixaPluginExecutionPolicy.runtimeFirstWithPlatform(),
+      );
+      final PixaImage customImage = PixaImage.custom(
+        'custom-avatar',
+        () async => bytes,
+        width: 64,
+        height: 32,
+        fit: BoxFit.cover,
+        pluginExecutionPolicy:
+            const PixaPluginExecutionPolicy.runtimeFirstWithDart(),
+      );
+      final PixaImage runtimeImage = PixaImage.runtimePlugin(
+        sourceKind: 'content',
+        locator: 'content://media/private/image.png?token=alpha',
+        width: 96,
+        height: 54,
+        pluginExecutionPolicy:
+            const PixaPluginExecutionPolicy.runtimeFirstWithPlatform(),
+      );
+
+      expect(customProvider.request.source, isA<PixaCustomSource>());
+      expect(
+        customProvider.request.targetSize,
+        const PixaTargetSize(width: 64, height: 32),
+      );
+      expect(customProvider.request.pluginExecutionPolicy.dart, isTrue);
+      expect(runtimeProvider.request.source, isA<PixaRuntimePluginSource>());
+      expect(runtimeProvider.request.pluginExecutionPolicy.platform, isTrue);
+      expect(
+        runtimeProvider.request.encodedCacheKey.debugLabel,
+        isNot(contains('alpha')),
+      );
+
+      expect(customImage.request.source, isA<PixaCustomSource>());
+      expect(
+        customImage.request.targetSize,
+        const PixaTargetSize(width: 64, height: 32),
+      );
+      expect(customImage.fit, BoxFit.cover);
+      expect(runtimeImage.request.source, isA<PixaRuntimePluginSource>());
+      expect(
+        runtimeImage.request.targetSize,
+        const PixaTargetSize(width: 96, height: 54),
+      );
+      expect(
+        runtimeImage.request.encodedCacheKey.debugLabel,
+        isNot(contains('alpha')),
+      );
+    },
+  );
 
   test('encoded cache key is shared across decode-size variants', () {
     final PixaRequest small = PixaRequest.network(

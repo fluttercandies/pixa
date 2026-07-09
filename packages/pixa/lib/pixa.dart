@@ -14,6 +14,7 @@ export 'src/observer.dart'
     show
         PixaCallbackObserver,
         PixaEvent,
+        PixaLogObserver,
         PixaObserver,
         PixaObserverSamplingPolicy,
         PixaRequestSnapshot;

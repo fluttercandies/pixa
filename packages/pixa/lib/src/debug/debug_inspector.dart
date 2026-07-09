@@ -3,6 +3,7 @@ import '../config.dart';
 import '../display_decoder.dart';
 import '../runtime/capabilities.dart';
 import '../pixa.dart';
+import '../redaction.dart';
 import '../registry.dart';
 import '../scheduler_stats.dart';
 
@@ -16,6 +17,7 @@ final class PixaDebugSnapshot {
     required this.capabilities,
     required this.platformSelfCheck,
     required this.registryArchitecture,
+    required this.registryRoutePlan,
     required this.cacheStats,
     required this.decodedCacheStats,
     required this.schedulerStats,
@@ -38,6 +40,9 @@ final class PixaDebugSnapshot {
 
   /// Plugin registry and runtime module architecture snapshot.
   final PixaRegistryArchitectureSnapshot registryArchitecture;
+
+  /// Compiled plugin route plan used by hot-path lookups.
+  final Map<String, Object?> registryRoutePlan;
 
   /// runtime cache statistics, when Pixa is configured.
   final PixaCacheStats? cacheStats;
@@ -94,6 +99,7 @@ final class PixaDebugSnapshot {
         'platformSelfCheck': platformSelfCheck.toJson(),
       },
       'registryArchitecture': registryArchitecture.toJson(),
+      'registryRoutePlan': registryRoutePlan,
       'cacheStats': cacheStats == null
           ? null
           : <String, Object?>{
@@ -146,6 +152,48 @@ final class PixaDebugSnapshot {
       'schedulerStats': schedulerStats?.toJson(),
     };
   }
+
+  /// Compact redacted diagnostic text for issue reports and support logs.
+  String toDiagnosticString() {
+    final StringBuffer buffer = StringBuffer()
+      ..writeln('Pixa diagnostics')
+      ..writeln('configured: $isConfigured')
+      ..writeln('platform: ${capabilities.platformStatus.platform}')
+      ..writeln(
+        'runtimeAvailable: ${capabilities.platformStatus.runtimeAvailable}',
+      )
+      ..writeln('selfCheckPassed: ${platformSelfCheck.passed}')
+      ..writeln('displayDecoder: ${displayDecoder.defaultBackend}')
+      ..writeln('cacheHitRate: ${_formatRatio(cacheStats?.hitRate ?? 0)}')
+      ..writeln(
+        'decodedCache: entries=${decodedCacheStats.currentSize}/${decodedCacheStats.maximumSize} '
+        'bytes=${decodedCacheStats.currentSizeBytes}/${decodedCacheStats.maximumSizeBytes} '
+        'live=${decodedCacheStats.liveImageCount}',
+      )
+      ..writeln(
+        'scheduler: active=${schedulerStats?.activeRuntimeLoads ?? 0} '
+        'queue=${schedulerStats?.queueDepth ?? 0} '
+        'inflight=${schedulerStats?.inflightRequests ?? 0}',
+      )
+      ..writeln(
+        'handlers: runtime=${registryArchitecture.runtimeHandlers} '
+        'dart=${registryArchitecture.dartHandlers} '
+        'platform=${registryArchitecture.platformHandlers} '
+        'external=${registryArchitecture.externalHandlers}',
+      )
+      ..writeln(
+        'runtimeModules: total=${registryArchitecture.runtimeModules} '
+        'singleHost=${registryArchitecture.runtimeCanUseSingleHostBinary}',
+      );
+    return PixaRedactor.redactText(buffer.toString().trimRight());
+  }
+}
+
+String _formatRatio(double value) {
+  final String fixed = value.toStringAsFixed(3);
+  return fixed
+      .replaceFirst(RegExp(r'0+$'), '')
+      .replaceFirst(RegExp(r'\.$'), '.0');
 }
 
 /// Inspector API for debug tooling.
@@ -171,6 +219,9 @@ final class PixaDebugInspector {
       registryArchitecture: configured
           ? Pixa.pipeline.registry.architectureSnapshot()
           : PixaRegistry().architectureSnapshot(),
+      registryRoutePlan: configured
+          ? Pixa.pipeline.routePlan.toJson()
+          : PixaRegistry().compileRoutePlan().toJson(),
       cacheStats: configured ? Pixa.cacheStats() : null,
       decodedCacheStats: Pixa.decodedCacheStats(),
       schedulerStats: configured ? Pixa.pipeline.schedulerStats() : null,

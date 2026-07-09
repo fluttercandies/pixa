@@ -50,15 +50,40 @@ final class PixaExecutionContext {
 }
 
 /// Encoded bytes returned by fetchers, decoders, processors, and cache stores.
+enum PixaPayloadKind {
+  /// Regular encoded image bytes that can enter Pixa encoded caches.
+  encodedImage,
+
+  /// Runtime-owned buffer with explicit lifetime managed by the host runtime.
+  runtimeOwnedBuffer,
+
+  /// File handle or path-like locator produced by a bounded plugin boundary.
+  fileHandle,
+
+  /// Stream handle for large payloads that must avoid Dart isolate copies.
+  streamHandle,
+
+  /// Metadata-only result with no image bytes.
+  metadataOnly,
+
+  /// Runtime display frame, such as RGBA pixels owned by the runtime.
+  runtimeDisplayFrame,
+}
+
+/// Payload returned by fetchers, decoders, processors, and cache stores.
 final class PixaBytePayload {
   /// Creates a byte payload.
   const PixaBytePayload({
     required this.bytes,
+    this.kind = PixaPayloadKind.encodedImage,
     this.mimeType,
     this.metadata = const <String, Object?>{},
   });
 
-  /// Encoded bytes.
+  /// Payload shape.
+  final PixaPayloadKind kind;
+
+  /// Encoded bytes or a small control payload for non-byte handle kinds.
   ///
   /// Implementations should return immutable or exclusively-owned data. Large
   /// runtime hot paths should prefer owned buffers outside this Dart

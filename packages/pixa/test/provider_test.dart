@@ -13,6 +13,11 @@ import 'package:pixa/pixa_debug.dart';
 import 'package:pixa/pixa.dart';
 import 'package:pixa/src/image_format.dart';
 
+const PixaVersionConstraint _compatiblePixa1 = PixaVersionConstraint(
+  minimumInclusive: '1.0.0',
+  maximumExclusive: '2.0.0',
+);
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -2378,8 +2383,7 @@ final class _UnknownTranscodePlugin implements PixaPlugin {
   String get id => 'unknown-transcode';
 
   @override
-  PixaVersionConstraint get compatiblePixaVersions =>
-      const PixaVersionConstraint.any();
+  PixaVersionConstraint get compatiblePixaVersions => _compatiblePixa1;
 
   @override
   void register(PixaRegistry registry) {
@@ -2436,8 +2440,7 @@ final class _GifTranscodePlugin implements PixaPlugin {
   String get id => 'gif-transcode';
 
   @override
-  PixaVersionConstraint get compatiblePixaVersions =>
-      const PixaVersionConstraint.any();
+  PixaVersionConstraint get compatiblePixaVersions => _compatiblePixa1;
 
   @override
   void register(PixaRegistry registry) {
@@ -2491,8 +2494,7 @@ final class _InvalidGifTranscodePlugin implements PixaPlugin {
   String get id => 'invalid-gif-transcode';
 
   @override
-  PixaVersionConstraint get compatiblePixaVersions =>
-      const PixaVersionConstraint.any();
+  PixaVersionConstraint get compatiblePixaVersions => _compatiblePixa1;
 
   @override
   void register(PixaRegistry registry) {

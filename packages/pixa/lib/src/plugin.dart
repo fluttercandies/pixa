@@ -15,26 +15,24 @@ abstract interface class PixaPlugin {
 /// Small semver-compatible constraint used to avoid depending on pub_semver.
 final class PixaVersionConstraint {
   /// Creates a version constraint.
-  const PixaVersionConstraint({this.minimumInclusive, this.maximumExclusive});
-
-  /// Accepts all versions.
-  const PixaVersionConstraint.any() : this();
+  const PixaVersionConstraint({
+    required this.minimumInclusive,
+    required this.maximumExclusive,
+  });
 
   /// Minimum inclusive version.
-  final String? minimumInclusive;
+  final String minimumInclusive;
 
   /// Maximum exclusive version.
-  final String? maximumExclusive;
+  final String maximumExclusive;
 
   /// Returns whether [version] is allowed.
   bool allows(String version) {
     final List<int> current = _parse(version);
-    final String? min = minimumInclusive;
-    if (min != null && _compare(current, _parse(min)) < 0) {
+    if (_compare(current, _parse(minimumInclusive)) < 0) {
       return false;
     }
-    final String? max = maximumExclusive;
-    if (max != null && _compare(current, _parse(max)) >= 0) {
+    if (_compare(current, _parse(maximumExclusive)) >= 0) {
       return false;
     }
     return true;

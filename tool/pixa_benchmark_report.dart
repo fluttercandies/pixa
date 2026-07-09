@@ -80,6 +80,9 @@ const Map<String, List<String>> _requiredCoverage = <String, List<String>>{
   'image completion pacing': <String>['image_completion_frame_gate_burst'],
   'request key hot path': <String>['request_cache_key_memoized_hot_path'],
   'format route hot path': <String>['format_route_capability_lookup'],
+  'runtime-only route plan hot path': <String>[
+    'runtime_only_route_plan_hot_path',
+  ],
   'animated image': <String>['flutter_animated_gif_frames'],
   'runtime ABI overhead': <String>['runtime_small_fnv1a64_32b'],
 };

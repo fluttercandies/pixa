@@ -41,11 +41,19 @@ void main() {
     label: 'unsupported image format support surface',
     files: _unsupportedFormatClaimFiles(root),
     patterns: _unsupportedFormatClaimPatterns,
+    ignoreLine: _isBrandSvgReferenceLine,
   );
   _checkStableRasterFormatMatrix(root, failures);
   _checkRuntimePackagingDiscipline(root, failures);
   _checkPluginAuthoringDocs(root, failures);
+  _checkPipelineExtensibilityDocs(root, failures);
+  _checkVideoFramePluginPackage(root, failures);
   _checkCoreProductFeatureDocs(root, failures);
+  _checkDeveloperDxDocs(root, failures);
+  _checkBrandAssets(root, failures);
+  _checkUserFacingReadmes(root, failures);
+  _checkReleaseNeutralReadmeInstallCopy(root, failures);
+  _checkExplicitPluginVersionConstraints(root, failures);
   _checkSwiftPackageManagerSupport(root, failures);
   _checkPublicExports(root, failures);
   _checkUnsafeBoundary(root, failures);
@@ -262,11 +270,15 @@ void _checkNoMatches(
   required String label,
   required Iterable<File> files,
   required List<RegExp> patterns,
+  bool Function(File file, String line)? ignoreLine,
 }) {
   for (final File file in files) {
     final List<String> lines = file.readAsLinesSync();
     for (var index = 0; index < lines.length; index++) {
       final String line = lines[index];
+      if (ignoreLine != null && ignoreLine(file, line)) {
+        continue;
+      }
       for (final RegExp pattern in patterns) {
         if (pattern.hasMatch(line)) {
           failures.add(
@@ -277,6 +289,12 @@ void _checkNoMatches(
       }
     }
   }
+}
+
+bool _isBrandSvgReferenceLine(File file, String line) {
+  final String normalizedLine = line.replaceAll(r'\', '/');
+  return normalizedLine.contains('assets/brand/pixa-lockup.svg') ||
+      normalizedLine.contains('assets/brand/pixa-mark.svg');
 }
 
 void _checkStableRasterFormatMatrix(Directory root, List<String> failures) {
@@ -436,7 +454,7 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
     'packages/pixa/plugins/pixa_plugins.json',
     'packages/pixa/plugins/optional/pixa_jpeg_turbo_processor.json',
     'packages/pixa/plugins/optional/pixa_webp_processor.json',
-    'packages/pixa/plugins/optional/pixa_mjpeg_video_frame.json',
+    'packages/pixa_video_frame_mjpeg/pixa_plugin.json',
   ]) {
     final File file = File('${root.path}/$path');
     if (!file.existsSync()) {
@@ -447,6 +465,15 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
   }
   if (sources.length < 9) {
     return;
+  }
+  final File oldMjpegManifest = File(
+    '${root.path}/packages/pixa/plugins/optional/pixa_mjpeg_video_frame.json',
+  );
+  if (oldMjpegManifest.existsSync()) {
+    failures.add(
+      'runtime packaging discipline: MJPEG video-frame manifest must live in '
+      'packages/pixa_video_frame_mjpeg/pixa_plugin.json, not core optional',
+    );
   }
 
   _requireRawToken(
@@ -533,10 +560,8 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
     'enable_native_roi',
     'enable_jpeg_turbo_roi',
     'enable_webp_roi',
-    'enable_mjpeg_video_frame',
     'plugins/optional/pixa_jpeg_turbo_processor.json',
     'plugins/optional/pixa_webp_processor.json',
-    'plugins/optional/pixa_mjpeg_video_frame.json',
     'link-arg=-Wl,-dead_strip',
     'link-arg=-Wl,--gc-sections',
     'link-arg=-Wl,--as-needed',
@@ -593,8 +618,9 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
   _checkOptionalVideoFrameManifest(
     root,
     failures,
-    path: 'packages/pixa/plugins/optional/pixa_mjpeg_video_frame.json',
+    path: 'packages/pixa_video_frame_mjpeg/pixa_plugin.json',
     expectedModuleId: 'pixa.video_frame.mjpeg',
+    expectedPackageName: 'pixa_video_frame_mjpeg',
     expectedEntrypoint: 'pixa_mjpeg_video_frame_plugin_init',
     expectedRoute: 'video-frame:mjpeg',
     expectedOutputMime: 'image/jpeg',
@@ -614,6 +640,16 @@ void _checkPluginAuthoringDocs(Directory root, List<String> failures) {
     'PixaPlugin',
     'PixaVersionConstraint',
     'PixaConfig(plugins:',
+    'PixaPluginIntegrationCandidate',
+    'PixaRegistry.registerAdaptiveIntegration',
+    'automatic integration selection',
+    'hostRuntimeAvailable',
+    'platformAvailable',
+    'adaptivePluginIntegrations',
+    'pub.dev package cannot auto-link runtime host code',
+    'local `path`, a `git` dependency, or a workspace package',
+    'must register at least one fetcher, decoder, processor',
+    'every descriptor it adds must match the candidate mode',
     'dart pub publish --dry-run',
     'dart pub publish',
     'host-linked runtime modules',
@@ -635,6 +671,7 @@ void _checkPluginAuthoringDocs(Directory root, List<String> failures) {
     'README.md': 'packages/pixa/PLUGIN_AUTHORING.md',
     'README_ZH.md': 'packages/pixa/PLUGIN_AUTHORING.md',
     'packages/pixa/README.md': 'PLUGIN_AUTHORING.md',
+    'packages/pixa/README_ZH.md': 'PLUGIN_AUTHORING.md',
   };
   for (final MapEntry<String, String> entry in links.entries) {
     final File file = File('${root.path}/${entry.key}');
@@ -644,6 +681,185 @@ void _checkPluginAuthoringDocs(Directory root, List<String> failures) {
     }
     if (!file.readAsStringSync().contains(entry.value)) {
       failures.add('${entry.key} must link to ${entry.value}');
+    }
+  }
+}
+
+void _checkPipelineExtensibilityDocs(Directory root, List<String> failures) {
+  final File guide = File('${root.path}/packages/pixa/PLUGIN_AUTHORING.md');
+  if (!guide.existsSync()) {
+    failures.add('missing packages/pixa/PLUGIN_AUTHORING.md');
+    return;
+  }
+  final String guideText = guide.readAsStringSync();
+  for (final String token in <String>[
+    'PixaPluginExecutionKind.platform',
+    'PixaPluginExecutionPolicy.runtimeFirstWithPlatform()',
+    'PixaPlatformContract',
+    'PixaPlatformFetcherDescriptor',
+    'PixaPayloadKind',
+    'MethodChannel',
+    'EventChannel',
+    'Pigeon',
+    'compiled route plan',
+    'platform capability matrix',
+    'hot-path safety',
+    'cache hit',
+    'PixaPluginIntegrationCandidate',
+    'PixaRegistry.registerAdaptiveIntegration',
+    'automatic integration selection',
+    'adaptivePluginIntegrations',
+  ]) {
+    if (!guideText.contains(token)) {
+      failures.add('pipeline extensibility docs missing `$token`');
+    }
+  }
+
+  const Map<String, List<String>> docs = <String, List<String>>{
+    'README.md': <String>[
+      'compiled route plan',
+      'platform capability matrix',
+      'PixaPluginExecutionPolicy.runtimeFirstWithPlatform()',
+      'PixaPluginIntegrationCandidate',
+      'PixaRegistry.registerAdaptiveIntegration',
+      'automatic integration selection',
+      'adaptivePluginIntegrations',
+      'pub.dev package cannot auto-link runtime host code',
+    ],
+    'README_ZH.md': <String>[
+      'compiled route plan',
+      'platform capability matrix',
+      'PixaPluginExecutionPolicy.runtimeFirstWithPlatform()',
+      'PixaPluginIntegrationCandidate',
+      'PixaRegistry.registerAdaptiveIntegration',
+      'automatic integration selection',
+      'adaptivePluginIntegrations',
+      'pub.dev package cannot auto-link runtime host code',
+    ],
+    'packages/pixa/README.md': <String>[
+      'compiled route plan',
+      'platform capability matrix',
+      'PixaPluginExecutionPolicy.runtimeFirstWithPlatform()',
+      'PixaPluginIntegrationCandidate',
+      'PixaRegistry.registerAdaptiveIntegration',
+      'automatic integration selection',
+      'adaptivePluginIntegrations',
+      'pub.dev package cannot auto-link runtime host code',
+    ],
+    'packages/pixa/README_ZH.md': <String>[
+      'compiled route plan',
+      'platform capability matrix',
+      'PixaPluginExecutionPolicy.runtimeFirstWithPlatform()',
+      'PixaPluginIntegrationCandidate',
+      'PixaRegistry.registerAdaptiveIntegration',
+      'automatic integration selection',
+      'adaptivePluginIntegrations',
+      'pub.dev package cannot auto-link runtime host code',
+    ],
+  };
+  for (final MapEntry<String, List<String>> entry in docs.entries) {
+    final File file = File('${root.path}/${entry.key}');
+    if (!file.existsSync()) {
+      failures.add('missing ${entry.key}');
+      continue;
+    }
+    final String text = file.readAsStringSync();
+    for (final String token in entry.value) {
+      if (!text.contains(token)) {
+        failures.add('${entry.key} missing pipeline docs token `$token`');
+      }
+    }
+  }
+}
+
+void _checkVideoFramePluginPackage(Directory root, List<String> failures) {
+  const Map<String, List<String>> requiredTokens = <String, List<String>>{
+    'packages/pixa_video_frame_mjpeg/pubspec.yaml': <String>[
+      'name: pixa_video_frame_mjpeg',
+      'resolution: workspace',
+      'pixa:',
+    ],
+    'packages/pixa_video_frame_mjpeg/lib/pixa_video_frame_mjpeg.dart': <String>[
+      'PixaMjpegVideoFramePlugin',
+      'PixaMjpegVideoFrame.request',
+      'PixaMjpegVideoFrame.image',
+      'hostRuntimeAvailable',
+      'pixaMjpegVideoFrameDescriptor',
+      'PixaRuntimeVideoFrameBackendDescriptor',
+      'video-frame:mjpeg',
+      'image/jpeg',
+    ],
+    'packages/pixa_video_frame_mjpeg/pixa_plugin.json': <String>[
+      '"moduleId": "pixa.video_frame.mjpeg"',
+      '"packageName": "pixa_video_frame_mjpeg"',
+      '"entrypointSymbol": "pixa_mjpeg_video_frame_plugin_init"',
+      '"fetcherSourceKinds": ["video-frame:mjpeg"]',
+      '"videoFrameOutputMimeTypes": ["image/jpeg"]',
+    ],
+    'packages/pixa_video_frame_mjpeg/README.md': <String>[
+      'PixaMjpegVideoFramePlugin',
+      'hostRuntimeAvailable',
+      'PixaMjpegVideoFrame.request',
+      'PixaMjpegVideoFrame.image',
+      'pixa_plugin.json',
+      'plugin_manifest',
+      'plugin_manifest_directory',
+      'pub.dev package cannot auto-link runtime host code',
+      'video-frame:mjpeg',
+      'image/jpeg',
+    ],
+    'README.md': <String>[
+      'pixa_video_frame_mjpeg',
+      'PixaMjpegVideoFramePlugin',
+      'hostRuntimeAvailable',
+      'does not ship a default video-frame backend',
+      'plugin_manifest_directory',
+    ],
+    'README_ZH.md': <String>[
+      'pixa_video_frame_mjpeg',
+      'PixaMjpegVideoFramePlugin',
+      'hostRuntimeAvailable',
+      '不内置默认 video-frame backend',
+      'plugin_manifest_directory',
+    ],
+    'packages/pixa/README.md': <String>[
+      'pixa_video_frame_mjpeg',
+      'PixaMjpegVideoFramePlugin',
+      'hostRuntimeAvailable',
+      'does not ship a default video-frame backend',
+      'plugin_manifest_directory',
+    ],
+    'packages/pixa/README_ZH.md': <String>[
+      'pixa_video_frame_mjpeg',
+      'PixaMjpegVideoFramePlugin',
+      'hostRuntimeAvailable',
+      '不内置默认 video-frame backend',
+      'plugin_manifest_directory',
+    ],
+    'packages/pixa/PLUGIN_AUTHORING.md': <String>[
+      'pixa_video_frame_mjpeg',
+      'PixaMjpegVideoFramePlugin',
+      'PixaMjpegVideoFrame.request',
+      'hostRuntimeAvailable',
+      'video-frame:mjpeg',
+      'does not expose the MJPEG manifest',
+      'plugin_manifest_directory',
+    ],
+  };
+
+  for (final MapEntry<String, List<String>> entry in requiredTokens.entries) {
+    final File file = File('${root.path}/${entry.key}');
+    if (!file.existsSync()) {
+      failures.add('video-frame plugin package: ${entry.key} is missing');
+      continue;
+    }
+    final String text = file.readAsStringSync();
+    for (final String token in entry.value) {
+      if (!text.contains(token)) {
+        failures.add(
+          'video-frame plugin package: ${entry.key} missing `$token`',
+        );
+      }
     }
   }
 }
@@ -671,6 +887,319 @@ void _checkCoreProductFeatureDocs(Directory root, List<String> failures) {
     for (final String token in tokens) {
       if (!text.contains(token)) {
         failures.add('$path must document `$token`');
+      }
+    }
+  }
+}
+
+void _checkDeveloperDxDocs(Directory root, List<String> failures) {
+  const Map<String, List<String>> requiredTokens = <String, List<String>>{
+    'README.md': <String>[
+      'PixaRequest.asset',
+      'PixaProvider.custom',
+      'PixaImage.runtimePlugin',
+      'PixaDebugSnapshot.toDiagnosticString()',
+      'PixaLogObserver',
+      'PixaS3.provider',
+      'PixaS3.image',
+    ],
+    'README_ZH.md': <String>[
+      'PixaRequest.asset',
+      'PixaProvider.custom',
+      'PixaImage.runtimePlugin',
+      'PixaDebugSnapshot.toDiagnosticString()',
+      'PixaLogObserver',
+      'PixaS3.provider',
+      'PixaS3.image',
+    ],
+    'packages/pixa/README.md': <String>[
+      'PixaRequest.asset',
+      'PixaProvider.custom',
+      'PixaImage.runtimePlugin',
+      'PixaDebugSnapshot.toDiagnosticString()',
+      'PixaLogObserver',
+      'PixaS3.provider',
+      'PixaS3.image',
+    ],
+    'packages/pixa/README_ZH.md': <String>[
+      'PixaRequest.asset',
+      'PixaProvider.custom',
+      'PixaImage.runtimePlugin',
+      'PixaDebugSnapshot.toDiagnosticString()',
+      'PixaLogObserver',
+      'PixaS3.provider',
+      'PixaS3.image',
+    ],
+  };
+  for (final MapEntry<String, List<String>> entry in requiredTokens.entries) {
+    final File file = File('${root.path}/${entry.key}');
+    if (!file.existsSync()) {
+      failures.add('missing ${entry.key}');
+      continue;
+    }
+    final String text = file.readAsStringSync();
+    for (final String token in entry.value) {
+      if (!text.contains(token)) {
+        failures.add('${entry.key} must document Developer DX `$token`');
+      }
+    }
+  }
+}
+
+void _checkBrandAssets(Directory root, List<String> failures) {
+  const List<String> svgPaths = <String>[
+    'packages/pixa/assets/brand/pixa-mark.svg',
+    'packages/pixa/assets/brand/pixa-lockup.svg',
+  ];
+  for (final String path in svgPaths) {
+    final File file = File('${root.path}/$path');
+    if (!file.existsSync()) {
+      failures.add('brand asset missing: $path');
+      continue;
+    }
+    final String text = file.readAsStringSync();
+    for (final String token in <String>[
+      'role="img"',
+      'aria-labelledby="title desc"',
+      '<title id="title">',
+      '<desc id="desc">',
+    ]) {
+      if (!text.contains(token)) {
+        failures.add('brand asset $path missing `$token`');
+      }
+    }
+  }
+
+  const Map<String, String> readmeRefs = <String, String>{
+    'README.md': 'packages/pixa/assets/brand/pixa-lockup.svg',
+    'README_ZH.md': 'packages/pixa/assets/brand/pixa-lockup.svg',
+    'packages/pixa/README.md': 'assets/brand/pixa-lockup.svg',
+    'packages/pixa/README_ZH.md': 'assets/brand/pixa-lockup.svg',
+  };
+  for (final MapEntry<String, String> entry in readmeRefs.entries) {
+    final File file = File('${root.path}/${entry.key}');
+    if (!file.existsSync()) {
+      failures.add('brand README missing: ${entry.key}');
+      continue;
+    }
+    final String text = file.readAsStringSync();
+    if (!text.contains(entry.value)) {
+      failures.add('${entry.key} must reference `${entry.value}`');
+    }
+    if (!text.contains('alt="Pixa logo"')) {
+      failures.add('${entry.key} must include accessible Pixa logo alt text');
+    }
+  }
+}
+
+void _checkUserFacingReadmes(Directory root, List<String> failures) {
+  const Map<String, List<String>> requiredTokens = <String, List<String>>{
+    'README.md': <String>[
+      '## Install',
+      '## Quick Start',
+      '## What You Get',
+      '## Official Plugins',
+      '## Example App',
+      '## Documentation Map',
+    ],
+    'README_ZH.md': <String>[
+      '## 安装',
+      '## 快速开始',
+      '## 你会得到什么',
+      '## 官方插件',
+      '## 示例应用',
+      '## 文档导航',
+    ],
+    'packages/pixa/README.md': <String>[
+      '## Install',
+      '## Quick Start',
+      '## Requests And Sources',
+      '## Responsive Images, Warmup, And Analysis',
+      '## Privacy And Limits',
+      '## Diagnostics',
+    ],
+    'packages/pixa/README_ZH.md': <String>[
+      '## 安装',
+      '## 快速开始',
+      '## Request 和 Source',
+      '## 响应式图片、预热和分析',
+      '## 隐私与资源限制',
+      '## 诊断',
+    ],
+    'packages/pixa_fetcher_s3/README.md': <String>[
+      'Official Pixa S3 fetcher package',
+      '## Install',
+      '## Register',
+      '## Use',
+      '## Credentials And Privacy',
+      'PixaS3.provider',
+      'PixaS3.image',
+    ],
+    'packages/pixa_video_frame_mjpeg/README.md': <String>[
+      'Official Pixa MJPEG AVI video-frame backend package',
+      '## Install',
+      '## Enable The Runtime Module',
+      '## Register',
+      '## Use',
+      '## Failure Behavior',
+    ],
+    'examples/pixa_gallery/README.md': <String>[
+      '# Pixa Gallery Example',
+      '## Run',
+      '## What To Try',
+      '## Notes For App Developers',
+    ],
+    'examples/pixa_gallery/ios/Runner/Assets.xcassets/LaunchImage.imageset/README.md':
+        <String>[
+          '# Launch Screen Assets',
+          'example app',
+          'not part of the Pixa library API',
+        ],
+  };
+
+  for (final MapEntry<String, List<String>> entry in requiredTokens.entries) {
+    final File file = File('${root.path}/${entry.key}');
+    if (!file.existsSync()) {
+      failures.add('user-facing README missing: ${entry.key}');
+      continue;
+    }
+    final String text = file.readAsStringSync();
+    for (final String token in entry.value) {
+      if (!text.contains(token)) {
+        failures.add('${entry.key} must keep user README token `$token`');
+      }
+    }
+  }
+}
+
+void _checkReleaseNeutralReadmeInstallCopy(
+  Directory root,
+  List<String> failures,
+) {
+  final Map<String, String> readmes = <String, String>{
+    for (final String path in <String>[
+      'README.md',
+      'README_ZH.md',
+      'packages/pixa/README.md',
+      'packages/pixa/README_ZH.md',
+      'packages/pixa_fetcher_s3/README.md',
+      'packages/pixa_video_frame_mjpeg/README.md',
+    ])
+      path: File('${root.path}/$path').readAsStringSync(),
+  };
+
+  final List<RegExp> banned = <RegExp>[
+    RegExp(r'first public release', caseSensitive: false),
+    RegExp(r'publishing disabled', caseSensitive: false),
+    RegExp(r'release owner', caseSensitive: false),
+    RegExp(r'published package after', caseSensitive: false),
+    RegExp(r'首个公开版本'),
+  ];
+  for (final MapEntry<String, String> entry in readmes.entries) {
+    for (final RegExp pattern in banned) {
+      if (pattern.hasMatch(entry.value)) {
+        failures.add(
+          '${entry.key} contains release-stage README install copy matching '
+          '`${pattern.pattern}`',
+        );
+      }
+    }
+  }
+
+  final Map<String, List<String>> requiredInstallTokens =
+      <String, List<String>>{
+        'README.md': <String>['pixa: ^1.0.0', 'path: packages/pixa'],
+        'README_ZH.md': <String>['pixa: ^1.0.0', 'path: packages/pixa'],
+        'packages/pixa/README.md': <String>['pixa: ^1.0.0', 'path: ../pixa'],
+        'packages/pixa/README_ZH.md': <String>['pixa: ^1.0.0', 'path: ../pixa'],
+        'packages/pixa_fetcher_s3/README.md': <String>[
+          'pixa: ^1.0.0',
+          'pixa_fetcher_s3: ^1.0.0',
+          'path: ../pixa',
+          'path: ../pixa_fetcher_s3',
+        ],
+        'packages/pixa_video_frame_mjpeg/README.md': <String>[
+          'pixa: ^1.0.0',
+          'pixa_video_frame_mjpeg: ^1.0.0',
+          'path: ../pixa',
+          'path: ../pixa_video_frame_mjpeg',
+        ],
+      };
+
+  for (final MapEntry<String, List<String>> entry
+      in requiredInstallTokens.entries) {
+    final String text = readmes[entry.key]!;
+    for (final String token in entry.value) {
+      if (!text.contains(token)) {
+        failures.add('${entry.key} must keep install token `$token`');
+      }
+    }
+  }
+}
+
+void _checkExplicitPluginVersionConstraints(
+  Directory root,
+  List<String> failures,
+) {
+  final List<File> files = <File>[
+    File('${root.path}/README.md'),
+    File('${root.path}/README_ZH.md'),
+    File('${root.path}/packages/pixa/README.md'),
+    File('${root.path}/packages/pixa/README_ZH.md'),
+    File('${root.path}/packages/pixa/PLUGIN_AUTHORING.md'),
+    File('${root.path}/packages/pixa/lib/src/plugin.dart'),
+    File('${root.path}/packages/pixa/test/plugin_test.dart'),
+    File('${root.path}/packages/pixa/test/provider_test.dart'),
+    File('${root.path}/packages/pixa_fetcher_s3/README.md'),
+    File('${root.path}/packages/pixa_fetcher_s3/pubspec.yaml'),
+    File('${root.path}/packages/pixa_video_frame_mjpeg/README.md'),
+    File('${root.path}/packages/pixa_video_frame_mjpeg/pubspec.yaml'),
+  ];
+
+  final RegExp anyDependency = RegExp(
+    r'^\s*(?:pixa|pixa_fetcher_s3|pixa_video_frame_mjpeg):\s*any\s*$',
+    multiLine: true,
+  );
+
+  for (final File file in files) {
+    if (!file.existsSync()) {
+      failures.add('explicit plugin version constraints: missing ${file.path}');
+      continue;
+    }
+    final String text = file.readAsStringSync();
+    if (text.contains('PixaVersionConstraint.any')) {
+      failures.add(
+        'explicit plugin version constraints: ${_relative(root, file)} '
+        'must not use PixaVersionConstraint.any',
+      );
+    }
+    if (text.contains('PixaVersionConstraint()')) {
+      failures.add(
+        'explicit plugin version constraints: ${_relative(root, file)} '
+        'must not construct an empty PixaVersionConstraint',
+      );
+    }
+    if (anyDependency.hasMatch(text)) {
+      failures.add(
+        'explicit plugin version constraints: ${_relative(root, file)} '
+        'must not use any for Pixa package dependencies',
+      );
+    }
+  }
+
+  final File pluginApi = File('${root.path}/packages/pixa/lib/src/plugin.dart');
+  if (pluginApi.existsSync()) {
+    final String text = pluginApi.readAsStringSync();
+    for (final String token in <String>[
+      'required this.minimumInclusive',
+      'required this.maximumExclusive',
+      'final String minimumInclusive',
+      'final String maximumExclusive',
+    ]) {
+      if (!text.contains(token)) {
+        failures.add(
+          'explicit plugin version constraints: plugin API missing `$token`',
+        );
       }
     }
   }
@@ -950,6 +1479,7 @@ void _checkOptionalVideoFrameManifest(
   List<String> failures, {
   required String path,
   required String expectedModuleId,
+  required String expectedPackageName,
   required String expectedEntrypoint,
   required String expectedRoute,
   required String expectedOutputMime,
@@ -974,7 +1504,8 @@ void _checkOptionalVideoFrameManifest(
     );
     return;
   }
-  if (module['deployment'] != 'hostLinkedPluginModule' ||
+  if (module['packageName'] != expectedPackageName ||
+      module['deployment'] != 'hostLinkedPluginModule' ||
       module['entrypointSymbol'] != expectedEntrypoint ||
       module['hostManagedRuntime'] != true ||
       module['binaryMessages'] != true ||

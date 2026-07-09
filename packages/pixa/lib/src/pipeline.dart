@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:isolate';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'cache/cache_stats.dart';
@@ -34,7 +35,9 @@ final class PixaPipeline {
        assert(maxConcurrentRuntimeLoads > 0),
        assert(maxQueuedRuntimeLoads >= 0),
        maxConcurrentRuntimeLoads = maxConcurrentRuntimeLoads.clamp(1, 32),
-       maxQueuedRuntimeLoads = maxQueuedRuntimeLoads.clamp(0, 65536).toInt();
+       maxQueuedRuntimeLoads = maxQueuedRuntimeLoads.clamp(0, 65536).toInt() {
+    routePlan = this.registry.compileRoutePlan();
+  }
 
   /// Platform cache root path.
   final String cacheRootPath;
@@ -47,6 +50,9 @@ final class PixaPipeline {
 
   /// Plugin registry used for non-core extension routes.
   final PixaRegistry registry;
+
+  /// Compiled route plan used by hot-path plugin lookups.
+  late final PixaCompiledRoutePlan routePlan;
 
   /// Maximum concurrent Dart isolate entries into the runtime pipeline.
   final int maxConcurrentRuntimeLoads;
@@ -76,6 +82,9 @@ final class PixaPipeline {
   final Map<_InflightRuntimeLoadKey, _InflightRuntimeLoad> _inflight =
       <_InflightRuntimeLoadKey, _InflightRuntimeLoad>{};
   final _PriorityInflightQueue _queue = _PriorityInflightQueue();
+  final Map<String, int> _activePlatformCalls = <String, int>{};
+  final Map<String, ListQueue<Completer<void>>> _queuedPlatformCalls =
+      <String, ListQueue<Completer<void>>>{};
 
   /// Loads encoded image bytes through Rust.
   Future<PixaPipelineLoad> load(PixaRequest request) {
@@ -1520,71 +1529,15 @@ final class PixaPipeline {
             data.lengthInBytes,
           );
         case PixaCustomSource(:final id, :final loader):
-          final PixaFetcherDescriptor? descriptor = registry
+          final PixaFetcherDescriptor? descriptor = routePlan
               .fetcherForSourceKind(id);
-          if (descriptor is PixaDartFetcherDescriptor) {
-            final int pluginStartedAtMicros = _clock.elapsedMicroseconds;
-            _emit(
-              PixaEvent(
-                requestId: inflight.rootRequestId,
-                stage: PixaStage.fetch,
-                name: 'plugin.fetch.start',
-                request: request,
-                attributes: <String, Object?>{
-                  'fetcherId': descriptor.id,
-                  'sourceKind': id,
-                },
-              ),
-            );
-            final PixaExecutionContext context = PixaExecutionContext(
-              requestId: inflight.rootRequestId,
-              request: request,
-              cancellationSignal: _InflightCancellationSignal(inflight),
-              onProgress: (PixaProgress progress) {
-                for (final _PipelineListener listener
-                    in List<_PipelineListener>.of(inflight.listeners)) {
-                  final PixaProgress scoped = PixaProgress(
-                    requestId: listener.requestId,
-                    stage: progress.stage,
-                    receivedBytes: progress.receivedBytes,
-                    expectedBytes: progress.expectedBytes,
-                    message: progress.message,
-                  );
-                  listener.emitProgress(scoped);
-                  _emit(
-                    PixaEvent(
-                      requestId: listener.requestId,
-                      stage: scoped.stage,
-                      name: 'plugin.fetch.progress',
-                      request: request,
-                      progress: scoped,
-                      attributes: <String, Object?>{
-                        'fetcherId': descriptor.id,
-                        'sourceKind': id,
-                      },
-                    ),
-                  );
-                }
-              },
-            );
-            final PixaBytePayload payload = await descriptor.fetcher.fetch(
+          if (descriptor != null) {
+            final PixaBytePayload payload = await _runPluginFetcher(
+              inflight,
+              request,
               source,
-              context,
-            );
-            _emit(
-              PixaEvent(
-                requestId: inflight.rootRequestId,
-                stage: PixaStage.fetch,
-                name: 'plugin.fetch.complete',
-                request: request,
-                durationMicros: _elapsedSince(pluginStartedAtMicros),
-                attributes: <String, Object?>{
-                  'fetcherId': descriptor.id,
-                  'sourceKind': id,
-                  'mimeType': payload.mimeType,
-                  'bytes': payload.bytes.length,
-                },
-              ),
+              descriptor,
+              id,
             );
             return payload.bytes;
           }
@@ -1605,6 +1558,302 @@ final class PixaPipeline {
         stackTrace: stackTrace,
       );
     }
+  }
+
+  Future<PixaBytePayload> _runPluginFetcher(
+    _InflightRuntimeLoad inflight,
+    PixaRequest request,
+    PixaSource source,
+    PixaFetcherDescriptor descriptor,
+    String sourceKind,
+  ) async {
+    _ensurePluginFetcherPolicy(inflight, request, descriptor, sourceKind);
+    final PixaFetcher fetcher = _pluginFetcherImplementation(
+      inflight,
+      descriptor,
+    );
+    _validatePlatformFetcherHost(inflight, descriptor);
+    final int pluginStartedAtMicros = _clock.elapsedMicroseconds;
+    final Map<String, Object?> baseAttributes = _pluginFetcherAttributes(
+      descriptor,
+      sourceKind,
+    );
+    return _withPlatformCallSlot(descriptor, () async {
+      _InflightCancellationSignal(inflight).throwIfCancellationRequested();
+      _emit(
+        PixaEvent(
+          requestId: inflight.rootRequestId,
+          stage: PixaStage.fetch,
+          name: 'plugin.fetch.start',
+          request: request,
+          attributes: baseAttributes,
+        ),
+      );
+      try {
+        final PixaExecutionContext context = PixaExecutionContext(
+          requestId: inflight.rootRequestId,
+          request: request,
+          cancellationSignal: _InflightCancellationSignal(inflight),
+          onProgress: (PixaProgress progress) {
+            for (final _PipelineListener listener in List<_PipelineListener>.of(
+              inflight.listeners,
+            )) {
+              final PixaProgress scoped = PixaProgress(
+                requestId: listener.requestId,
+                stage: progress.stage,
+                receivedBytes: progress.receivedBytes,
+                expectedBytes: progress.expectedBytes,
+                message: progress.message,
+              );
+              listener.emitProgress(scoped);
+              _emit(
+                PixaEvent(
+                  requestId: listener.requestId,
+                  stage: scoped.stage,
+                  name: 'plugin.fetch.progress',
+                  request: request,
+                  progress: scoped,
+                  attributes: baseAttributes,
+                ),
+              );
+            }
+          },
+        );
+        final PixaBytePayload payload =
+            await Future<PixaBytePayload>.value(
+              fetcher.fetch(source, context),
+            ).timeout(
+              request.limits.timeout,
+              onTimeout: () {
+                inflight.notifyCancelled();
+                throw PixaFailure(
+                  requestId: inflight.rootRequestId,
+                  stage: PixaStage.fetch,
+                  safeMessage:
+                      'Pixa plugin fetcher ${descriptor.id} timed out after '
+                      '${request.limits.timeout.inMilliseconds}ms.',
+                  retryability: PixaRetryability.retryable,
+                );
+              },
+            );
+        _validatePluginFetcherPayload(inflight, request, descriptor, payload);
+        _emit(
+          PixaEvent(
+            requestId: inflight.rootRequestId,
+            stage: PixaStage.fetch,
+            name: 'plugin.fetch.complete',
+            request: request,
+            durationMicros: _elapsedSince(pluginStartedAtMicros),
+            attributes: <String, Object?>{
+              ...baseAttributes,
+              'payloadKind': payload.kind.name,
+              'mimeType': payload.mimeType,
+              'bytes': payload.bytes.length,
+            },
+          ),
+        );
+        return payload;
+      } on PixaFailure {
+        rethrow;
+      } on Object catch (error, stackTrace) {
+        throw PixaFailure(
+          requestId: inflight.rootRequestId,
+          stage: PixaStage.fetch,
+          safeMessage: 'Pixa plugin fetcher ${descriptor.id} failed: $error',
+          retryability: PixaRetryability.notRetryable,
+          originalError: error,
+          stackTrace: stackTrace,
+        );
+      }
+    });
+  }
+
+  Future<T> _withPlatformCallSlot<T>(
+    PixaFetcherDescriptor descriptor,
+    Future<T> Function() body,
+  ) async {
+    if (descriptor is! PixaPlatformDescriptor) {
+      return body();
+    }
+    final PixaPlatformDescriptor platformDescriptor =
+        descriptor as PixaPlatformDescriptor;
+    final String key = descriptor.id;
+    final int maxConcurrent = platformDescriptor.platform.maxConcurrentCalls;
+    if ((_activePlatformCalls[key] ?? 0) >= maxConcurrent) {
+      final Completer<void> waiter = Completer<void>();
+      (_queuedPlatformCalls[key] ??= ListQueue<Completer<void>>()).add(waiter);
+      await waiter.future;
+    }
+    _activePlatformCalls[key] = (_activePlatformCalls[key] ?? 0) + 1;
+    try {
+      return await body();
+    } finally {
+      final int remaining = (_activePlatformCalls[key] ?? 1) - 1;
+      if (remaining <= 0) {
+        _activePlatformCalls.remove(key);
+      } else {
+        _activePlatformCalls[key] = remaining;
+      }
+      final ListQueue<Completer<void>>? queue = _queuedPlatformCalls[key];
+      final Completer<void>? next = queue == null || queue.isEmpty
+          ? null
+          : queue.removeFirst();
+      if (queue != null && queue.isEmpty) {
+        _queuedPlatformCalls.remove(key);
+      }
+      if (next != null && !next.isCompleted) {
+        next.complete();
+      }
+    }
+  }
+
+  void _ensurePluginFetcherPolicy(
+    _InflightRuntimeLoad inflight,
+    PixaRequest request,
+    PixaFetcherDescriptor descriptor,
+    String sourceKind,
+  ) {
+    final PixaPluginExecutionPolicy policy = request.pluginExecutionPolicy;
+    final bool allowed = switch (descriptor.executionKind) {
+      PixaPluginExecutionKind.runtime => policy.runtime,
+      PixaPluginExecutionKind.dart => policy.dart,
+      PixaPluginExecutionKind.platform => policy.platform,
+      PixaPluginExecutionKind.external => policy.external,
+    };
+    if (allowed) {
+      return;
+    }
+    throw PixaFailure(
+      requestId: inflight.rootRequestId,
+      stage: PixaStage.fetch,
+      safeMessage:
+          'Pixa fetcher "${descriptor.id}" for source kind "$sourceKind" '
+          'requires plugin execution policy permission for '
+          '${descriptor.executionKind.name}.',
+      retryability: PixaRetryability.notRetryable,
+    );
+  }
+
+  PixaFetcher _pluginFetcherImplementation(
+    _InflightRuntimeLoad inflight,
+    PixaFetcherDescriptor descriptor,
+  ) {
+    return switch (descriptor) {
+      PixaDartFetcherDescriptor(:final fetcher) => fetcher,
+      PixaPlatformFetcherDescriptor(:final fetcher) => fetcher,
+      _ => throw PixaFailure(
+        requestId: inflight.rootRequestId,
+        stage: PixaStage.fetch,
+        safeMessage:
+            'Pixa fetcher "${descriptor.id}" cannot execute on the Dart '
+            'inline source boundary.',
+        retryability: PixaRetryability.notRetryable,
+      ),
+    };
+  }
+
+  void _validatePlatformFetcherHost(
+    _InflightRuntimeLoad inflight,
+    PixaFetcherDescriptor descriptor,
+  ) {
+    if (descriptor is! PixaPlatformDescriptor) {
+      return;
+    }
+    final PixaPlatformDescriptor platformDescriptor =
+        descriptor as PixaPlatformDescriptor;
+    final PixaHostPlatform? host = _currentHostPlatform();
+    if (host != null &&
+        platformDescriptor.platform.supportedPlatforms.contains(host)) {
+      return;
+    }
+    throw PixaFailure(
+      requestId: inflight.rootRequestId,
+      stage: PixaStage.fetch,
+      safeMessage:
+          'Pixa platform fetcher "${descriptor.id}" has unsupported host '
+          'platform ${host?.name ?? defaultTargetPlatform.name}.',
+      retryability: PixaRetryability.notRetryable,
+    );
+  }
+
+  void _validatePluginFetcherPayload(
+    _InflightRuntimeLoad inflight,
+    PixaRequest request,
+    PixaFetcherDescriptor descriptor,
+    PixaBytePayload payload,
+  ) {
+    if (payload.bytes.length > request.limits.maxEncodedBytes) {
+      throw PixaFailure(
+        requestId: inflight.rootRequestId,
+        stage: PixaStage.fetch,
+        safeMessage: 'Pixa plugin fetcher output exceeded byte limit.',
+        retryability: PixaRetryability.notRetryable,
+      );
+    }
+    if (descriptor is PixaPlatformDescriptor) {
+      final PixaPlatformDescriptor platformDescriptor =
+          descriptor as PixaPlatformDescriptor;
+      if (payload.kind != PixaPayloadKind.encodedImage) {
+        throw PixaFailure(
+          requestId: inflight.rootRequestId,
+          stage: PixaStage.fetch,
+          safeMessage:
+              'Pixa platform fetcher "${descriptor.id}" returned unsupported '
+              'payload kind ${payload.kind.name}.',
+          retryability: PixaRetryability.notRetryable,
+        );
+      }
+      final int? maxOutputBytes = platformDescriptor.platform.maxOutputBytes;
+      if (maxOutputBytes != null && payload.bytes.length > maxOutputBytes) {
+        throw PixaFailure(
+          requestId: inflight.rootRequestId,
+          stage: PixaStage.fetch,
+          safeMessage:
+              'Pixa platform output exceeded byte limit for fetcher '
+              '"${descriptor.id}".',
+          retryability: PixaRetryability.notRetryable,
+        );
+      }
+    }
+    final String? declaredMime = _normalizeOptionalMimeType(payload.mimeType);
+    if (declaredMime == null) {
+      return;
+    }
+    final String? detectedMime = PixaImageFormatCatalog(
+      registry: registry,
+    ).routeForPayload(payload.bytes)?.mimeType;
+    if (detectedMime != null && detectedMime != declaredMime) {
+      throw PixaFailure(
+        requestId: inflight.rootRequestId,
+        stage: PixaStage.fetch,
+        safeMessage:
+            'Pixa plugin fetcher "${descriptor.id}" MIME/signature mismatch.',
+        retryability: PixaRetryability.notRetryable,
+      );
+    }
+  }
+
+  Map<String, Object?> _pluginFetcherAttributes(
+    PixaFetcherDescriptor descriptor,
+    String sourceKind,
+  ) {
+    final Map<String, Object?> attributes = <String, Object?>{
+      'fetcherId': descriptor.id,
+      'sourceKind': sourceKind,
+      'executionKind': descriptor.executionKind.name,
+    };
+    if (descriptor is PixaPlatformDescriptor) {
+      final PixaPlatformDescriptor platformDescriptor =
+          descriptor as PixaPlatformDescriptor;
+      attributes.addAll(<String, Object?>{
+        'platformChannel': platformDescriptor.platform.channel,
+        'platformHotPathSafe': platformDescriptor.platform.hotPathSafe,
+        'platformSupportsCancellation':
+            platformDescriptor.platform.supportsCancellation,
+        'platformBackgroundQueue': platformDescriptor.platform.backgroundQueue,
+      });
+    }
+    return attributes;
   }
 
   void _emit(PixaEvent event) {
@@ -2096,6 +2345,22 @@ Map<String, Object?> _processorArguments(String descriptor) {
     arguments[key] = value;
   }
   return Map<String, Object?>.unmodifiable(arguments);
+}
+
+String? _normalizeOptionalMimeType(String? mimeType) {
+  final String? normalized = mimeType?.split(';').first.trim().toLowerCase();
+  return normalized == null || normalized.isEmpty ? null : normalized;
+}
+
+PixaHostPlatform? _currentHostPlatform() {
+  return switch (defaultTargetPlatform) {
+    TargetPlatform.android => PixaHostPlatform.android,
+    TargetPlatform.iOS => PixaHostPlatform.ios,
+    TargetPlatform.macOS => PixaHostPlatform.macos,
+    TargetPlatform.windows => PixaHostPlatform.windows,
+    TargetPlatform.linux => PixaHostPlatform.linux,
+    TargetPlatform.fuchsia => null,
+  };
 }
 
 int _priorityRankValue(PixaPriority priority) {

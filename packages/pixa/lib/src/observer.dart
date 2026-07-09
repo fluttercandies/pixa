@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import 'cache/cache_stats.dart';
 import 'failure.dart';
 import 'progress.dart';
@@ -213,4 +215,66 @@ final class PixaCallbackObserver implements PixaObserver {
 
   @override
   void onPixaEvent(PixaEvent event) => callback(event);
+}
+
+/// Observer that formats redacted single-line logs for local debugging.
+final class PixaLogObserver implements PixaObserver {
+  /// Creates a log observer.
+  const PixaLogObserver([this.write]);
+
+  /// Receives one redacted log line per event.
+  final void Function(String line)? write;
+
+  @override
+  void onPixaEvent(PixaEvent event) {
+    final String line = PixaRedactor.redactText(_formatEvent(event));
+    final void Function(String line)? sink = write;
+    if (sink == null) {
+      debugPrint(line);
+      return;
+    }
+    sink(line);
+  }
+
+  String _formatEvent(PixaEvent event) {
+    final StringBuffer buffer = StringBuffer()
+      ..write('[${event.stage.name}] ${event.name} #${event.requestId}');
+    final PixaRequestSnapshot? request = event.request;
+    if (request != null) {
+      buffer
+        ..write(' source=')
+        ..write(request.sourceLabel)
+        ..write(' cache=')
+        ..write(request.cacheKey)
+        ..write(' priority=')
+        ..write(request.priority);
+    }
+    final PixaProgress? progress = event.progress;
+    if (progress != null) {
+      buffer
+        ..write(' progress=')
+        ..write(progress.receivedBytes ?? '-')
+        ..write('/')
+        ..write(progress.expectedBytes ?? '-');
+    }
+    final PixaFailure? failure = event.failure;
+    if (failure != null) {
+      buffer
+        ..write(' failure=')
+        ..write(failure.retryability.name)
+        ..write(':')
+        ..write(failure.safeMessage);
+    }
+    if (event.durationMicros != null) {
+      buffer
+        ..write(' durationMicros=')
+        ..write(event.durationMicros);
+    }
+    if (event.attributes.isNotEmpty) {
+      buffer
+        ..write(' attrs=')
+        ..write(event.attributes);
+    }
+    return buffer.toString();
+  }
 }

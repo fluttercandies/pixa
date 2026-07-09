@@ -12,8 +12,291 @@ enum PixaPluginExecutionKind {
   /// Runs in Dart. This is opt-in and not used by default hot paths.
   dart,
 
+  /// Runs through a Flutter platform-channel or platform plugin boundary.
+  platform,
+
   /// Runs outside the Pixa host, such as a process or platform service.
   external,
+}
+
+/// Integration shape selected for an adaptive pub plugin.
+enum PixaPluginIntegrationMode {
+  /// Host-linked module inside Pixa's shared runtime.
+  runtimeHost,
+
+  /// Flutter platform-channel or platform plugin boundary.
+  platformChannel,
+
+  /// Pure Dart plugin descriptor.
+  pureDart,
+
+  /// Explicit external or standalone FFI boundary.
+  external,
+}
+
+/// Registers one selected adaptive plugin candidate.
+typedef PixaPluginIntegrationRegistrar = void Function(PixaRegistry registry);
+
+/// Candidate integration path exposed by a pub plugin package.
+final class PixaPluginIntegrationCandidate {
+  const PixaPluginIntegrationCandidate._({
+    required this.id,
+    required this.mode,
+    required this.available,
+    required this.requiredIntegration,
+    required this.priority,
+    required this.register,
+    this.packageName,
+    this.unavailableMessage,
+  });
+
+  /// Runtime host candidates outrank platform/Dart/external by default.
+  static const int runtimeHostPriority = 400;
+
+  /// Platform-channel candidates outrank Dart/external by default.
+  static const int platformChannelPriority = 300;
+
+  /// Pure Dart candidates outrank external by default.
+  static const int pureDartPriority = 200;
+
+  /// External candidates are the last default fallback.
+  static const int externalPriority = 100;
+
+  /// Creates a host-runtime candidate.
+  const PixaPluginIntegrationCandidate.runtimeHost({
+    required String id,
+    required bool hostRuntimeAvailable,
+    required PixaPluginIntegrationRegistrar register,
+    String? packageName,
+    bool requiredIntegration = false,
+    int priority = runtimeHostPriority,
+    String? unavailableMessage,
+  }) : this._(
+         id: id,
+         mode: PixaPluginIntegrationMode.runtimeHost,
+         available: hostRuntimeAvailable,
+         requiredIntegration: requiredIntegration,
+         priority: priority,
+         register: register,
+         packageName: packageName,
+         unavailableMessage: unavailableMessage,
+       );
+
+  /// Creates a platform-channel candidate.
+  const PixaPluginIntegrationCandidate.platformChannel({
+    required String id,
+    required bool platformAvailable,
+    required PixaPluginIntegrationRegistrar register,
+    String? packageName,
+    bool requiredIntegration = false,
+    int priority = platformChannelPriority,
+    String? unavailableMessage,
+  }) : this._(
+         id: id,
+         mode: PixaPluginIntegrationMode.platformChannel,
+         available: platformAvailable,
+         requiredIntegration: requiredIntegration,
+         priority: priority,
+         register: register,
+         packageName: packageName,
+         unavailableMessage: unavailableMessage,
+       );
+
+  /// Creates a pure Dart candidate.
+  const PixaPluginIntegrationCandidate.pureDart({
+    required String id,
+    required PixaPluginIntegrationRegistrar register,
+    String? packageName,
+    bool available = true,
+    bool requiredIntegration = false,
+    int priority = pureDartPriority,
+    String? unavailableMessage,
+  }) : this._(
+         id: id,
+         mode: PixaPluginIntegrationMode.pureDart,
+         available: available,
+         requiredIntegration: requiredIntegration,
+         priority: priority,
+         register: register,
+         packageName: packageName,
+         unavailableMessage: unavailableMessage,
+       );
+
+  /// Creates an external or standalone FFI candidate.
+  const PixaPluginIntegrationCandidate.external({
+    required String id,
+    required PixaPluginIntegrationRegistrar register,
+    String? packageName,
+    bool available = true,
+    bool requiredIntegration = false,
+    int priority = externalPriority,
+    String? unavailableMessage,
+  }) : this._(
+         id: id,
+         mode: PixaPluginIntegrationMode.external,
+         available: available,
+         requiredIntegration: requiredIntegration,
+         priority: priority,
+         register: register,
+         packageName: packageName,
+         unavailableMessage: unavailableMessage,
+       );
+
+  /// Stable candidate id inside the plugin package.
+  final String id;
+
+  /// Candidate execution boundary.
+  final PixaPluginIntegrationMode mode;
+
+  /// Whether this candidate is usable for the current app configuration.
+  final bool available;
+
+  /// Whether this candidate must be available instead of falling back.
+  final bool requiredIntegration;
+
+  /// Higher priority wins among available candidates.
+  final int priority;
+
+  /// Pub package that provides this candidate, used for diagnostics.
+  final String? packageName;
+
+  /// Safe message explaining why an unavailable candidate cannot be used.
+  final String? unavailableMessage;
+
+  /// Registers descriptors for this candidate only.
+  final PixaPluginIntegrationRegistrar register;
+}
+
+/// Selected adaptive integration recorded during registry setup.
+final class PixaPluginIntegrationSelection {
+  /// Creates a selected integration descriptor.
+  const PixaPluginIntegrationSelection({
+    required this.pluginId,
+    required this.candidateId,
+    required this.mode,
+    required this.priority,
+    this.packageName,
+  });
+
+  /// Plugin id passed to [PixaRegistry.registerAdaptiveIntegration].
+  final String pluginId;
+
+  /// Selected candidate id.
+  final String candidateId;
+
+  /// Selected integration mode.
+  final PixaPluginIntegrationMode mode;
+
+  /// Selected candidate priority.
+  final int priority;
+
+  /// Pub package that provided the selected candidate.
+  final String? packageName;
+
+  /// JSON-like representation for diagnostics and debug panels.
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'pluginId': pluginId,
+      'candidateId': candidateId,
+      'mode': mode.name,
+      'priority': priority,
+      'packageName': packageName,
+    };
+  }
+}
+
+/// Host platforms supported by platform-channel plugin descriptors.
+enum PixaHostPlatform {
+  /// Android.
+  android,
+
+  /// iOS.
+  ios,
+
+  /// macOS.
+  macos,
+
+  /// Windows.
+  windows,
+
+  /// Linux.
+  linux,
+}
+
+/// Stable contract for a Flutter platform-channel backed plugin handler.
+final class PixaPlatformContract {
+  /// Creates a platform-channel contract.
+  const PixaPlatformContract({
+    required this.channel,
+    required this.supportedPlatforms,
+    this.maxConcurrentCalls = 1,
+    this.supportsCancellation = false,
+    this.hotPathSafe = false,
+    this.backgroundQueue = true,
+    this.maxOutputBytes,
+  });
+
+  /// MethodChannel/EventChannel/Pigeon API namespace used by the plugin.
+  final String channel;
+
+  /// Host platforms where this descriptor is implemented.
+  final Set<PixaHostPlatform> supportedPlatforms;
+
+  /// Maximum parallel calls Pixa may issue to this boundary.
+  final int maxConcurrentCalls;
+
+  /// Whether the platform implementation observes Pixa cancellation.
+  final bool supportsCancellation;
+
+  /// Whether this platform path has evidence for visible gallery hot paths.
+  final bool hotPathSafe;
+
+  /// Whether native work runs off the platform UI thread where applicable.
+  final bool backgroundQueue;
+
+  /// Optional bounded output payload size for Dart/platform transfer.
+  final int? maxOutputBytes;
+
+  /// JSON-like representation for diagnostics and debug panels.
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'channel': channel,
+      'supportedPlatforms':
+          supportedPlatforms
+              .map((PixaHostPlatform platform) => platform.name)
+              .toList()
+            ..sort(),
+      'maxConcurrentCalls': maxConcurrentCalls,
+      'supportsCancellation': supportsCancellation,
+      'hotPathSafe': hotPathSafe,
+      'backgroundQueue': backgroundQueue,
+      'maxOutputBytes': maxOutputBytes,
+    };
+  }
+
+  void _validate(String label, String handlerId) {
+    if (channel.trim().isEmpty) {
+      throw StateError(
+        'Pixa $label "$handlerId" declares an empty platform channel.',
+      );
+    }
+    if (supportedPlatforms.isEmpty) {
+      throw StateError(
+        'Pixa $label "$handlerId" declares no supported platform.',
+      );
+    }
+    if (maxConcurrentCalls < 1) {
+      throw StateError(
+        'Pixa $label "$handlerId" declares invalid platform concurrency.',
+      );
+    }
+    final int? limit = maxOutputBytes;
+    if (limit != null && limit < 1) {
+      throw StateError(
+        'Pixa $label "$handlerId" declares invalid max output bytes.',
+      );
+    }
+  }
 }
 
 /// Runtime ABI deployment mode for a plugin module.
@@ -132,6 +415,7 @@ final class PixaRegistryArchitectureSnapshot {
     required this.decodersWithStreamingInput,
     required this.runtimeHandlers,
     required this.dartHandlers,
+    required this.platformHandlers,
     required this.externalHandlers,
     required this.runtimeModules,
     required this.builtInHostModules,
@@ -183,6 +467,9 @@ final class PixaRegistryArchitectureSnapshot {
   /// Descriptor count that executes in Dart.
   final int dartHandlers;
 
+  /// Descriptor count that executes through Flutter platform channels.
+  final int platformHandlers;
+
   /// Descriptor count that declares an external boundary.
   final int externalHandlers;
 
@@ -226,7 +513,7 @@ final class PixaRegistryArchitectureSnapshot {
 
   /// True when no descriptor can enter a non-runtime execution path.
   bool get defaultHotPathUsesRuntimeOnly {
-    return dartHandlers == 0 && externalHandlers == 0;
+    return dartHandlers == 0 && platformHandlers == 0 && externalHandlers == 0;
   }
 
   /// JSON-like representation for debug surfaces.
@@ -245,6 +532,7 @@ final class PixaRegistryArchitectureSnapshot {
       'decodersWithStreamingInput': decodersWithStreamingInput,
       'runtimeHandlers': runtimeHandlers,
       'dartHandlers': dartHandlers,
+      'platformHandlers': platformHandlers,
       'externalHandlers': externalHandlers,
       'runtimeModules': runtimeModules,
       'builtInHostModules': builtInHostModules,
@@ -423,6 +711,12 @@ abstract interface class PixaRuntimeDescriptor implements PixaRegistryHandler {
   PixaRuntimeContract get runtime;
 }
 
+/// Descriptor that executes through a Flutter platform plugin boundary.
+abstract interface class PixaPlatformDescriptor implements PixaRegistryHandler {
+  /// Platform-channel contract for this descriptor.
+  PixaPlatformContract get platform;
+}
+
 /// Fetcher extension descriptor.
 abstract interface class PixaFetcherDescriptor implements PixaRegistryHandler {
   /// Execution layer used by this fetcher.
@@ -544,6 +838,16 @@ abstract interface class PixaDartFetcherDescriptor
   PixaFetcher get fetcher;
 }
 
+/// Fetcher descriptor backed by a Flutter platform plugin boundary.
+abstract interface class PixaPlatformFetcherDescriptor
+    implements PixaFetcherDescriptor, PixaPlatformDescriptor {
+  /// Fetcher implementation.
+  ///
+  /// Implementations usually wrap MethodChannel, EventChannel, Pigeon, or a
+  /// platform plugin API and must still return through Pixa's payload contract.
+  PixaFetcher get fetcher;
+}
+
 /// Decoder extension descriptor.
 abstract interface class PixaDecoderDescriptor implements PixaRegistryHandler {
   /// Execution layer used by this decoder.
@@ -576,6 +880,13 @@ abstract interface class PixaDartDecoderDescriptor
   PixaDecoder get decoder;
 }
 
+/// Decoder descriptor backed by a Flutter platform plugin boundary.
+abstract interface class PixaPlatformDecoderDescriptor
+    implements PixaDecoderDescriptor, PixaPlatformDescriptor {
+  /// Decoder implementation.
+  PixaDecoder get decoder;
+}
+
 /// Processor extension descriptor.
 abstract interface class PixaProcessorDescriptor
     implements PixaRegistryHandler {
@@ -593,6 +904,13 @@ abstract interface class PixaDartProcessorDescriptor
   PixaProcessor get processor;
 }
 
+/// Processor descriptor backed by a Flutter platform plugin boundary.
+abstract interface class PixaPlatformProcessorDescriptor
+    implements PixaProcessorDescriptor, PixaPlatformDescriptor {
+  /// Processor implementation.
+  PixaProcessor get processor;
+}
+
 /// Encoded cache store extension descriptor.
 abstract interface class PixaCacheStoreDescriptor
     implements PixaRegistryHandler {
@@ -606,6 +924,13 @@ abstract interface class PixaCacheStoreDescriptor
 /// Cache-store descriptor with an explicit Dart plugin handler.
 abstract interface class PixaDartCacheStoreDescriptor
     implements PixaCacheStoreDescriptor {
+  /// Cache-store implementation.
+  PixaCacheStore get cacheStore;
+}
+
+/// Cache-store descriptor backed by a Flutter platform plugin boundary.
+abstract interface class PixaPlatformCacheStoreDescriptor
+    implements PixaCacheStoreDescriptor, PixaPlatformDescriptor {
   /// Cache-store implementation.
   PixaCacheStore get cacheStore;
 }
@@ -733,6 +1058,173 @@ abstract interface class PixaDebugPanelDescriptor
   String get title;
 }
 
+/// Immutable route and capability plan compiled from a registry.
+final class PixaCompiledRoutePlan {
+  PixaCompiledRoutePlan._({
+    required Map<String, PixaFetcherDescriptor> fetcherRoutes,
+    required Map<String, PixaDecoderDescriptor> decoderMimeRoutes,
+    required Map<String, PixaDecoderDescriptor> decoderFormatRoutes,
+    required Map<String, PixaDecoderDescriptor> decoderSignatureRoutes,
+    required Map<String, PixaProcessorDescriptor> processorRoutes,
+    required Map<String, PixaCacheStoreDescriptor> cacheStoreRoutes,
+    required Map<String, PixaPlatformContract> platformContracts,
+    required List<PixaPluginIntegrationSelection> adaptiveIntegrations,
+    required this.architecture,
+  }) : _fetcherRoutes = Map<String, PixaFetcherDescriptor>.unmodifiable(
+         fetcherRoutes,
+       ),
+       _decoderMimeRoutes = Map<String, PixaDecoderDescriptor>.unmodifiable(
+         decoderMimeRoutes,
+       ),
+       _decoderFormatRoutes = Map<String, PixaDecoderDescriptor>.unmodifiable(
+         decoderFormatRoutes,
+       ),
+       _decoderSignatureRoutes =
+           Map<String, PixaDecoderDescriptor>.unmodifiable(
+             decoderSignatureRoutes,
+           ),
+       _processorRoutes = Map<String, PixaProcessorDescriptor>.unmodifiable(
+         processorRoutes,
+       ),
+       _cacheStoreRoutes = Map<String, PixaCacheStoreDescriptor>.unmodifiable(
+         cacheStoreRoutes,
+       ),
+       _platformContracts = Map<String, PixaPlatformContract>.unmodifiable(
+         platformContracts,
+       ),
+       _adaptiveIntegrations =
+           List<PixaPluginIntegrationSelection>.unmodifiable(
+             adaptiveIntegrations,
+           );
+
+  final Map<String, PixaFetcherDescriptor> _fetcherRoutes;
+  final Map<String, PixaDecoderDescriptor> _decoderMimeRoutes;
+  final Map<String, PixaDecoderDescriptor> _decoderFormatRoutes;
+  final Map<String, PixaDecoderDescriptor> _decoderSignatureRoutes;
+  final Map<String, PixaProcessorDescriptor> _processorRoutes;
+  final Map<String, PixaCacheStoreDescriptor> _cacheStoreRoutes;
+  final Map<String, PixaPlatformContract> _platformContracts;
+  final List<PixaPluginIntegrationSelection> _adaptiveIntegrations;
+
+  /// Architecture snapshot that produced this plan.
+  final PixaRegistryArchitectureSnapshot architecture;
+
+  /// Number of source-kind fetcher routes.
+  int get fetcherRoutes => _fetcherRoutes.length;
+
+  /// Number of MIME decoder routes.
+  int get decoderMimeRoutes => _decoderMimeRoutes.length;
+
+  /// Number of format-id decoder routes.
+  int get decoderFormatRoutes => _decoderFormatRoutes.length;
+
+  /// Number of bounded header-signature decoder routes.
+  int get decoderSignatureRoutes => _decoderSignatureRoutes.length;
+
+  /// Number of processor operation routes.
+  int get processorRoutes => _processorRoutes.length;
+
+  /// Number of cache-store namespace routes.
+  int get cacheStoreRoutes => _cacheStoreRoutes.length;
+
+  /// Descriptor count that executes through Flutter platform channels.
+  int get platformHandlers => architecture.platformHandlers;
+
+  /// Selected adaptive pub plugin integrations.
+  List<PixaPluginIntegrationSelection> get adaptiveIntegrations {
+    return _adaptiveIntegrations;
+  }
+
+  /// True when no non-runtime descriptor can enter the default hot path.
+  bool get defaultHotPathUsesRuntimeOnly {
+    return architecture.defaultHotPathUsesRuntimeOnly;
+  }
+
+  /// Source kinds that resolve to platform-channel fetchers.
+  Set<String> get platformSourceKinds {
+    return Set<String>.unmodifiable(
+      _fetcherRoutes.entries
+          .where(
+            (MapEntry<String, PixaFetcherDescriptor> entry) =>
+                entry.value.executionKind == PixaPluginExecutionKind.platform,
+          )
+          .map((MapEntry<String, PixaFetcherDescriptor> entry) => entry.key),
+    );
+  }
+
+  /// Returns the fetcher descriptor registered for [sourceKind], if any.
+  PixaFetcherDescriptor? fetcherForSourceKind(String sourceKind) {
+    return _fetcherRoutes[_normalizeRouteClaim(sourceKind)];
+  }
+
+  /// Returns the decoder descriptor registered for [mimeType], if any.
+  PixaDecoderDescriptor? decoderForMimeType(String mimeType) {
+    return _decoderMimeRoutes[_normalizeMimeType(mimeType)];
+  }
+
+  /// Returns the decoder descriptor registered for [formatId], if any.
+  PixaDecoderDescriptor? decoderForFormatId(String formatId) {
+    return _decoderFormatRoutes[_normalizeRouteClaim(formatId)];
+  }
+
+  /// Returns the processor descriptor registered for [operation], if any.
+  PixaProcessorDescriptor? processorForOperation(String operation) {
+    return _processorRoutes[_normalizeRouteClaim(operation)];
+  }
+
+  /// Returns the cache-store descriptor registered for [namespace], if any.
+  PixaCacheStoreDescriptor? cacheStoreForNamespace(String namespace) {
+    return _cacheStoreRoutes[_normalizeRouteClaim(namespace)];
+  }
+
+  /// Returns the platform contract for [handlerId], if any.
+  PixaPlatformContract? platformContractForHandler(String handlerId) {
+    return _platformContracts[handlerId.trim()];
+  }
+
+  /// JSON-like representation for debug surfaces.
+  Map<String, Object?> toJson() {
+    final List<String> platformKinds = platformSourceKinds.toList()..sort();
+    final List<Map<String, Object?>> platformMatrix =
+        _platformContracts.entries
+            .map(
+              (MapEntry<String, PixaPlatformContract> entry) =>
+                  <String, Object?>{
+                    'handlerId': entry.key,
+                    ...entry.value.toJson(),
+                  },
+            )
+            .toList()
+          ..sort(
+            (Map<String, Object?> left, Map<String, Object?> right) =>
+                (left['handlerId']! as String).compareTo(
+                  right['handlerId']! as String,
+                ),
+          );
+    return <String, Object?>{
+      'fetcherRoutes': fetcherRoutes,
+      'decoderMimeRoutes': decoderMimeRoutes,
+      'decoderFormatRoutes': decoderFormatRoutes,
+      'decoderSignatureRoutes': decoderSignatureRoutes,
+      'processorRoutes': processorRoutes,
+      'cacheStoreRoutes': cacheStoreRoutes,
+      'platformHandlers': platformHandlers,
+      'platformSourceKinds': platformKinds,
+      'platformCapabilityMatrix': platformMatrix,
+      'adaptivePluginIntegrations': _adaptiveIntegrations
+          .map((PixaPluginIntegrationSelection selection) => selection.toJson())
+          .toList(),
+      'executionLaneHandlers': <String, Object?>{
+        'runtime': architecture.runtimeHandlers,
+        'dart': architecture.dartHandlers,
+        'platform': architecture.platformHandlers,
+        'external': architecture.externalHandlers,
+      },
+      'defaultHotPathUsesRuntimeOnly': defaultHotPathUsesRuntimeOnly,
+    };
+  }
+}
+
 /// Mutable plugin registration surface used during `Pixa.configure`.
 final class PixaRegistry {
   /// Creates a registry.
@@ -751,6 +1243,8 @@ final class PixaRegistry {
       <String, PixaCacheKeyContributorDescriptor>{};
   final Map<String, PixaDebugPanelDescriptor> _debugPanels =
       <String, PixaDebugPanelDescriptor>{};
+  final List<PixaPluginIntegrationSelection> _adaptiveIntegrationSelections =
+      <PixaPluginIntegrationSelection>[];
   final Map<String, String> _fetcherSourceKinds = <String, String>{};
   final Map<String, String> _decoderPriorities = <String, String>{};
   final Map<String, String> _decoderFormatPriorities = <String, String>{};
@@ -898,6 +1392,13 @@ final class PixaRegistry {
   List<PixaDebugPanelDescriptor> get debugPanels =>
       List<PixaDebugPanelDescriptor>.unmodifiable(_debugPanels.values);
 
+  /// Selected adaptive pub plugin integrations.
+  List<PixaPluginIntegrationSelection> get adaptiveIntegrationSelections {
+    return List<PixaPluginIntegrationSelection>.unmodifiable(
+      _adaptiveIntegrationSelections,
+    );
+  }
+
   /// Returns an aggregated architecture snapshot for this registry.
   PixaRegistryArchitectureSnapshot architectureSnapshot() {
     final List<PixaRegistryHandler> handlers = <PixaRegistryHandler>[
@@ -910,6 +1411,7 @@ final class PixaRegistry {
         <String, PixaRuntimeContract>{};
     var runtimeHandlers = 0;
     var dartHandlers = 0;
+    var platformHandlers = 0;
     var externalHandlers = 0;
     var allHostRuntime = true;
     var allBinaryMessages = true;
@@ -930,6 +1432,8 @@ final class PixaRegistry {
           allStreamHandles = allStreamHandles && contract.streamHandles;
         case PixaPluginExecutionKind.dart:
           dartHandlers++;
+        case PixaPluginExecutionKind.platform:
+          platformHandlers++;
         case PixaPluginExecutionKind.external:
           externalHandlers++;
       }
@@ -994,6 +1498,7 @@ final class PixaRegistry {
           .length,
       runtimeHandlers: runtimeHandlers,
       dartHandlers: dartHandlers,
+      platformHandlers: platformHandlers,
       externalHandlers: externalHandlers,
       runtimeModules: runtimeModules.length,
       builtInHostModules: builtInHostModules,
@@ -1005,6 +1510,180 @@ final class PixaRegistry {
       allRuntimeHandlersUseOwnedBuffers: allOwnedBuffers,
       allRuntimeHandlersUseStreamHandles: allStreamHandles,
     );
+  }
+
+  /// Compiles deterministic route and capability tables for hot-path lookup.
+  PixaCompiledRoutePlan compileRoutePlan() {
+    final Map<String, PixaFetcherDescriptor> fetcherRoutes =
+        <String, PixaFetcherDescriptor>{
+          for (final MapEntry<String, String> entry
+              in _fetcherSourceKinds.entries)
+            entry.key: _fetchers[entry.value]!,
+        };
+    final Map<String, PixaDecoderDescriptor> decoderMimeRoutes =
+        <String, PixaDecoderDescriptor>{};
+    final Map<String, PixaDecoderDescriptor> decoderFormatRoutes =
+        <String, PixaDecoderDescriptor>{};
+    final Map<String, PixaDecoderDescriptor> decoderSignatureRoutes =
+        <String, PixaDecoderDescriptor>{};
+    for (final PixaDecoderDescriptor decoder in _decoders.values) {
+      for (final String mimeType in decoder.mimeTypes) {
+        _claimHighestPriorityDecoder(
+          decoderMimeRoutes,
+          _normalizeMimeType(mimeType),
+          decoder,
+        );
+      }
+      for (final String formatId in decoder.formatIds) {
+        _claimHighestPriorityDecoder(
+          decoderFormatRoutes,
+          _normalizeRouteClaim(formatId),
+          decoder,
+        );
+      }
+      for (final PixaDecoderSignature signature in decoder.signatures) {
+        _claimHighestPriorityDecoder(
+          decoderSignatureRoutes,
+          signature.routeKey,
+          decoder,
+        );
+      }
+    }
+    final Map<String, PixaProcessorDescriptor> processorRoutes =
+        <String, PixaProcessorDescriptor>{
+          for (final MapEntry<String, String> entry
+              in _processorOperations.entries)
+            entry.key: _processors[entry.value]!,
+        };
+    final Map<String, PixaCacheStoreDescriptor> cacheStoreRoutes =
+        <String, PixaCacheStoreDescriptor>{
+          for (final MapEntry<String, String> entry
+              in _cacheStoreNamespaces.entries)
+            entry.key: _cacheStores[entry.value]!,
+        };
+    final Map<String, PixaPlatformContract> platformContracts =
+        <String, PixaPlatformContract>{};
+    for (final PixaRegistryHandler handler in <PixaRegistryHandler>[
+      ..._fetchers.values,
+      ..._decoders.values,
+      ..._processors.values,
+      ..._cacheStores.values,
+    ]) {
+      if (handler is PixaPlatformDescriptor) {
+        platformContracts[handler.id] = handler.platform;
+      }
+    }
+    return PixaCompiledRoutePlan._(
+      fetcherRoutes: fetcherRoutes,
+      decoderMimeRoutes: decoderMimeRoutes,
+      decoderFormatRoutes: decoderFormatRoutes,
+      decoderSignatureRoutes: decoderSignatureRoutes,
+      processorRoutes: processorRoutes,
+      cacheStoreRoutes: cacheStoreRoutes,
+      platformContracts: platformContracts,
+      adaptiveIntegrations: _adaptiveIntegrationSelections,
+      architecture: architectureSnapshot(),
+    );
+  }
+
+  /// Selects and registers exactly one integration path for a pub plugin.
+  void registerAdaptiveIntegration({
+    required String pluginId,
+    required List<PixaPluginIntegrationCandidate> candidates,
+    bool requireAvailableCandidate = true,
+  }) {
+    final String normalizedPluginId = pluginId.trim();
+    if (normalizedPluginId.isEmpty) {
+      throw StateError('Pixa adaptive plugin id must not be empty.');
+    }
+    if (_adaptiveIntegrationSelections.any(
+      (PixaPluginIntegrationSelection selection) =>
+          selection.pluginId == normalizedPluginId,
+    )) {
+      throw StateError(
+        'Duplicate Pixa adaptive plugin integration "$normalizedPluginId".',
+      );
+    }
+    if (candidates.isEmpty) {
+      throw StateError(
+        'Pixa adaptive plugin "$normalizedPluginId" declares no integration '
+        'candidates.',
+      );
+    }
+
+    final Set<String> candidateIds = <String>{};
+    for (final PixaPluginIntegrationCandidate candidate in candidates) {
+      final String candidateId = candidate.id.trim();
+      if (candidateId.isEmpty) {
+        throw StateError(
+          'Pixa adaptive plugin "$normalizedPluginId" has an empty candidate '
+          'id.',
+        );
+      }
+      if (!candidateIds.add(candidateId)) {
+        throw StateError(
+          'Pixa adaptive plugin "$normalizedPluginId" declares duplicate '
+          'candidate "$candidateId".',
+        );
+      }
+      if (candidate.requiredIntegration && !candidate.available) {
+        throw StateError(
+          _adaptiveCandidateUnavailableMessage(
+            normalizedPluginId,
+            candidate,
+            requiredCandidate: true,
+          ),
+        );
+      }
+    }
+
+    final List<PixaPluginIntegrationCandidate> available = candidates.where((
+      PixaPluginIntegrationCandidate candidate,
+    ) {
+      return candidate.available;
+    }).toList()..sort(_compareAdaptiveCandidates);
+    if (available.isEmpty) {
+      if (!requireAvailableCandidate) {
+        return;
+      }
+      throw StateError(
+        'Pixa adaptive plugin "$normalizedPluginId" has no available '
+        'integration candidate. ${_adaptiveCandidateDiagnostics(candidates)}',
+      );
+    }
+
+    final PixaPluginIntegrationCandidate selected = available.first;
+    final _PixaRegistryStateSnapshot snapshot = _PixaRegistryStateSnapshot(
+      this,
+    );
+    final Set<String> beforeFetcherIds = _fetchers.keys.toSet();
+    final Set<String> beforeDecoderIds = _decoders.keys.toSet();
+    final Set<String> beforeProcessorIds = _processors.keys.toSet();
+    final Set<String> beforeCacheStoreIds = _cacheStores.keys.toSet();
+    try {
+      selected.register(this);
+      _validateAdaptiveSelectedHandlers(
+        registry: this,
+        pluginId: normalizedPluginId,
+        candidate: selected,
+        beforeFetcherIds: beforeFetcherIds,
+        beforeDecoderIds: beforeDecoderIds,
+        beforeProcessorIds: beforeProcessorIds,
+        beforeCacheStoreIds: beforeCacheStoreIds,
+      );
+      _adaptiveIntegrationSelections.add(
+        PixaPluginIntegrationSelection(
+          pluginId: normalizedPluginId,
+          candidateId: selected.id.trim(),
+          mode: selected.mode,
+          priority: selected.priority,
+          packageName: selected.packageName,
+        ),
+      );
+    } catch (_) {
+      snapshot.restore(this);
+      rethrow;
+    }
   }
 
   /// Registers an observer.
@@ -1233,6 +1912,24 @@ void _validateExecutionContract(
       'handler contract.',
     );
   }
+  if (kind == PixaPluginExecutionKind.platform &&
+      handler is! PixaPlatformDescriptor) {
+    throw StateError(
+      'Pixa $label "${handler.id}" declares platform execution without a '
+      'platform contract.',
+    );
+  }
+  if (kind == PixaPluginExecutionKind.platform) {
+    final PixaPlatformDescriptor platformDescriptor =
+        handler as PixaPlatformDescriptor;
+    platformDescriptor.platform._validate(label, handler.id);
+    if (!_hasPlatformExecutionHandler(handler, label)) {
+      throw StateError(
+        'Pixa $label "${handler.id}" declares platform execution without a '
+        'platform handler contract.',
+      );
+    }
+  }
 }
 
 bool _hasDartExecutionHandler(PixaRegistryHandler handler, String label) {
@@ -1245,6 +1942,16 @@ bool _hasDartExecutionHandler(PixaRegistryHandler handler, String label) {
   };
 }
 
+bool _hasPlatformExecutionHandler(PixaRegistryHandler handler, String label) {
+  return switch (label) {
+    'fetcher' => handler is PixaPlatformFetcherDescriptor,
+    'decoder' => handler is PixaPlatformDecoderDescriptor,
+    'processor' => handler is PixaPlatformProcessorDescriptor,
+    'cache store' => handler is PixaPlatformCacheStoreDescriptor,
+    _ => true,
+  };
+}
+
 PixaPluginExecutionKind _executionKindFor(PixaRegistryHandler handler) {
   return switch (handler) {
     PixaFetcherDescriptor(:final executionKind) => executionKind,
@@ -1253,6 +1960,235 @@ PixaPluginExecutionKind _executionKindFor(PixaRegistryHandler handler) {
     PixaCacheStoreDescriptor(:final executionKind) => executionKind,
     _ => PixaPluginExecutionKind.dart,
   };
+}
+
+void _validateAdaptiveSelectedHandlers({
+  required PixaRegistry registry,
+  required String pluginId,
+  required PixaPluginIntegrationCandidate candidate,
+  required Set<String> beforeFetcherIds,
+  required Set<String> beforeDecoderIds,
+  required Set<String> beforeProcessorIds,
+  required Set<String> beforeCacheStoreIds,
+}) {
+  final PixaPluginExecutionKind expected = _executionKindForAdaptiveMode(
+    candidate.mode,
+  );
+  final List<PixaRegistryHandler> newHandlers = <PixaRegistryHandler>[
+    ...registry._fetchers.entries
+        .where(
+          (MapEntry<String, PixaFetcherDescriptor> entry) =>
+              !beforeFetcherIds.contains(entry.key),
+        )
+        .map((MapEntry<String, PixaFetcherDescriptor> entry) => entry.value),
+    ...registry._decoders.entries
+        .where(
+          (MapEntry<String, PixaDecoderDescriptor> entry) =>
+              !beforeDecoderIds.contains(entry.key),
+        )
+        .map((MapEntry<String, PixaDecoderDescriptor> entry) => entry.value),
+    ...registry._processors.entries
+        .where(
+          (MapEntry<String, PixaProcessorDescriptor> entry) =>
+              !beforeProcessorIds.contains(entry.key),
+        )
+        .map((MapEntry<String, PixaProcessorDescriptor> entry) => entry.value),
+    ...registry._cacheStores.entries
+        .where(
+          (MapEntry<String, PixaCacheStoreDescriptor> entry) =>
+              !beforeCacheStoreIds.contains(entry.key),
+        )
+        .map((MapEntry<String, PixaCacheStoreDescriptor> entry) => entry.value),
+  ];
+  if (newHandlers.isEmpty) {
+    throw StateError(
+      'Pixa adaptive plugin "$pluginId" candidate "${candidate.id.trim()}" '
+      'must register at least one fetcher, decoder, processor, or cache store '
+      'descriptor.',
+    );
+  }
+  for (final PixaRegistryHandler handler in newHandlers) {
+    final PixaPluginExecutionKind actual = _executionKindFor(handler);
+    if (actual == expected) {
+      continue;
+    }
+    throw StateError(
+      'Pixa adaptive plugin "$pluginId" candidate "${candidate.id.trim()}" '
+      'declares ${candidate.mode.name} integration but registered handler '
+      '"${handler.id}" with ${actual.name} execution; expected '
+      '${expected.name} execution.',
+    );
+  }
+}
+
+PixaPluginExecutionKind _executionKindForAdaptiveMode(
+  PixaPluginIntegrationMode mode,
+) {
+  return switch (mode) {
+    PixaPluginIntegrationMode.runtimeHost => PixaPluginExecutionKind.runtime,
+    PixaPluginIntegrationMode.platformChannel =>
+      PixaPluginExecutionKind.platform,
+    PixaPluginIntegrationMode.pureDart => PixaPluginExecutionKind.dart,
+    PixaPluginIntegrationMode.external => PixaPluginExecutionKind.external,
+  };
+}
+
+int _compareAdaptiveCandidates(
+  PixaPluginIntegrationCandidate left,
+  PixaPluginIntegrationCandidate right,
+) {
+  final int priority = right.priority.compareTo(left.priority);
+  if (priority != 0) {
+    return priority;
+  }
+  final int mode = _adaptiveModeRank(
+    right.mode,
+  ).compareTo(_adaptiveModeRank(left.mode));
+  if (mode != 0) {
+    return mode;
+  }
+  return left.id.trim().compareTo(right.id.trim());
+}
+
+int _adaptiveModeRank(PixaPluginIntegrationMode mode) {
+  return switch (mode) {
+    PixaPluginIntegrationMode.runtimeHost => 4,
+    PixaPluginIntegrationMode.platformChannel => 3,
+    PixaPluginIntegrationMode.pureDart => 2,
+    PixaPluginIntegrationMode.external => 1,
+  };
+}
+
+String _adaptiveCandidateUnavailableMessage(
+  String pluginId,
+  PixaPluginIntegrationCandidate candidate, {
+  required bool requiredCandidate,
+}) {
+  final String package = candidate.packageName == null
+      ? ''
+      : ' from package "${candidate.packageName}"';
+  final String requirement = requiredCandidate ? ' required' : '';
+  final String reason = candidate.unavailableMessage == null
+      ? ''
+      : ' ${candidate.unavailableMessage}';
+  return 'Pixa adaptive plugin "$pluginId"$package cannot use$requirement '
+      'integration candidate "${candidate.id.trim()}" '
+      '(${candidate.mode.name}).$reason';
+}
+
+String _adaptiveCandidateDiagnostics(
+  List<PixaPluginIntegrationCandidate> candidates,
+) {
+  return candidates
+      .map((PixaPluginIntegrationCandidate candidate) {
+        final String package = candidate.packageName == null
+            ? ''
+            : ' package=${candidate.packageName}';
+        final String reason = candidate.unavailableMessage == null
+            ? ''
+            : ' reason=${candidate.unavailableMessage}';
+        return '${candidate.id.trim()}(${candidate.mode.name},'
+            ' available=${candidate.available},'
+            ' required=${candidate.requiredIntegration},'
+            ' priority=${candidate.priority}$package$reason)';
+      })
+      .join('; ');
+}
+
+final class _PixaRegistryStateSnapshot {
+  _PixaRegistryStateSnapshot(PixaRegistry registry)
+    : observers = List<PixaObserver>.of(registry._observers),
+      fetchers = Map<String, PixaFetcherDescriptor>.of(registry._fetchers),
+      decoders = Map<String, PixaDecoderDescriptor>.of(registry._decoders),
+      processors = Map<String, PixaProcessorDescriptor>.of(
+        registry._processors,
+      ),
+      cacheStores = Map<String, PixaCacheStoreDescriptor>.of(
+        registry._cacheStores,
+      ),
+      cacheKeyContributors = Map<String, PixaCacheKeyContributorDescriptor>.of(
+        registry._cacheKeyContributors,
+      ),
+      debugPanels = Map<String, PixaDebugPanelDescriptor>.of(
+        registry._debugPanels,
+      ),
+      adaptiveIntegrationSelections = List<PixaPluginIntegrationSelection>.of(
+        registry._adaptiveIntegrationSelections,
+      ),
+      fetcherSourceKinds = Map<String, String>.of(registry._fetcherSourceKinds),
+      decoderPriorities = Map<String, String>.of(registry._decoderPriorities),
+      decoderFormatPriorities = Map<String, String>.of(
+        registry._decoderFormatPriorities,
+      ),
+      decoderSignaturePriorities = Map<String, String>.of(
+        registry._decoderSignaturePriorities,
+      ),
+      processorOperations = Map<String, String>.of(
+        registry._processorOperations,
+      ),
+      cacheStoreNamespaces = Map<String, String>.of(
+        registry._cacheStoreNamespaces,
+      );
+
+  final List<PixaObserver> observers;
+  final Map<String, PixaFetcherDescriptor> fetchers;
+  final Map<String, PixaDecoderDescriptor> decoders;
+  final Map<String, PixaProcessorDescriptor> processors;
+  final Map<String, PixaCacheStoreDescriptor> cacheStores;
+  final Map<String, PixaCacheKeyContributorDescriptor> cacheKeyContributors;
+  final Map<String, PixaDebugPanelDescriptor> debugPanels;
+  final List<PixaPluginIntegrationSelection> adaptiveIntegrationSelections;
+  final Map<String, String> fetcherSourceKinds;
+  final Map<String, String> decoderPriorities;
+  final Map<String, String> decoderFormatPriorities;
+  final Map<String, String> decoderSignaturePriorities;
+  final Map<String, String> processorOperations;
+  final Map<String, String> cacheStoreNamespaces;
+
+  void restore(PixaRegistry registry) {
+    registry._observers
+      ..clear()
+      ..addAll(observers);
+    registry._fetchers
+      ..clear()
+      ..addAll(fetchers);
+    registry._decoders
+      ..clear()
+      ..addAll(decoders);
+    registry._processors
+      ..clear()
+      ..addAll(processors);
+    registry._cacheStores
+      ..clear()
+      ..addAll(cacheStores);
+    registry._cacheKeyContributors
+      ..clear()
+      ..addAll(cacheKeyContributors);
+    registry._debugPanels
+      ..clear()
+      ..addAll(debugPanels);
+    registry._adaptiveIntegrationSelections
+      ..clear()
+      ..addAll(adaptiveIntegrationSelections);
+    registry._fetcherSourceKinds
+      ..clear()
+      ..addAll(fetcherSourceKinds);
+    registry._decoderPriorities
+      ..clear()
+      ..addAll(decoderPriorities);
+    registry._decoderFormatPriorities
+      ..clear()
+      ..addAll(decoderFormatPriorities);
+    registry._decoderSignaturePriorities
+      ..clear()
+      ..addAll(decoderSignaturePriorities);
+    registry._processorOperations
+      ..clear()
+      ..addAll(processorOperations);
+    registry._cacheStoreNamespaces
+      ..clear()
+      ..addAll(cacheStoreNamespaces);
+  }
 }
 
 void _validateRuntimeContract(
@@ -1304,6 +2240,20 @@ void _validateRuntimeContract(
           'symbol.',
         );
       }
+  }
+}
+
+void _claimHighestPriorityDecoder(
+  Map<String, PixaDecoderDescriptor> routes,
+  String route,
+  PixaDecoderDescriptor decoder,
+) {
+  if (route.isEmpty) {
+    return;
+  }
+  final PixaDecoderDescriptor? existing = routes[route];
+  if (existing == null || decoder.priority > existing.priority) {
+    routes[route] = decoder;
   }
 }
 

@@ -1,3 +1,4 @@
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pixa/pixa.dart';
 import 'package:pixa/pixa_plugins.dart';
@@ -78,5 +79,59 @@ void main() {
     expect(first.encodedCacheKey, isNot(second.encodedCacheKey));
     expect(first.encodedCacheKey.debugLabel, isNot(contains('alpha-secret')));
     expect(second.encodedCacheKey.debugLabel, isNot(contains('bravo-secret')));
+  });
+
+  test('S3 provider and image helpers reuse runtime-only request material', () {
+    const PixaS3Credentials credentials = PixaS3Credentials(
+      accessKeyId: 'AKIDEXAMPLE',
+      secretAccessKey: 'alpha-secret',
+      sessionToken: 'alpha-session',
+    );
+
+    final PixaProvider provider = PixaS3.provider(
+      bucket: 'bucket',
+      key: 'photos/cat.gif',
+      region: 'us-east-1',
+      credentials: credentials,
+      targetWidth: 120,
+      targetHeight: 80,
+      cacheNamespace: 's3-private',
+      cachePolicy: const PixaCachePolicy(privateDiskCache: true),
+      priority: PixaPriority.high,
+    );
+    final PixaImage image = PixaS3.image(
+      bucket: 'bucket',
+      key: 'photos/cat.gif',
+      region: 'us-east-1',
+      credentials: credentials,
+      width: 120,
+      height: 80,
+      fit: BoxFit.cover,
+      cacheNamespace: 's3-private',
+      cachePolicy: const PixaCachePolicy(privateDiskCache: true),
+      priority: PixaPriority.high,
+    );
+
+    expect(provider.request.source, isA<PixaRuntimePluginSource>());
+    expect(
+      provider.request.targetSize,
+      const PixaTargetSize(width: 120, height: 80),
+    );
+    expect(provider.request.cacheNamespace, 's3-private');
+    expect(provider.request.priority, PixaPriority.high);
+    expect(provider.request.pluginExecutionPolicy.usesRuntimeOnly, isTrue);
+    expect(image.request.source, isA<PixaRuntimePluginSource>());
+    expect(
+      image.request.targetSize,
+      const PixaTargetSize(width: 120, height: 80),
+    );
+    expect(image.fit, BoxFit.cover);
+    expect(image.request.cachePolicy.privateDiskCache, isTrue);
+    expect(provider.request.encodedCacheKey, image.request.encodedCacheKey);
+    expect(
+      provider.request.encodedCacheKey.debugLabel,
+      isNot(contains('alpha')),
+    );
+    expect(image.request.encodedCacheKey.debugLabel, isNot(contains('alpha')));
   });
 }

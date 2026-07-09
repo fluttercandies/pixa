@@ -3,7 +3,7 @@
   "modules": [
     {
       "moduleId": "pixa.video_frame.mjpeg",
-      "packageName": "pixa",
+      "packageName": "pixa_video_frame_mjpeg",
       "deployment": "hostLinkedPluginModule",
       "abiVersion": 1,
       "implementationLanguage": "rust",
