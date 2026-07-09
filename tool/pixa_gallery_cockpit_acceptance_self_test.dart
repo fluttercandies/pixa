@@ -5,9 +5,11 @@ import 'pixa_gallery_cockpit_acceptance.dart' as acceptance;
 
 void main() {
   _mobilePlatformsUseCiSizedLaunchBudget();
+  _androidCiEnablesHardwareAcceleration();
   _androidCiUsesFreshEmulatorForCockpitAcceptance();
   _androidCiUsesCiSizedEmulatorBootBudget();
   _androidCiCapturesCockpitDiagnosticsOnFailure();
+  _androidCiCapturesLiveCockpitDiagnostics();
   _cockpitEntrypointStartsRemoteBeforeGalleryBootstrap();
   _workflowAllowsSlowGalleryBootstrap();
   _windowsFlutterRootResolvesBat();
@@ -85,6 +87,28 @@ void _androidCiUsesFreshEmulatorForCockpitAcceptance() {
   );
 }
 
+void _androidCiEnablesHardwareAcceleration() {
+  final workflow = File('.github/workflows/ci.yml').readAsStringSync();
+  const kvmStep = '- name: Enable Android emulator KVM acceleration';
+  final kvmIndex = workflow.indexOf(kvmStep);
+  const probeStep = '- name: Build and run Android platform probe';
+  final probeIndex = workflow.indexOf(probeStep);
+  _expect(kvmIndex >= 0, 'Android CI should enable KVM acceleration.');
+  _expect(
+    probeIndex > kvmIndex,
+    'Android CI should enable KVM before starting any emulator.',
+  );
+  final nextStepIndex = workflow.indexOf('\n      - name:', kvmIndex + 1);
+  final kvmBlock = workflow.substring(
+    kvmIndex,
+    nextStepIndex == -1 ? workflow.length : nextStepIndex,
+  );
+  _expect(
+    kvmBlock.contains('/dev/kvm'),
+    'Android KVM acceleration step should configure /dev/kvm access.',
+  );
+}
+
 void _androidCiUsesCiSizedEmulatorBootBudget() {
   final workflow = File('.github/workflows/ci.yml').readAsStringSync();
   final matches = RegExp(
@@ -134,6 +158,22 @@ void _androidCiCapturesCockpitDiagnosticsOnFailure() {
     script.contains(r'exit "$status"'),
     'Android cockpit CI script should preserve the acceptance exit code.',
   );
+}
+
+void _androidCiCapturesLiveCockpitDiagnostics() {
+  final script = File('tool/pixa_android_cockpit_ci.sh').readAsStringSync();
+  for (final required in <String>[
+    'live-logcat.txt',
+    'live-adb-heartbeat.txt',
+    'live-process-snapshot.txt',
+    'pixa_android_cockpit_monitor',
+    'cleanup_live_diagnostics',
+  ]) {
+    _expect(
+      script.contains(required),
+      'Android cockpit live diagnostics should include $required.',
+    );
+  }
 }
 
 void _windowsFlutterRootResolvesBat() {
