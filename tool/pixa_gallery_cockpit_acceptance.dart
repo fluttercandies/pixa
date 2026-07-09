@@ -45,7 +45,7 @@ Future<void> main(List<String> args) async {
     }
   }
 
-  final workflow = _workflowForPlatform(
+  final workflow = workflowForAcceptance(
     workflowFile.readAsStringSync(),
     platform,
   );
@@ -53,7 +53,7 @@ Future<void> main(List<String> args) async {
     '${outputRoot.path}${Platform.pathSeparator}validate_task.yaml',
   );
   configFile.writeAsStringSync(
-    _validateTaskConfig(
+    validateTaskConfig(
       projectDir: projectDir.path,
       platform: platform,
       deviceId: deviceId,
@@ -215,8 +215,8 @@ Future<_ValidationCommandResult> _runValidationWithRemoteOnlyHostCapture({
           outputRoot: outputRoot,
           persistScriptPath: scriptPath,
           liveRunDisplayName: 'Pixa gallery cockpit acceptance',
-          baseline: const cockpit.CockpitRunTaskBaselineRequest(
-            captureScreenshot: true,
+          baseline: cockpit.CockpitRunTaskBaselineRequest(
+            captureScreenshot: baselineCaptureScreenshotForPlatform(platform),
             screenshotName: 'pixa-gallery-baseline',
             includeSnapshot: true,
           ),
@@ -440,7 +440,14 @@ String? _readString(Map<String, Object?> value, String key) {
   return raw is String && raw.isNotEmpty ? raw : null;
 }
 
-String _workflowForPlatform(String source, String platform) {
+String workflowForAcceptance(String source, String platform) {
+  return manualBaselineCaptureWorkflowForPlatform(
+    workflowForPlatform(source, platform),
+    platform,
+  );
+}
+
+String workflowForPlatform(String source, String platform) {
   final platformPattern = RegExp(r'^platform:\s*\S+\s*$', multiLine: true);
   if (!platformPattern.hasMatch(source)) {
     throw const FormatException('Cockpit workflow must declare a platform.');
@@ -448,7 +455,61 @@ String _workflowForPlatform(String source, String platform) {
   return source.replaceFirst(platformPattern, 'platform: $platform');
 }
 
-String _validateTaskConfig({
+bool baselineCaptureScreenshotForPlatform(String platform) {
+  return platform != 'android';
+}
+
+String manualBaselineCaptureWorkflowForPlatform(
+  String source,
+  String platform,
+) {
+  if (baselineCaptureScreenshotForPlatform(platform)) {
+    return source;
+  }
+  if (source.contains('commandId: baseline_capture')) {
+    return source;
+  }
+
+  final waitStep = RegExp(
+    r'^  - stepId: wait-gallery-workbench\s*$',
+    multiLine: true,
+  ).firstMatch(source);
+  if (waitStep == null) {
+    throw const FormatException(
+      'Android cockpit workflow must wait for Gallery Workbench before baseline.',
+    );
+  }
+  final nextStepMatches = RegExp(
+    r'^  - stepId: ',
+    multiLine: true,
+  ).allMatches(source, waitStep.end);
+  final nextStep = nextStepMatches.isEmpty ? null : nextStepMatches.first;
+  if (nextStep == null) {
+    throw const FormatException(
+      'Android cockpit workflow must contain a step after Gallery Workbench.',
+    );
+  }
+
+  return source.replaceRange(nextStep.start, nextStep.start, '''
+  - stepId: baseline_capture
+    stepType: retry
+    maxAttempts: 6
+    delayMs: 1000
+    step:
+      stepType: command
+      command:
+        commandId: baseline_capture
+        commandType: captureScreenshot
+        screenshotRequest:
+          reason: baseline
+          name: pixa-gallery-baseline
+          includeSnapshot: true
+          attachToStep: true
+
+''');
+}
+
+String validateTaskConfig({
   required String projectDir,
   required String platform,
   required String deviceId,
@@ -471,7 +532,7 @@ runTask:
   persistScriptPath: ${_yaml(scriptPath)}
   liveRunDisplayName: Pixa gallery cockpit acceptance
   baseline:
-    captureScreenshot: true
+    captureScreenshot: ${baselineCaptureScreenshotForPlatform(platform)}
     screenshotName: pixa-gallery-baseline
     includeSnapshot: true
   requirements:

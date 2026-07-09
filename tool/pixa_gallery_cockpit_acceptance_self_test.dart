@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cockpit/cockpit.dart' as cockpit;
+
 import 'pixa_gallery_cockpit_acceptance.dart' as acceptance;
 
 void main() {
@@ -11,6 +13,7 @@ void main() {
   _androidCiCapturesCockpitDiagnosticsOnFailure();
   _androidCiCapturesLiveCockpitDiagnostics();
   _androidAcceptanceUsesRemoteOnlyHostCapture();
+  _androidAcceptanceDelaysBaselineUntilWorkbench();
   _cockpitEntrypointStartsRemoteBeforeGalleryBootstrap();
   _workflowAllowsSlowGalleryBootstrap();
   _windowsFlutterRootResolvesBat();
@@ -204,6 +207,97 @@ void _androidAcceptanceUsesRemoteOnlyHostCapture() {
       'Android cockpit acceptance should force remote Flutter screenshot capture.',
     );
   }
+}
+
+void _androidAcceptanceDelaysBaselineUntilWorkbench() {
+  _expect(
+    !acceptance.baselineCaptureScreenshotForPlatform('android'),
+    'Android cockpit acceptance should disable automatic baseline capture.',
+  );
+  for (final platform in <String>['ios', 'linux', 'macos', 'windows']) {
+    _expect(
+      acceptance.baselineCaptureScreenshotForPlatform(platform),
+      '$platform cockpit acceptance should keep automatic baseline capture.',
+    );
+  }
+
+  final workflowSource = File(
+    'examples/pixa_gallery/cockpit/pixa_gallery_acceptance.yaml',
+  ).readAsStringSync();
+  final androidWorkflow = acceptance.workflowForAcceptance(
+    workflowSource,
+    'android',
+  );
+  final macosWorkflow = acceptance.workflowForAcceptance(
+    workflowSource,
+    'macos',
+  );
+  _expect(
+    androidWorkflow.contains('platform: android'),
+    'Android cockpit acceptance should generate an Android workflow.',
+  );
+  _expect(
+    macosWorkflow.contains('platform: macos'),
+    'macOS cockpit acceptance should keep the macOS workflow platform.',
+  );
+  _expect(
+    !macosWorkflow.contains('commandId: baseline_capture'),
+    'Non-Android cockpit acceptance should not inject a manual baseline.',
+  );
+  _expect(
+    androidWorkflow.contains('commandId: baseline_capture'),
+    'Android manual baseline should keep the canonical baseline command id.',
+  );
+  final waitIndex = androidWorkflow.indexOf('wait-gallery-workbench');
+  final baselineIndex = androidWorkflow.indexOf('commandId: baseline_capture');
+  final parsedAndroidWorkflow = cockpit.cockpitControlScriptFromText(
+    androidWorkflow,
+  );
+  _expect(
+    parsedAndroidWorkflow.workflowSteps.isNotEmpty,
+    'Android workflow should parse after injecting the manual baseline.',
+  );
+  _expect(
+    waitIndex >= 0 && baselineIndex > waitIndex,
+    'Android manual baseline should run after the Gallery Workbench wait.',
+  );
+  _expect(
+    androidWorkflow.indexOf('assert-source-control') > baselineIndex,
+    'Android manual baseline should run before the first post-baseline assertion.',
+  );
+
+  final androidConfig = _sampleValidateTaskConfig(
+    platform: 'android',
+    workflow: androidWorkflow,
+  );
+  final macosConfig = _sampleValidateTaskConfig(
+    platform: 'macos',
+    workflow: macosWorkflow,
+  );
+  _expect(
+    androidConfig.contains('captureScreenshot: false'),
+    'Android validate-task config should disable automatic baseline capture.',
+  );
+  _expect(
+    macosConfig.contains('captureScreenshot: true'),
+    'Non-Android validate-task config should keep automatic baseline capture.',
+  );
+}
+
+String _sampleValidateTaskConfig({
+  required String platform,
+  required String workflow,
+}) {
+  return acceptance.validateTaskConfig(
+    projectDir: '/tmp/pixa_gallery',
+    platform: platform,
+    deviceId: platform,
+    sessionPort: 47331,
+    launchTimeoutSeconds: 240,
+    outputRoot: '/tmp/pixa_gallery_cockpit',
+    scriptPath: '/tmp/pixa_gallery_cockpit/workflow.yaml',
+    workflow: workflow,
+  );
 }
 
 void _windowsFlutterRootResolvesBat() {
