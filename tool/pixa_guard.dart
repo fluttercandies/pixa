@@ -53,6 +53,7 @@ void main() {
   _checkBrandAssets(root, failures);
   _checkUserFacingReadmes(root, failures);
   _checkReleaseNeutralReadmeInstallCopy(root, failures);
+  _checkPubReleaseReadiness(root, failures);
   _checkExplicitPluginVersionConstraints(root, failures);
   _checkSwiftPackageManagerSupport(root, failures);
   _checkPublicExports(root, failures);
@@ -584,6 +585,7 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
     'require_cargo_feature',
     'jpeg-turbo-roi',
     'webp-roi',
+    '../../../plugins/pixa_plugins.json',
   ]) {
     _requireRawToken(
       sources,
@@ -1135,6 +1137,186 @@ void _checkReleaseNeutralReadmeInstallCopy(
       }
     }
   }
+}
+
+void _checkPubReleaseReadiness(Directory root, List<String> failures) {
+  const List<String> packageRoots = <String>[
+    'packages/pixa',
+    'packages/pixa_fetcher_s3',
+    'packages/pixa_video_frame_mjpeg',
+  ];
+
+  if (!File('${root.path}/tool/pixa_pub_dependency_smoke.dart').existsSync()) {
+    failures.add(
+      'pub release readiness: tool/pixa_pub_dependency_smoke.dart is missing',
+    );
+  }
+
+  for (final String packageRoot in packageRoots) {
+    for (final String fileName in <String>['LICENSE', 'CHANGELOG.md']) {
+      final File file = File('${root.path}/$packageRoot/$fileName');
+      if (!file.existsSync()) {
+        failures.add('pub release readiness: $packageRoot missing $fileName');
+      }
+    }
+
+    final File pubspec = File('${root.path}/$packageRoot/pubspec.yaml');
+    if (!pubspec.existsSync()) {
+      failures.add('pub release readiness: $packageRoot missing pubspec.yaml');
+      continue;
+    }
+    final String pubspecText = pubspec.readAsStringSync();
+    if (RegExp(
+      r'^\s*publish_to:\s*none\s*$',
+      multiLine: true,
+    ).hasMatch(pubspecText)) {
+      failures.add(
+        'pub release readiness: $packageRoot must not disable publishing',
+      );
+    }
+    if (RegExp(
+      r'^\s*path:\s*\.\./pixa\s*$',
+      multiLine: true,
+    ).hasMatch(pubspecText)) {
+      failures.add(
+        'pub release readiness: $packageRoot must not publish a path '
+        'dependency on pixa',
+      );
+    }
+  }
+
+  for (final String pluginPackage in <String>[
+    'packages/pixa_fetcher_s3',
+    'packages/pixa_video_frame_mjpeg',
+  ]) {
+    final File pubspec = File('${root.path}/$pluginPackage/pubspec.yaml');
+    if (!pubspec.existsSync()) {
+      continue;
+    }
+    final String text = pubspec.readAsStringSync();
+    if (!RegExp(r'^\s*pixa:\s*\^1\.0\.0\s*$', multiLine: true).hasMatch(text)) {
+      failures.add(
+        'pub release readiness: $pluginPackage must depend on pixa ^1.0.0',
+      );
+    }
+  }
+
+  final File buildHook = File('${root.path}/packages/pixa/hook/build.dart');
+  if (!buildHook.existsSync()) {
+    failures.add(
+      'pub release readiness: packages/pixa/hook/build.dart missing',
+    );
+  } else {
+    final String buildHookText = buildHook.readAsStringSync();
+    if (!buildHookText.contains("packageRoot.resolve('native_src/rust/')")) {
+      failures.add(
+        'pub release readiness: build hook must use package-local '
+        'native_src/rust',
+      );
+    }
+    if (buildHookText.contains('../../rust/')) {
+      failures.add(
+        'pub release readiness: build hook must not depend on repository-root '
+        '../../rust',
+      );
+    }
+    if (!buildHookText.contains("environment['CARGO_TARGET_DIR']") ||
+        !buildHookText.contains("outputDirectory.resolve('cargo_target/')")) {
+      failures.add(
+        'pub release readiness: build hook must place Cargo target output '
+        'under the Native Assets output directory',
+      );
+    }
+  }
+
+  _checkPublishedRustSource(root, failures);
+}
+
+void _checkPublishedRustSource(Directory root, List<String> failures) {
+  final Directory rootRust = Directory('${root.path}/rust');
+  final Directory packageRust = Directory(
+    '${root.path}/packages/pixa/native_src/rust',
+  );
+  if (!rootRust.existsSync()) {
+    failures.add('pub release readiness: rust source root is missing');
+    return;
+  }
+  if (!packageRust.existsSync()) {
+    failures.add(
+      'pub release readiness: packages/pixa/native_src/rust is missing',
+    );
+    return;
+  }
+
+  final Directory packageTarget = Directory('${packageRust.path}/target');
+  if (packageTarget.existsSync()) {
+    failures.add(
+      'pub release readiness: packages/pixa/native_src/rust must not include '
+      'Cargo target build output',
+    );
+  }
+
+  final Set<String> extensions = <String>{'.lock', '.rs', '.toml'};
+  final List<File> rootFiles = _filesUnderDirectory(
+    rootRust,
+    extensions: extensions,
+  ).toList();
+  for (final File rootFile in rootFiles) {
+    final String relative = _relativePath(rootRust, rootFile);
+    final File packageFile = File('${packageRust.path}/$relative');
+    if (!packageFile.existsSync()) {
+      failures.add(
+        'pub release readiness: native_src/rust missing copied $relative',
+      );
+      continue;
+    }
+    if (rootFile.readAsStringSync() != packageFile.readAsStringSync()) {
+      failures.add(
+        'pub release readiness: native_src/rust/$relative is not in sync '
+        'with rust/$relative',
+      );
+    }
+  }
+
+  for (final File packageFile in _filesUnderDirectory(
+    packageRust,
+    extensions: extensions,
+  )) {
+    final String relative = _relativePath(packageRust, packageFile);
+    final File rootFile = File('${rootRust.path}/$relative');
+    if (!rootFile.existsSync()) {
+      failures.add(
+        'pub release readiness: native_src/rust has extra $relative',
+      );
+    }
+  }
+}
+
+Iterable<File> _filesUnderDirectory(
+  Directory directory, {
+  required Set<String> extensions,
+}) sync* {
+  if (!directory.existsSync()) {
+    return;
+  }
+  for (final FileSystemEntity entity in directory.listSync(recursive: true)) {
+    if (entity is! File) {
+      continue;
+    }
+    final String path = entity.path.replaceAll(r'\', '/');
+    if (path.contains('/target/')) {
+      continue;
+    }
+    if (extensions.any(path.endsWith)) {
+      yield entity;
+    }
+  }
+}
+
+String _relativePath(Directory base, File file) {
+  final String basePath = base.absolute.path.replaceAll(r'\', '/');
+  final String filePath = file.absolute.path.replaceAll(r'\', '/');
+  return filePath.substring(basePath.length + 1);
 }
 
 void _checkExplicitPluginVersionConstraints(

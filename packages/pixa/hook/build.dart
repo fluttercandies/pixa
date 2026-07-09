@@ -38,7 +38,10 @@ Future<void> main(List<String> args) async {
       pluginPlanOutput,
     ).writeAsString(pluginPlan.toPrettyJson());
 
-    final Uri rustWorkspace = input.packageRoot.resolve('../../rust/');
+    final Uri rustWorkspace = pixaRustWorkspaceRoot(input.packageRoot);
+    final Uri cargoTargetDirectory = pixaCargoTargetDirectory(
+      input.outputDirectory,
+    );
     final String? targetTriple = _rustTarget(input.config.code);
     final Set<String> cargoFeatures = _cargoFeatures(pluginPlan);
     final List<String> command = <String>[
@@ -56,6 +59,7 @@ Future<void> main(List<String> args) async {
       Platform.environment,
     );
     environment['PIXA_PLUGIN_PLAN'] = pluginPlanOutput.toFilePath();
+    environment['CARGO_TARGET_DIR'] = cargoTargetDirectory.toFilePath();
     _configureRustToolchainEnvironment(environment);
     _configureNativeRoiEnvironment(
       environment,
@@ -70,7 +74,11 @@ Future<void> main(List<String> args) async {
     );
     _configureCrossCompileEnvironment(environment, targetTriple);
     _configureReleaseLinkingEnvironment(environment, targetTriple);
-    _clearStaleTurboJpegCmakeCaches(rustWorkspace, targetTriple, cargoFeatures);
+    _clearStaleTurboJpegCmakeCaches(
+      cargoTargetDirectory,
+      targetTriple,
+      cargoFeatures,
+    );
     final String cargo = _cargoExecutable(environment);
 
     final ProcessResult result = await Process.run(
@@ -91,10 +99,10 @@ Future<void> main(List<String> args) async {
     }
 
     final String libraryName = _libraryName(input.config.code.targetOS);
-    final Uri builtLibrary = rustWorkspace.resolve(
+    final Uri builtLibrary = cargoTargetDirectory.resolve(
       targetTriple == null
-          ? 'target/release/$libraryName'
-          : 'target/$targetTriple/release/$libraryName',
+          ? 'release/$libraryName'
+          : '$targetTriple/release/$libraryName',
     );
     final File builtFile = File.fromUri(builtLibrary);
     if (!builtFile.existsSync()) {
@@ -143,6 +151,7 @@ workingDirectory: ${rustWorkspace.toFilePath()}
 exitCode: ${result.exitCode}
 CARGO: ${environment['CARGO'] ?? ''}
 RUSTC: ${environment['RUSTC'] ?? ''}
+CARGO_TARGET_DIR: ${environment['CARGO_TARGET_DIR'] ?? ''}
 TARGET_PATH: ${environment[Platform.isWindows ? 'Path' : 'PATH'] ?? ''}
 TURBOJPEG_SOURCE: ${environment['TURBOJPEG_SOURCE'] ?? ''}
 TURBOJPEG_STATIC: ${environment['TURBOJPEG_STATIC'] ?? ''}
@@ -266,7 +275,7 @@ void _configureWindowsNasmEnvironment(Map<String, String> environment) {
 }
 
 void _clearStaleTurboJpegCmakeCaches(
-  Uri rustWorkspace,
+  Uri cargoTargetDirectory,
   String? targetTriple,
   Set<String> cargoFeatures,
 ) {
@@ -274,7 +283,7 @@ void _clearStaleTurboJpegCmakeCaches(
     return;
   }
   final Directory buildRoot = Directory.fromUri(
-    rustWorkspace.resolve('target/$targetTriple/release/build/'),
+    cargoTargetDirectory.resolve('$targetTriple/release/build/'),
   );
   if (!buildRoot.existsSync()) {
     return;
@@ -421,6 +430,14 @@ void _prependPath(Map<String, String> environment, String path) {
     entries.remove(path);
   }
   environment[key] = <String>[path, ...entries].join(separator);
+}
+
+Uri pixaRustWorkspaceRoot(Uri packageRoot) {
+  return packageRoot.resolve('native_src/rust/');
+}
+
+Uri pixaCargoTargetDirectory(Uri outputDirectory) {
+  return outputDirectory.resolve('cargo_target/');
 }
 
 List<Uri> _rustBuildInputs(Uri rustWorkspace) {

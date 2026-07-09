@@ -3,6 +3,24 @@ import 'package:flutter_test/flutter_test.dart';
 import '../hook/build.dart';
 
 void main() {
+  test('Rust workspace resolves inside the published package', () {
+    final Uri packageRoot = Uri.file('/pub-cache/pixa-1.0.0/');
+
+    expect(
+      pixaRustWorkspaceRoot(packageRoot).toString(),
+      'file:///pub-cache/pixa-1.0.0/native_src/rust/',
+    );
+  });
+
+  test('Cargo target directory resolves inside Native Assets output', () {
+    final Uri outputDirectory = Uri.file('/tmp/native-assets/pixa/');
+
+    expect(
+      pixaCargoTargetDirectory(outputDirectory).toString(),
+      'file:///tmp/native-assets/pixa/cargo_target/',
+    );
+  });
+
   test('Windows TurboJPEG CMake processor is explicit for MSVC targets', () {
     expect(
       pixaWindowsTurboJpegCmakeSystemProcessor('x86_64-pc-windows-msvc'),
