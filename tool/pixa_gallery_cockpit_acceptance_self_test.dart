@@ -7,6 +7,7 @@ void main() {
   _mobilePlatformsUseCiSizedLaunchBudget();
   _androidCiUsesFreshEmulatorForCockpitAcceptance();
   _androidCiUsesCiSizedEmulatorBootBudget();
+  _androidCiCapturesCockpitDiagnosticsOnFailure();
   _windowsFlutterRootResolvesBat();
   _nonWindowsFlutterRootResolvesBinary();
   _failedValidationResultKeepsEvidence();
@@ -66,6 +67,32 @@ void _androidCiUsesCiSizedEmulatorBootBudget() {
     timeouts.every((timeout) => timeout == 2700),
     'Android emulator boot timeouts should allow slow CI boot.',
   );
+}
+
+void _androidCiCapturesCockpitDiagnosticsOnFailure() {
+  final workflow = File('.github/workflows/ci.yml').readAsStringSync();
+  const cockpitStep = '- name: Run Android gallery cockpit acceptance';
+  final cockpitIndex = workflow.indexOf(cockpitStep);
+  _expect(cockpitIndex >= 0, 'Android cockpit acceptance step should exist.');
+  final nextStepIndex = workflow.indexOf('\n      - name:', cockpitIndex + 1);
+  final cockpitBlock = workflow.substring(
+    cockpitIndex,
+    nextStepIndex == -1 ? workflow.length : nextStepIndex,
+  );
+  for (final required in <String>[
+    'android-diagnostics',
+    'adb devices -l',
+    'adb -s emulator-5554 forward --list',
+    'adb -s emulator-5554 logcat -c',
+    'pidof dev.pixa.pixa_gallery',
+    'dumpsys activity processes',
+    'logcat -d -v time -t 2000',
+  ]) {
+    _expect(
+      cockpitBlock.contains(required),
+      'Android cockpit failure diagnostics should collect $required.',
+    );
+  }
 }
 
 void _windowsFlutterRootResolvesBat() {
