@@ -81,6 +81,9 @@ final class PixaRedactor {
     if (queryMaterial.isNotEmpty) {
       material['query'] = queryMaterial;
     }
+    if (uri.userInfo.isNotEmpty) {
+      material['userInfo'] = _secretFingerprint(uri.userInfo);
+    }
     return material;
   }
 
@@ -151,19 +154,22 @@ final class PixaRedactor {
 
   /// Redacts sensitive query parameters from a URI.
   static Uri redactUri(Uri uri) {
-    if (!uri.hasQuery) {
-      return uri;
+    final Uri redactedUserInfo = uri.userInfo.isEmpty
+        ? uri
+        : uri.replace(userInfo: '<redacted>');
+    if (!redactedUserInfo.hasQuery) {
+      return redactedUserInfo;
     }
 
     final Map<String, List<String>> query = <String, List<String>>{};
     for (final MapEntry<String, List<String>> entry
-        in uri.queryParametersAll.entries) {
+        in redactedUserInfo.queryParametersAll.entries) {
       query[entry.key] = isSensitiveQuery(entry.key)
           ? <String>['<redacted>']
           : entry.value;
     }
 
-    return uri.replace(
+    return redactedUserInfo.replace(
       queryParameters: query.map((String key, List<String> values) {
         return MapEntry<String, String>(key, values.join(','));
       }),

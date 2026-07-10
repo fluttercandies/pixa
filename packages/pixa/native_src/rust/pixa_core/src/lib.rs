@@ -1,5 +1,7 @@
 //! Runtime primitives shared by Pixa platform bindings.
 
+use sha2::{Digest, Sha256};
+
 pub mod analysis;
 pub mod cache;
 pub mod cancel;
@@ -53,12 +55,12 @@ pub use progress::{RuntimeProgressEvent, RuntimeProgressSink, RuntimeProgressSta
 pub use request::{CacheMode, RuntimeRequest, RuntimeSource};
 pub use s3_fetcher::{S3RuntimePluginExecutor, S3_FETCHER_MODULE_ID};
 
-/// Returns a stable FNV-1a 64-bit hash for normalized cache-key material.
+/// Returns a stable FNV-1a 64-bit checksum retained for compatibility.
 pub fn fnv1a64(input: &[u8]) -> u64 {
     fnv1a64_continue(0xcbf29ce484222325, input)
 }
 
-/// Returns a stable FNV-1a 64-bit hash for prefix + input without allocating.
+/// Returns a prefixed FNV-1a checksum without allocating.
 pub fn fnv1a64_with_prefix(prefix: &[u8], input: &[u8]) -> u64 {
     const OFFSET: u64 = 0xcbf29ce484222325;
 
@@ -73,6 +75,16 @@ fn fnv1a64_continue(hash: u64, input: &[u8]) -> u64 {
         let mixed = hash ^ u64::from(*byte);
         mixed.wrapping_mul(PRIME)
     })
+}
+
+/// Returns the first 128 bits of SHA-256 as two big-endian lanes.
+pub fn sha256_hash_pair(input: &[u8]) -> (u64, u64) {
+    let digest = Sha256::digest(input);
+    let mut primary = [0_u8; 8];
+    let mut secondary = [0_u8; 8];
+    primary.copy_from_slice(&digest[..8]);
+    secondary.copy_from_slice(&digest[8..16]);
+    (u64::from_be_bytes(primary), u64::from_be_bytes(secondary))
 }
 
 /// Runtime platform capability snapshot.
@@ -122,6 +134,14 @@ mod tests {
                 fnv1a64(&concatenated)
             );
         }
+    }
+
+    #[test]
+    fn sha256_hash_pair_uses_the_first_128_digest_bits() {
+        assert_eq!(
+            sha256_hash_pair(b"pixa"),
+            (0x164fb963c3f92416, 0xbf647e7f0875c5ab)
+        );
     }
 
     #[test]

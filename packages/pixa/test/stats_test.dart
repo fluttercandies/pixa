@@ -737,7 +737,7 @@ void main() {
 
     expect(payload.take(4), <int>[0x50, 0x58, 0x52, 0x31]);
     expect(payload.first, isNot(0x7b));
-    expect(payload.length, lessThan(256));
+    expect(payload.length, lessThan(320));
   });
 
   test(
@@ -745,8 +745,11 @@ void main() {
     () {
       final PixaCacheKey key = PixaCacheKey.fromParts(<Object?>['pixa']);
 
-      expect(key.value, 'bef3f60dc4ff7eed');
-      expect(key.materialHash, 0x668135a3077b3346);
+      expect(key.value, '36724fc925eb8ada155565d41195b594');
+      expect(
+        BigInt.from(key.materialHash).toUnsigned(64).toRadixString(16),
+        '155565d41195b594',
+      );
     },
   );
 

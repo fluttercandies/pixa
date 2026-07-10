@@ -961,7 +961,7 @@ unsafe extern "C" fn pixa_qoi_decoder_plugin_decode(
     0
 }
 
-/// Hashes a byte range using the Pixa runtime cache-key hash.
+/// Hashes a byte range using the compatibility FNV-1a checksum.
 #[no_mangle]
 pub extern "C" fn pixa_fnv1a64(ptr: *const u8, len: usize) -> u64 {
     let Some(bytes) = (unsafe { bytes_from_ptr(ptr, len) }) else {
@@ -1009,9 +1009,10 @@ pub extern "C" fn pixa_cache_key_hash_pair(
     let Some(bytes) = (unsafe { bytes_from_ptr(ptr, len) }) else {
         return -1;
     };
+    let (primary, secondary) = pixa_core::sha256_hash_pair(bytes);
     unsafe {
-        *out_primary = pixa_core::fnv1a64(bytes);
-        *out_secondary = pixa_core::fnv1a64_with_prefix(b"material:", bytes);
+        *out_primary = primary;
+        *out_secondary = secondary;
     }
     0
 }
@@ -2684,7 +2685,7 @@ mod tests {
     }
 
     #[test]
-    fn cache_key_hash_pair_uses_one_input_buffer() {
+    fn cache_key_hash_pair_returns_sha256_128() {
         let input = b"pixa";
         let mut primary = 0_u64;
         let mut secondary = 0_u64;
@@ -2693,8 +2694,8 @@ mod tests {
             pixa_cache_key_hash_pair(input.as_ptr(), input.len(), &mut primary, &mut secondary);
 
         assert_eq!(status, 0);
-        assert_eq!(primary, 0xbef3f60dc4ff7eed);
-        assert_eq!(secondary, 0x668135a3077b3346);
+        assert_eq!(primary, 0x164fb963c3f92416);
+        assert_eq!(secondary, 0xbf647e7f0875c5ab);
     }
 
     #[test]

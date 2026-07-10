@@ -443,17 +443,30 @@ final class PixaHeadersPolicy {
 
   /// Returns redacted key material for selected headers.
   Map<String, Object?> keyMaterial(Map<String, String> headers) {
+    final Map<String, String> lookup = <String, String>{
+      for (final MapEntry<String, String> entry in headers.entries)
+        entry.key.toLowerCase(): entry.value,
+    };
     final Map<String, Object?> material = <String, Object?>{};
     for (final String name in varyHeaders) {
-      final String? value = headers[name] ?? headers[name.toLowerCase()];
+      final String normalizedName = name.toLowerCase();
+      final String? value = lookup[normalizedName];
       if (value == null) {
         continue;
       }
-      material[name.toLowerCase()] = PixaRedactor.isSensitiveHeader(name)
+      material[normalizedName] = PixaRedactor.isSensitiveHeader(name)
           ? '<sensitive>'
           : value;
     }
     return material;
+  }
+
+  PixaHeadersPolicy _snapshot() {
+    return PixaHeadersPolicy(
+      varyHeaders: Set<String>.unmodifiable(
+        varyHeaders.map((String name) => name.toLowerCase()),
+      ),
+    );
   }
 }
 
@@ -461,26 +474,78 @@ final class PixaHeadersPolicy {
 @immutable
 final class PixaRequest {
   /// Creates an image request.
-  const PixaRequest({
+  factory PixaRequest({
+    required PixaSource source,
+    Map<String, String> headers = const <String, String>{},
+    PixaHeadersPolicy headersPolicy = const PixaHeadersPolicy(),
+    String cacheNamespace = 'default',
+    PixaTargetSize? targetSize,
+    double scale = 1.0,
+    BoxFit? fit,
+    List<String> processors = const <String>[],
+    Map<String, Object?> decoderOptions = const <String, Object?>{},
+    PixaPluginExecutionPolicy pluginExecutionPolicy =
+        const PixaPluginExecutionPolicy.runtimeOnly(),
+    PixaCachePolicy cachePolicy = const PixaCachePolicy(),
+    PixaPriority priority = PixaPriority.normal,
+    PixaRetryPolicy retryPolicy = const PixaRetryPolicy.none(),
+    PixaRequestLimits limits = const PixaRequestLimits(),
+    PixaRedirectPolicy redirectPolicy = const PixaRedirectPolicy(),
+    Map<String, Object?> metadata = const <String, Object?>{},
+    PixaRequest? lowRes,
+    List<PixaSource> sources = const <PixaSource>[],
+  }) {
+    _validateRuntimeRequestValues(
+      scale: scale,
+      targetSize: targetSize,
+      retryPolicy: retryPolicy,
+      limits: limits,
+    );
+    return PixaRequest._(
+      source: source,
+      headers: _snapshotHeaders(headers),
+      headersPolicy: headersPolicy._snapshot(),
+      cacheNamespace: cacheNamespace,
+      targetSize: targetSize,
+      scale: scale,
+      fit: fit,
+      processors: List<String>.unmodifiable(processors),
+      decoderOptions: _snapshotObjectMap(
+        decoderOptions,
+        argumentName: 'decoderOptions',
+      ),
+      pluginExecutionPolicy: pluginExecutionPolicy,
+      cachePolicy: cachePolicy,
+      priority: priority,
+      retryPolicy: retryPolicy,
+      limits: limits,
+      redirectPolicy: redirectPolicy,
+      metadata: _snapshotObjectMap(metadata, argumentName: 'metadata'),
+      lowRes: lowRes,
+      sources: List<PixaSource>.unmodifiable(sources),
+    );
+  }
+
+  const PixaRequest._({
     required this.source,
-    this.headers = const <String, String>{},
-    this.headersPolicy = const PixaHeadersPolicy(),
-    this.cacheNamespace = 'default',
-    this.targetSize,
-    this.scale = 1.0,
-    this.fit,
-    this.processors = const <String>[],
-    this.decoderOptions = const <String, Object?>{},
-    this.pluginExecutionPolicy = const PixaPluginExecutionPolicy.runtimeOnly(),
-    this.cachePolicy = const PixaCachePolicy(),
-    this.priority = PixaPriority.normal,
-    this.retryPolicy = const PixaRetryPolicy.none(),
-    this.limits = const PixaRequestLimits(),
-    this.redirectPolicy = const PixaRedirectPolicy(),
-    this.metadata = const <String, Object?>{},
-    this.lowRes,
-    this.sources = const <PixaSource>[],
-  }) : assert(scale > 0);
+    required this.headers,
+    required this.headersPolicy,
+    required this.cacheNamespace,
+    required this.targetSize,
+    required this.scale,
+    required this.fit,
+    required this.processors,
+    required this.decoderOptions,
+    required this.pluginExecutionPolicy,
+    required this.cachePolicy,
+    required this.priority,
+    required this.retryPolicy,
+    required this.limits,
+    required this.redirectPolicy,
+    required this.metadata,
+    required this.lowRes,
+    required this.sources,
+  });
 
   /// Creates a network request.
   factory PixaRequest.network(
@@ -879,7 +944,9 @@ final class PixaRequest {
     return PixaCacheKey.fromParts(<Object?>[
       cacheNamespace,
       source.cacheMaterial,
-      sources.map((PixaSource source) => source.cacheMaterial),
+      sources
+          .map((PixaSource source) => source.cacheMaterial)
+          .toList(growable: false),
       headersPolicy.keyMaterial(headers),
       _privatePartitionMaterial,
       targetSize?.width,
@@ -973,6 +1040,182 @@ final class PixaRequest {
 
   @override
   int get hashCode => cacheKey.hashCode;
+}
+
+const int _maxPortableUsize = 0xffffffff;
+
+Map<String, String> _snapshotHeaders(Map<String, String> headers) {
+  final Map<String, String> canonicalNames = <String, String>{};
+  final Map<String, String> snapshot = <String, String>{};
+  for (final MapEntry<String, String> entry in headers.entries) {
+    final String normalized = entry.key.toLowerCase();
+    if (canonicalNames.containsKey(normalized)) {
+      throw ArgumentError(
+        'headers contains duplicate names that differ only by case: '
+        '$normalized',
+      );
+    }
+    canonicalNames[normalized] = entry.key;
+    snapshot[entry.key] = entry.value;
+  }
+  return Map<String, String>.unmodifiable(snapshot);
+}
+
+Map<String, Object?> _snapshotObjectMap(
+  Map<String, Object?> values, {
+  required String argumentName,
+}) {
+  final Map<String, Object?> snapshot = <String, Object?>{};
+  int index = 0;
+  for (final MapEntry<String, Object?> entry in values.entries) {
+    snapshot[entry.key] = _snapshotSupportedValue(
+      entry.value,
+      argumentName: argumentName,
+      path: '$argumentName.value[$index]',
+    );
+    index += 1;
+  }
+  return Map<String, Object?>.unmodifiable(snapshot);
+}
+
+Object? _snapshotSupportedValue(
+  Object? value, {
+  required String argumentName,
+  required String path,
+}) {
+  if (value == null || value is bool || value is int || value is String) {
+    return value;
+  }
+  if (value is double) {
+    if (!value.isFinite) {
+      throw ArgumentError(
+        '$argumentName contains a non-finite double at $path.',
+      );
+    }
+    return value;
+  }
+  if (value is Uint8List) {
+    return Uint8List.fromList(value).asUnmodifiableView();
+  }
+  if (value is List) {
+    return List<Object?>.unmodifiable(<Object?>[
+      for (int index = 0; index < value.length; index++)
+        _snapshotSupportedValue(
+          value[index],
+          argumentName: argumentName,
+          path: '$path[$index]',
+        ),
+    ]);
+  }
+  if (value is Map) {
+    final Map<Object?, Object?> snapshot = <Object?, Object?>{};
+    int index = 0;
+    for (final MapEntry<dynamic, dynamic> entry in value.entries) {
+      final Object? key = _snapshotSupportedValue(
+        entry.key,
+        argumentName: argumentName,
+        path: '$path.key[$index]',
+      );
+      snapshot[key] = _snapshotSupportedValue(
+        entry.value,
+        argumentName: argumentName,
+        path: '$path.value[$index]',
+      );
+      index += 1;
+    }
+    return Map<Object?, Object?>.unmodifiable(snapshot);
+  }
+  throw ArgumentError(
+    '$argumentName contains unsupported value type ${value.runtimeType} at '
+    '$path; use null, bool, int, finite double, String, Uint8List, List, or '
+    'Map.',
+  );
+}
+
+void _validateRuntimeRequestValues({
+  required double scale,
+  required PixaTargetSize? targetSize,
+  required PixaRetryPolicy retryPolicy,
+  required PixaRequestLimits limits,
+}) {
+  if (!scale.isFinite || scale <= 0) {
+    throw ArgumentError.value(scale, 'scale', 'must be finite and positive');
+  }
+  _validateDimension(targetSize?.width, 'targetSize.width');
+  _validateDimension(targetSize?.height, 'targetSize.height');
+  _validatePositivePortableUsize(
+    retryPolicy.maxAttempts,
+    'retryPolicy.maxAttempts',
+  );
+  if (retryPolicy.delay.isNegative) {
+    throw ArgumentError.value(
+      retryPolicy.delay,
+      'retryPolicy.delay',
+      'must not be negative',
+    );
+  }
+  if (retryPolicy.jitter.isNegative) {
+    throw ArgumentError.value(
+      retryPolicy.jitter,
+      'retryPolicy.jitter',
+      'must not be negative',
+    );
+  }
+  _validatePositivePortableUsize(
+    limits.maxEncodedBytes,
+    'limits.maxEncodedBytes',
+  );
+  _validatePositive(limits.maxDecodedPixels, 'limits.maxDecodedPixels');
+  _validatePositivePortableUsize(
+    limits.maxAnimationFrames,
+    'limits.maxAnimationFrames',
+  );
+  _validatePositiveMilliseconds(
+    limits.maxAnimationDuration,
+    'limits.maxAnimationDuration',
+  );
+  _validatePositivePortableUsize(
+    limits.maxProcessorOutputBytes,
+    'limits.maxProcessorOutputBytes',
+  );
+  if (limits.maxRedirects < 0 || limits.maxRedirects > _maxPortableUsize) {
+    throw ArgumentError.value(
+      limits.maxRedirects,
+      'limits.maxRedirects',
+      'must be between 0 and $_maxPortableUsize',
+    );
+  }
+  _validatePositiveMilliseconds(limits.timeout, 'limits.timeout');
+  _validatePositiveMilliseconds(limits.connectTimeout, 'limits.connectTimeout');
+  _validatePositiveMilliseconds(limits.idleTimeout, 'limits.idleTimeout');
+}
+
+void _validateDimension(int? value, String name) {
+  if (value != null && (value <= 0 || value > 0xffffffff)) {
+    throw ArgumentError.value(value, name, 'must fit a positive uint32');
+  }
+}
+
+void _validatePositivePortableUsize(int value, String name) {
+  if (value <= 0 || value > _maxPortableUsize) {
+    throw ArgumentError.value(
+      value,
+      name,
+      'must be between 1 and $_maxPortableUsize',
+    );
+  }
+}
+
+void _validatePositive(int value, String name) {
+  if (value <= 0) {
+    throw ArgumentError.value(value, name, 'must be positive');
+  }
+}
+
+void _validatePositiveMilliseconds(Duration value, String name) {
+  if (value.inMilliseconds <= 0) {
+    throw ArgumentError.value(value, name, 'must be at least 1 millisecond');
+  }
 }
 
 final Expando<PixaCacheKey> _pixaRequestCacheKeys = Expando<PixaCacheKey>(

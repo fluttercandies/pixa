@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -7,6 +9,11 @@ import 'redaction.dart';
 final Expando<String> _bytesSourceFingerprints = Expando<String>(
   'PixaBytesSource.fingerprint',
 );
+final Expando<String> _assetBundleIdentities = Expando<String>(
+  'PixaAssetSource.bundleIdentity',
+);
+final String _assetBundleProcessNonce = _newAssetBundleProcessNonce();
+int _nextAssetBundleIdentity = 0;
 
 /// Function used by custom sources to provide encoded bytes.
 typedef PixaCustomSourceLoader = Future<Uint8List> Function();
@@ -236,6 +243,7 @@ final class PixaAssetSource extends PixaSource {
     'type': 'asset',
     'name': name,
     'package': package,
+    if (bundle != null) 'bundle': _assetBundleIdentity(bundle!),
   };
 
   @override
@@ -246,7 +254,11 @@ final class PixaAssetSource extends PixaSource {
 /// Memory object image source.
 final class PixaMemorySource extends PixaSource {
   /// Creates a memory image source.
-  const PixaMemorySource(this.id, this.bytes);
+  factory PixaMemorySource(String id, Uint8List bytes) {
+    return PixaMemorySource._(id, _immutableSourceBytes(bytes));
+  }
+
+  PixaMemorySource._(this.id, this.bytes);
 
   /// Caller-provided stable identity.
   final String id;
@@ -268,7 +280,11 @@ final class PixaMemorySource extends PixaSource {
 /// Raw encoded bytes image source.
 final class PixaBytesSource extends PixaSource {
   /// Creates a bytes image source.
-  const PixaBytesSource(this.bytes, {this.id});
+  factory PixaBytesSource(Uint8List bytes, {String? id}) {
+    return PixaBytesSource._(_immutableSourceBytes(bytes), id: id);
+  }
+
+  PixaBytesSource._(this.bytes, {this.id});
 
   /// Encoded image bytes.
   final Uint8List bytes;
@@ -290,6 +306,24 @@ final class PixaBytesSource extends PixaSource {
 
 String _bytesSourceFingerprint(Uint8List bytes) {
   return _bytesSourceFingerprints[bytes] ??= PixaRuntimeBridge.hashHex(bytes);
+}
+
+Uint8List _immutableSourceBytes(Uint8List bytes) {
+  return Uint8List.fromList(bytes).asUnmodifiableView();
+}
+
+String _assetBundleIdentity(AssetBundle bundle) {
+  return _assetBundleIdentities[bundle] ??=
+      '$_assetBundleProcessNonce:${_nextAssetBundleIdentity++}';
+}
+
+String _newAssetBundleProcessNonce() {
+  final Random random = Random.secure();
+  final StringBuffer nonce = StringBuffer();
+  for (int index = 0; index < 16; index++) {
+    nonce.write(random.nextInt(256).toRadixString(16).padLeft(2, '0'));
+  }
+  return nonce.toString();
 }
 
 /// Custom image source.

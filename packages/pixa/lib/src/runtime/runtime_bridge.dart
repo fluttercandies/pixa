@@ -22,14 +22,15 @@ final class PixaRuntimeBridge {
     }
   }
 
-  /// Stable runtime hash used for cache keys and disk index entries.
+  /// Stable FNV-1a checksum retained for compatibility and benchmarks.
   static int hashBytes(Uint8List bytes) {
     return _withRuntimeBytes(bytes, _pixaFnv1a64);
   }
 
-  /// Stable unsigned hexadecimal hash text.
+  /// First 128 bits of SHA-256 as stable hexadecimal text.
   static String hashHex(Uint8List bytes) {
-    return uint64Hex(hashBytes(bytes));
+    final PixaRuntimeHashPair pair = cacheKeyHashPair(bytes);
+    return '${uint64Hex(pair.primary)}${uint64Hex(pair.secondary)}';
   }
 
   /// Formats a possibly signed runtime uint64 value as unsigned fixed-width hex.
@@ -37,7 +38,7 @@ final class PixaRuntimeBridge {
     return BigInt.from(value).toUnsigned(64).toRadixString(16).padLeft(16, '0');
   }
 
-  /// Stable primary/secondary hashes for normalized cache-key material.
+  /// First two 64-bit lanes of the SHA-256 cache-key digest.
   static PixaRuntimeHashPair cacheKeyHashPair(Uint8List bytes) {
     return _withRuntimeBytesAndHashPair(bytes, (
       Pointer<Uint8> ptr,
@@ -136,15 +137,15 @@ final class PixaRuntimeBridge {
   }
 }
 
-/// Primary and secondary cache-key hashes computed by one runtime call.
+/// Two SHA-256 cache-key digest lanes computed by one runtime call.
 final class PixaRuntimeHashPair {
   /// Creates a runtime hash pair.
   const PixaRuntimeHashPair(this.primary, this.secondary);
 
-  /// Primary hash used for stable file-safe key text.
+  /// First 64-bit digest lane used for stable file-safe key text.
   final int primary;
 
-  /// Secondary hash used to reduce accidental in-memory collisions.
+  /// Second 64-bit digest lane used for stable file-safe key text.
   final int secondary;
 }
 

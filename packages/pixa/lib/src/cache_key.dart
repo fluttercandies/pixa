@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
@@ -12,15 +13,21 @@ final class PixaCacheKey {
     Iterable<Object?> parts, {
     String? debugLabel,
   }) {
-    final String material = parts.map(_normalizePart).join('\n');
+    if (parts is! List) {
+      throw ArgumentError(
+        'Cache-key parts must be a List so their order is deterministic.',
+      );
+    }
+    final Uint8List material = _CanonicalCacheKeyEncoder.encode(parts);
     final PixaRuntimeHashPair hashes = PixaRuntimeBridge.cacheKeyHashPair(
-      Uint8List.fromList(utf8.encode(material)),
+      material,
     );
     final String primaryHex = PixaRuntimeBridge.uint64Hex(hashes.primary);
+    final String secondaryHex = PixaRuntimeBridge.uint64Hex(hashes.secondary);
     return PixaCacheKey._(
-      value: primaryHex,
+      value: '$primaryHex$secondaryHex',
       materialHash: hashes.secondary,
-      debugLabel: debugLabel ?? 'pixa:$primaryHex',
+      debugLabel: debugLabel ?? 'pixa:$primaryHex$secondaryHex',
     );
   }
 
@@ -53,27 +60,105 @@ final class PixaCacheKey {
   String toString() => debugLabel;
 }
 
-String _normalizePart(Object? value) {
-  if (value == null) {
-    return '<null>';
+final class _CanonicalCacheKeyEncoder {
+  _CanonicalCacheKeyEncoder._();
+
+  static Uint8List encode(List<dynamic> parts) {
+    return _encodeValue(parts, 'parts');
   }
-  if (value is Map) {
-    final List<MapEntry<String, String>> entries =
-        value.entries.map((MapEntry<Object?, Object?> entry) {
-            return MapEntry<String, String>(
-              _normalizePart(entry.key),
-              _normalizePart(entry.value),
-            );
-          }).toList()
-          ..sort((MapEntry<String, String> a, MapEntry<String, String> b) {
-            return a.key.compareTo(b.key);
-          });
-    return entries
-        .map((MapEntry<String, String> e) => '${e.key}=${e.value}')
-        .join('&');
+
+  static Uint8List _encodeValue(Object? value, String path) {
+    if (value == null) {
+      return _frame(0x00, Uint8List(0));
+    }
+    if (value is bool) {
+      return _frame(0x01, Uint8List.fromList(<int>[value ? 1 : 0]));
+    }
+    if (value is int) {
+      return _frame(0x02, Uint8List.fromList(utf8.encode(value.toString())));
+    }
+    if (value is double) {
+      if (!value.isFinite) {
+        throw ArgumentError('Non-finite double at $path is not deterministic.');
+      }
+      final ByteData data = ByteData(8)..setFloat64(0, value, Endian.big);
+      return _frame(0x03, data.buffer.asUint8List());
+    }
+    if (value is String) {
+      return _frame(0x04, Uint8List.fromList(utf8.encode(value)));
+    }
+    if (value is Uint8List) {
+      return _frame(0x05, value);
+    }
+    if (value is List) {
+      final BytesBuilder payload = BytesBuilder(copy: false);
+      for (int index = 0; index < value.length; index++) {
+        payload.add(_encodeValue(value[index], '$path[$index]'));
+      }
+      return _frame(0x06, payload.takeBytes());
+    }
+    if (value is Map) {
+      final List<_CanonicalMapEntry> entries = <_CanonicalMapEntry>[];
+      int index = 0;
+      for (final MapEntry<dynamic, dynamic> entry in value.entries) {
+        entries.add(
+          _CanonicalMapEntry(
+            _encodeValue(entry.key, '$path.key[$index]'),
+            _encodeValue(entry.value, '$path.value[$index]'),
+          ),
+        );
+        index += 1;
+      }
+      entries.sort(_compareEntries);
+      final BytesBuilder payload = BytesBuilder(copy: false);
+      for (final _CanonicalMapEntry entry in entries) {
+        payload
+          ..add(entry.key)
+          ..add(entry.value);
+      }
+      return _frame(0x07, payload.takeBytes());
+    }
+    throw ArgumentError(
+      'Unsupported cache-key value type ${value.runtimeType} at $path; '
+      'use null, bool, int, finite double, String, Uint8List, List, or Map.',
+    );
   }
-  if (value is Iterable && value is! String) {
-    return value.map(_normalizePart).join(',');
+
+  static Uint8List _frame(int tag, Uint8List payload) {
+    final ByteData length = ByteData(8)
+      ..setUint64(0, payload.length, Endian.big);
+    return (BytesBuilder(copy: false)
+          ..addByte(tag)
+          ..add(length.buffer.asUint8List())
+          ..add(payload))
+        .takeBytes();
   }
-  return value.toString();
+
+  static int _compareEntries(
+    _CanonicalMapEntry first,
+    _CanonicalMapEntry second,
+  ) {
+    final int keyOrder = _compareBytes(first.key, second.key);
+    return keyOrder != 0 ? keyOrder : _compareBytes(first.value, second.value);
+  }
+
+  static int _compareBytes(Uint8List first, Uint8List second) {
+    final int commonLength = first.length < second.length
+        ? first.length
+        : second.length;
+    for (int index = 0; index < commonLength; index++) {
+      final int order = first[index].compareTo(second[index]);
+      if (order != 0) {
+        return order;
+      }
+    }
+    return first.length.compareTo(second.length);
+  }
+}
+
+final class _CanonicalMapEntry {
+  const _CanonicalMapEntry(this.key, this.value);
+
+  final Uint8List key;
+  final Uint8List value;
 }
