@@ -7,8 +7,8 @@ use crate::request::RuntimeRequest;
 use crate::{RuntimeError, RuntimeResult};
 use bytes::Bytes;
 use http::header::{
-    AGE, AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, COOKIE, ETAG, EXPIRES, IF_MODIFIED_SINCE,
-    IF_NONE_MATCH, LAST_MODIFIED, LOCATION, PROXY_AUTHORIZATION, VARY,
+    AGE, AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, COOKIE, DATE, ETAG, EXPIRES,
+    IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, LOCATION, PROXY_AUTHORIZATION, VARY,
 };
 use http::{HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode, Uri};
 use http_body_util::{BodyExt, Empty};
@@ -19,7 +19,8 @@ use hyper_util::client::legacy::connect::{Connected, Connection, HttpConnector};
 use hyper_util::client::legacy::Client;
 use hyper_util::client::proxy::matcher::Matcher;
 use hyper_util::rt::TokioExecutor;
-use std::collections::BTreeMap;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -134,12 +135,12 @@ impl ProxyRoute {
             Self::DirectHttp => format!("direct-http:{connect_timeout_ms}"),
             Self::DirectHttps => format!("direct-https:{connect_timeout_ms}"),
             Self::HttpProxy { uri, auth } => format!(
-                "http-proxy:{connect_timeout_ms}:{uri}:{}",
-                auth_cache_key(auth)
+                "http-proxy:{}",
+                proxy_route_identity(1, connect_timeout_ms, uri, auth)
             ),
             Self::HttpsProxy { uri, auth } => format!(
-                "https-proxy:{connect_timeout_ms}:{uri}:{}",
-                auth_cache_key(auth)
+                "https-proxy:{}",
+                proxy_route_identity(2, connect_timeout_ms, uri, auth)
             ),
         }
     }
@@ -169,9 +170,11 @@ pub(crate) struct HttpCacheMetadata {
     pub(crate) etag: Option<String>,
     pub(crate) last_modified: Option<String>,
     pub(crate) cache_control: Option<String>,
+    pub(crate) date: Option<String>,
     pub(crate) expires: Option<String>,
     pub(crate) age: Option<String>,
     pub(crate) vary: Option<String>,
+    pub(crate) vary_request_key: Option<String>,
     pub(crate) fetched_at_ms: i64,
 }
 
@@ -229,7 +232,7 @@ impl AsyncCancelNotify {
 
 impl RuntimeCancelWaker for AsyncCancelNotify {
     fn wake_cancelled(&self) {
-        self.notify.notify_waiters();
+        self.notify.notify_one();
     }
 }
 
@@ -308,15 +311,18 @@ impl AdaptiveConcurrencyGate {
         Self {
             state: Mutex::new(AdaptiveConcurrencyState {
                 active: 0,
-                limit: limit.clamp(1, 16),
+                limit: limit.max(1),
             }),
             notify: tokio::sync::Notify::new(),
         }
     }
 
     async fn acquire(self: &Arc<Self>, limit: usize) -> RuntimeResult<AdaptiveConcurrencyPermit> {
-        let limit = limit.clamp(1, 16);
+        let limit = limit.max(1);
         loop {
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
             {
                 let mut state = self.state.lock().map_err(|_| {
                     RuntimeError::new("fetch", true, "HTTP concurrency guard poisoned")
@@ -327,7 +333,7 @@ impl AdaptiveConcurrencyGate {
                     return Ok(AdaptiveConcurrencyPermit { gate: self.clone() });
                 }
             }
-            self.notify.notified().await;
+            notified.await;
         }
     }
 
@@ -335,7 +341,7 @@ impl AdaptiveConcurrencyGate {
         if let Ok(mut state) = self.state.lock() {
             state.active = state.active.saturating_sub(1);
         }
-        self.notify.notify_waiters();
+        self.notify.notify_one();
     }
 }
 
@@ -343,6 +349,10 @@ impl Drop for AdaptiveConcurrencyPermit {
     fn drop(&mut self) {
         self.gate.release();
     }
+}
+
+fn http_runtime_worker_threads(available_parallelism: usize) -> usize {
+    available_parallelism.clamp(1, 2)
 }
 
 impl HttpTransport {
@@ -354,9 +364,11 @@ impl HttpTransport {
         network_concurrency: usize,
         proxy_policy: ProxyPolicy,
     ) -> RuntimeResult<Self> {
-        let concurrency = network_concurrency.clamp(1, 16);
+        let available_parallelism = std::thread::available_parallelism()
+            .map(|parallelism| parallelism.get())
+            .unwrap_or(1);
         let runtime = RuntimeBuilder::new_multi_thread()
-            .worker_threads(concurrency)
+            .worker_threads(http_runtime_worker_threads(available_parallelism))
             .thread_name("pixa-http")
             .enable_io()
             .enable_time()
@@ -372,7 +384,7 @@ impl HttpTransport {
         Ok(Self {
             runtime,
             clients: Mutex::new(BTreeMap::new()),
-            gate: Arc::new(AdaptiveConcurrencyGate::new(concurrency)),
+            gate: Arc::new(AdaptiveConcurrencyGate::new(network_concurrency)),
             proxy_policy,
         })
     }
@@ -416,7 +428,6 @@ impl HttpTransport {
         ensure_not_cancelled(cancel_token)?;
         let _permit = self.gate.acquire(network_concurrency).await?;
 
-        let initial_https = uri.scheme_str() == Some("https");
         let mut headers = header_map(&request.headers)?;
         apply_conditional_headers(&mut headers, conditional)?;
         let mut current = uri;
@@ -443,16 +454,7 @@ impl HttpTransport {
                     RuntimeError::new("fetch", false, "redirect missing location")
                 })?;
                 let next = resolve_redirect_uri(&current, location)?;
-                if initial_https
-                    && next.scheme_str() == Some("http")
-                    && !request.redirect_policy.allow_https_to_http
-                {
-                    return Err(RuntimeError::new(
-                        "fetch",
-                        false,
-                        "refused https to http redirect",
-                    ));
-                }
+                validate_redirect_transition(&current, &next, request.redirect_policy)?;
                 if is_cross_host_redirect(&current, &next) {
                     if !request.redirect_policy.allow_cross_host_redirects {
                         return Err(RuntimeError::new(
@@ -480,7 +482,7 @@ impl HttpTransport {
                 );
                 return Ok(HttpFetchResult::NotModified(HttpNotModifiedOutcome {
                     source_label: redact_uri(&current.to_string()),
-                    cache_metadata: HttpCacheMetadata::from_headers(response.headers()),
+                    cache_metadata: HttpCacheMetadata::from_headers(response.headers(), &headers),
                 }));
             }
 
@@ -494,7 +496,7 @@ impl HttpTransport {
 
             let expected_bytes =
                 validate_content_length(response.headers(), request.limits.max_encoded_bytes)?;
-            let metadata = HttpCacheMetadata::from_headers(response.headers());
+            let metadata = HttpCacheMetadata::from_headers(response.headers(), &headers);
             let bytes = read_body(
                 response.into_body(),
                 request.limits.max_encoded_bytes,
@@ -577,17 +579,71 @@ pub(crate) fn fetch(
 }
 
 impl HttpCacheMetadata {
-    fn from_headers(headers: &HeaderMap) -> Self {
+    fn from_headers(headers: &HeaderMap, request_headers: &HeaderMap) -> Self {
+        let vary = header_list_string(headers, VARY);
+        let vary_request_key = vary
+            .as_deref()
+            .and_then(|value| vary_request_key_for_headers(value, request_headers));
         Self {
             etag: header_string(headers, ETAG),
             last_modified: header_string(headers, LAST_MODIFIED),
-            cache_control: header_string(headers, CACHE_CONTROL),
+            cache_control: header_list_string(headers, CACHE_CONTROL),
+            date: header_string(headers, DATE),
             expires: header_string(headers, EXPIRES),
             age: header_string(headers, AGE),
-            vary: header_string(headers, VARY),
+            vary,
+            vary_request_key,
             fetched_at_ms: crate::cache::now_millis(),
         }
     }
+}
+
+pub(crate) fn request_vary_key(
+    vary: &str,
+    request_headers: &BTreeMap<String, String>,
+) -> RuntimeResult<Option<String>> {
+    let request_headers = header_map(request_headers)?;
+    Ok(vary_request_key_for_headers(vary, &request_headers))
+}
+
+fn vary_request_key_for_headers(vary: &str, headers: &HeaderMap) -> Option<String> {
+    let mut names = BTreeSet::new();
+    for name in vary
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        if name == "*" {
+            return None;
+        }
+        names.insert(name.to_ascii_lowercase());
+    }
+    let mut hasher = Sha256::new();
+    for name in names {
+        hash_framed(&mut hasher, name.as_bytes());
+        if let Some(value) = headers.get(name.as_str()) {
+            hasher.update([1]);
+            hash_framed(&mut hasher, value.as_bytes());
+        } else {
+            hasher.update([0]);
+        }
+    }
+    Some(hex_lower(&hasher.finalize()))
+}
+
+fn hash_framed(hasher: &mut Sha256, value: &[u8]) {
+    hasher.update(u64::try_from(value.len()).unwrap_or(u64::MAX).to_be_bytes());
+    hasher.update(value);
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    output
 }
 
 fn headers_for_route(headers: &HeaderMap, route: &ProxyRoute) -> HeaderMap {
@@ -637,11 +693,38 @@ fn no_proxy_with_loopback(no_proxy: &str) -> String {
     }
 }
 
+#[cfg(test)]
 fn auth_cache_key(auth: &Option<HeaderValue>) -> String {
-    let Some(auth) = auth else {
-        return "none".to_string();
-    };
-    format!("{:016x}", crate::fnv1a64(auth.as_bytes()))
+    let mut hasher = Sha256::new();
+    hash_identity_field(&mut hasher, 0, b"pixa.http.proxy-auth.v2");
+    hash_identity_field(&mut hasher, 1, &[u8::from(auth.is_some())]);
+    if let Some(auth) = auth {
+        hash_identity_field(&mut hasher, 2, auth.as_bytes());
+    }
+    format!("sha256:{}", hex_lower(&hasher.finalize()))
+}
+
+fn proxy_route_identity(
+    route_kind: u8,
+    connect_timeout_ms: u64,
+    uri: &Uri,
+    auth: &Option<HeaderValue>,
+) -> String {
+    let mut hasher = Sha256::new();
+    hash_identity_field(&mut hasher, 0, b"pixa.http.proxy-route.v2");
+    hash_identity_field(&mut hasher, 1, &[route_kind]);
+    hash_identity_field(&mut hasher, 2, &connect_timeout_ms.to_be_bytes());
+    hash_identity_field(&mut hasher, 3, uri.to_string().as_bytes());
+    hash_identity_field(&mut hasher, 4, &[u8::from(auth.is_some())]);
+    if let Some(auth) = auth {
+        hash_identity_field(&mut hasher, 5, auth.as_bytes());
+    }
+    format!("sha256:{}", hex_lower(&hasher.finalize()))
+}
+
+fn hash_identity_field(hasher: &mut Sha256, tag: u8, value: &[u8]) {
+    hasher.update([tag]);
+    hash_framed(hasher, value);
 }
 
 fn header_string(headers: &HeaderMap, name: HeaderName) -> Option<String> {
@@ -651,6 +734,17 @@ fn header_string(headers: &HeaderMap, name: HeaderName) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
+}
+
+fn header_list_string(headers: &HeaderMap, name: HeaderName) -> Option<String> {
+    let values = headers
+        .get_all(name)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| values.join(", "))
 }
 
 fn transport(network_concurrency: usize) -> RuntimeResult<&'static dyn RuntimeHttpTransport> {
@@ -950,11 +1044,13 @@ async fn wait_for_cancel(token: RuntimeCancelToken) {
         return;
     }
     let waker = Arc::new(AsyncCancelNotify::new());
+    let notified = waker.notify.notified();
+    tokio::pin!(notified);
     token.register_waker(&waker);
     if token.is_cancelled() {
         return;
     }
-    waker.notify.notified().await;
+    notified.await;
 }
 
 fn ensure_not_cancelled(cancel_token: Option<&RuntimeCancelToken>) -> RuntimeResult<()> {
@@ -1015,6 +1111,24 @@ fn resolve_redirect_uri(current: &Uri, location: &HeaderValue) -> RuntimeResult<
     };
 
     parse_network_uri(&resolved)
+}
+
+fn validate_redirect_transition(
+    current: &Uri,
+    next: &Uri,
+    policy: crate::request::RuntimeRedirectPolicy,
+) -> RuntimeResult<()> {
+    if current.scheme_str() == Some("https")
+        && next.scheme_str() == Some("http")
+        && !policy.allow_https_to_http
+    {
+        return Err(RuntimeError::new(
+            "fetch",
+            false,
+            "refused https to http redirect",
+        ));
+    }
+    Ok(())
 }
 
 fn header_map(headers: &std::collections::BTreeMap<String, String>) -> RuntimeResult<HeaderMap> {
@@ -1183,7 +1297,7 @@ mod tests {
     use rustls::{ServerConfig, ServerConnection, StreamOwned};
     use std::collections::BTreeMap;
     use std::io::{Error, ErrorKind, Read, Write};
-    use std::net::TcpListener;
+    use std::net::{Shutdown, TcpListener};
     use std::sync::Mutex;
     use std::thread;
     use std::time::Duration;
@@ -1213,6 +1327,56 @@ mod tests {
                 .unwrap()
                 .unwrap();
             drop(third);
+        });
+    }
+
+    #[test]
+    fn adaptive_concurrency_gate_preserves_user_limits_above_sixteen() {
+        let gate = AdaptiveConcurrencyGate::new(64);
+
+        let state = gate.state.lock().unwrap();
+        assert_eq!(state.limit, 64);
+    }
+
+    #[test]
+    fn http_runtime_workers_are_bounded_independently_of_request_concurrency() {
+        assert_eq!(http_runtime_worker_threads(1), 1);
+        assert_eq!(http_runtime_worker_threads(4), 2);
+        assert_eq!(http_runtime_worker_threads(12), 2);
+    }
+
+    #[test]
+    fn adaptive_concurrency_gate_retains_release_before_waiter_registration() {
+        let runtime = RuntimeBuilder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let gate = Arc::new(AdaptiveConcurrencyGate::new(1));
+            let permit = gate.acquire(1).await.unwrap();
+
+            drop(permit);
+
+            tokio::time::timeout(Duration::from_millis(50), gate.notify.notified())
+                .await
+                .expect("a release in the acquire registration window must be retained");
+        });
+    }
+
+    #[test]
+    fn async_cancel_notification_is_retained_before_waiter_registration() {
+        let runtime = RuntimeBuilder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let cancel_notify = AsyncCancelNotify::new();
+
+            cancel_notify.wake_cancelled();
+
+            tokio::time::timeout(Duration::from_millis(50), cancel_notify.notify.notified())
+                .await
+                .expect("cancellation in the waiter registration window must be retained");
         });
     }
 
@@ -1300,6 +1464,22 @@ mod tests {
         assert!(error.message.contains("cross-host"));
         first.join();
         second.shutdown_without_request();
+    }
+
+    #[test]
+    fn rejects_https_to_http_downgrade_on_every_redirect_hop() {
+        let http = "http://images.example.test/start".parse::<Uri>().unwrap();
+        let https = "https://images.example.test/secure".parse::<Uri>().unwrap();
+        let downgraded = "http://images.example.test/final".parse::<Uri>().unwrap();
+        let policy = RuntimeRedirectPolicy::default();
+
+        validate_redirect_transition(&http, &https, policy)
+            .expect("HTTP to HTTPS upgrade should be allowed");
+        let error = validate_redirect_transition(&https, &downgraded, policy)
+            .expect_err("the later HTTPS to HTTP hop must be refused");
+
+        assert_eq!(error.stage, "fetch");
+        assert!(error.message.contains("https to http"));
     }
 
     #[test]
@@ -1427,6 +1607,33 @@ mod tests {
         );
         assert!(raw_request.contains("if-none-match: \"v1\""));
         assert!(raw_request.contains("if-modified-since: wed, 21 oct 2015 07:28:00 gmt"));
+    }
+
+    #[test]
+    fn cache_metadata_combines_repeated_vary_fields() {
+        let server = spawn_http_server(
+            "HTTP/1.1 200 OK\r\nVary: Accept\r\nVary: User-Agent\r\nContent-Length: 2\r\n\r\nok"
+                .to_string(),
+        );
+        let mut request = test_request(server.url.clone());
+        request
+            .headers
+            .insert("accept".to_string(), "image/webp".to_string());
+        request
+            .headers
+            .insert("user-agent".to_string(), "pixa-test".to_string());
+
+        let fetched = match fetch(2, &request, &server.url, None, None, None).unwrap() {
+            HttpFetchResult::Fetched(fetched) => fetched,
+            HttpFetchResult::NotModified(_) => panic!("200 response must not be 304"),
+        };
+        server.join();
+
+        assert_eq!(
+            fetched.cache_metadata.vary.as_deref(),
+            Some("Accept, User-Agent")
+        );
+        assert!(fetched.cache_metadata.vary_request_key.is_some());
     }
 
     #[test]
@@ -1693,6 +1900,30 @@ mod tests {
         assert_ne!(http.cache_key(500), https.cache_key(500));
     }
 
+    #[test]
+    fn proxy_cache_identity_cryptographically_partitions_and_hides_auth() {
+        let first_auth = HeaderValue::from_static("Basic first-secret");
+        let second_auth = HeaderValue::from_static("Basic second-secret");
+        let first = auth_cache_key(&Some(first_auth.clone()));
+        let second = auth_cache_key(&Some(second_auth));
+
+        assert!(first.starts_with("sha256:"));
+        assert_ne!(first, second);
+        assert!(!first.contains("first-secret"));
+
+        let route = ProxyRoute::HttpProxy {
+            uri: "http://user:password@proxy.example.test:8080"
+                .parse()
+                .unwrap(),
+            auth: Some(first_auth),
+        };
+        let route_key = route.cache_key(500);
+        assert!(route_key.starts_with("http-proxy:sha256:"));
+        assert!(!route_key.contains("user"));
+        assert!(!route_key.contains("password"));
+        assert!(!route_key.contains("first-secret"));
+    }
+
     fn test_request(uri: String) -> RuntimeRequest {
         RuntimeRequest {
             source: RuntimeSource::Network { uri },
@@ -1748,6 +1979,8 @@ mod tests {
                 thread::sleep(delay);
             }
             stream.write_all(response.as_bytes()).unwrap();
+            stream.flush().unwrap();
+            finish_http_test_response(&mut stream);
             request
         });
         TestServer {
@@ -1773,6 +2006,8 @@ mod tests {
             stream.flush().unwrap();
             thread::sleep(delay);
             let _ = stream.write_all(&body);
+            let _ = stream.flush();
+            finish_http_test_response(&mut stream);
             request
         });
         TestServer {
@@ -1780,6 +2015,13 @@ mod tests {
             address: address.to_string(),
             handle,
         }
+    }
+
+    fn finish_http_test_response(stream: &mut std::net::TcpStream) {
+        let _ = stream.shutdown(Shutdown::Write);
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+        let mut drain = [0_u8; 64];
+        while stream.read(&mut drain).is_ok_and(|length| length > 0) {}
     }
 
     struct TlsTestServer {

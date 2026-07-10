@@ -22,10 +22,11 @@ use crate::{
     RuntimePluginProcessRequest, RuntimePluginVideoFrameSpec, RuntimeResult,
 };
 use image::GenericImageView;
+use sha2::{Digest, Sha256};
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap};
-use std::io::Cursor;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::io::{Cursor, Read};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -68,6 +69,7 @@ impl Default for RuntimePipelineConfig {
 
 /// Applies runtime configuration.
 pub fn configure(config: RuntimePipelineConfig) -> RuntimeResult<()> {
+    validate_pipeline_config(config)?;
     *pipeline_config()
         .lock()
         .map_err(|_| RuntimeError::new("config", true, "runtime config lock poisoned"))? = config;
@@ -78,12 +80,26 @@ pub fn configure(config: RuntimePipelineConfig) -> RuntimeResult<()> {
     Ok(())
 }
 
+fn validate_pipeline_config(config: RuntimePipelineConfig) -> RuntimeResult<()> {
+    if config.network_concurrency == 0 {
+        return Err(RuntimeError::new(
+            "config",
+            false,
+            "network concurrency must be greater than zero",
+        ));
+    }
+    Ok(())
+}
+
 /// Runtime load outcome.
 #[derive(Clone, Debug)]
 pub struct LoadOutcome {
     pub bytes: SharedBytes,
     pub cache_status: CacheStatus,
     pub source_label: String,
+    cacheable: bool,
+    cache_ttl_ms: Option<i64>,
+    http_cache_metadata: Option<DiskCacheHttpMetadata>,
 }
 
 /// Runtime RGBA image decoded for display handoff experiments.
@@ -160,18 +176,27 @@ pub fn load_image_with_cancel_and_progress(
 ) -> RuntimeResult<LoadOutcome> {
     if runtime_inflight_coalescing_allowed(&request) {
         let inflight_key = runtime_inflight_key(root, &request);
-        let (inflight, is_leader) = runtime_inflight_entry(&inflight_key)?;
+        let (inflight, listener, is_leader) =
+            runtime_inflight_entry(&inflight_key, cancel_token.as_ref())?;
         if !is_leader {
             emit_progress(
                 progress_sink,
                 RuntimeProgressEvent::new(RuntimeProgressStage::Request, "request.coalesced"),
             );
-            return wait_for_runtime_inflight(inflight, &request, cancel_token.as_ref());
+            return wait_for_runtime_inflight(inflight, listener, &request, cancel_token.as_ref());
         }
 
-        let result =
-            load_image_with_retry(root, request, inline_bytes, cancel_token, progress_sink);
+        let work_cancel = inflight.cancellation.work_token();
+        let result = load_image_with_retry(
+            root,
+            request,
+            inline_bytes,
+            Some(work_cancel),
+            progress_sink,
+        );
         publish_runtime_inflight_result(&inflight_key, inflight, result.clone());
+        ensure_not_cancelled(cancel_token.as_ref())?;
+        drop(listener);
         return result;
     }
 
@@ -345,23 +370,42 @@ fn load_unprocessed_image_once(
         RuntimeProgressEvent::new(RuntimeProgressStage::CacheLookup, "cache.memory.lookup"),
     );
     if request.cache_mode.read_memory() {
-        if let Some(bytes) = memory_cache()
+        let memory_entry = memory_cache()
             .lock()
             .map_err(|_| RuntimeError::new("memory_cache", true, "memory cache lock poisoned"))?
-            .get(&request.encoded_cache_key)
-        {
-            let prepared = prepare_decodable_image(bytes.clone(), request, progress_sink)?;
-            maybe_write_prepared_final_memory_cache(request, &prepared, progress_sink)?;
-            emit_progress(
-                progress_sink,
-                RuntimeProgressEvent::new(RuntimeProgressStage::CacheLookup, "cache.memory.hit")
+            .get_entry(&request.encoded_cache_key);
+        if let Some(entry) = memory_entry {
+            if !cache_entry_reusable(request, entry.http.as_ref())? {
+                memory_remove(&request.encoded_cache_key)?;
+            } else {
+                let cache_ttl_ms = remaining_ttl_ms(entry.expires_ms);
+                let bytes = entry.bytes;
+                validate_cached_image_limits(bytes.as_ref(), request, "decode")?;
+                let prepared = prepare_decodable_image(bytes.clone(), request, progress_sink)?;
+                maybe_write_prepared_final_memory_cache(
+                    request,
+                    &prepared,
+                    cache_ttl_ms,
+                    entry.http.as_ref(),
+                    progress_sink,
+                )?;
+                emit_progress(
+                    progress_sink,
+                    RuntimeProgressEvent::new(
+                        RuntimeProgressStage::CacheLookup,
+                        "cache.memory.hit",
+                    )
                     .with_bytes(prepared.bytes.len(), Some(prepared.bytes.len())),
-            );
-            return Ok(LoadOutcome {
-                bytes: prepared.bytes,
-                cache_status: CacheStatus::MemoryHit,
-                source_label: "memory-cache".to_string(),
-            });
+                );
+                return Ok(LoadOutcome {
+                    bytes: prepared.bytes,
+                    cache_status: CacheStatus::MemoryHit,
+                    source_label: "memory-cache".to_string(),
+                    cacheable: true,
+                    cache_ttl_ms,
+                    http_cache_metadata: entry.http,
+                });
+            }
         }
     }
 
@@ -376,14 +420,29 @@ fn load_unprocessed_image_once(
         RuntimeProgressEvent::new(RuntimeProgressStage::CacheLookup, "cache.disk.lookup"),
     );
     if request.cache_mode.read_disk() {
-        match disk.read_entry(&request.namespace, &request.encoded_cache_key)? {
+        match disk.read_entry_limited(
+            &request.namespace,
+            &request.encoded_cache_key,
+            request.limits.max_encoded_bytes,
+            "decode",
+            "cached encoded bytes exceed max encoded byte limit",
+        )? {
             DiskCacheRead::Hit(entry) => {
-                if entry.is_expired {
+                if !cache_entry_reusable(request, Some(&entry.http))? {
+                    emit_progress(
+                        progress_sink,
+                        RuntimeProgressEvent::new(
+                            RuntimeProgressStage::CacheLookup,
+                            "cache.disk.varyMiss",
+                        ),
+                    );
+                } else if entry.is_expired {
                     if request.cache_mode == CacheMode::StaleWhileRevalidate {
+                        let http = entry.http.as_ref().clone();
                         let bytes = shared_bytes(entry.bytes);
+                        validate_cached_image_limits(bytes.as_ref(), request, "decode")?;
                         let prepared =
                             prepare_decodable_image(bytes.clone(), request, progress_sink)?;
-                        maybe_write_prepared_final_memory_cache(request, &prepared, progress_sink)?;
                         spawn_stale_revalidate(root, request);
                         record_disk_hit()?;
                         emit_progress(
@@ -398,6 +457,9 @@ fn load_unprocessed_image_once(
                             bytes: prepared.bytes,
                             cache_status: CacheStatus::DiskHit,
                             source_label: "disk-cache-stale".to_string(),
+                            cacheable: false,
+                            cache_ttl_ms: Some(0),
+                            http_cache_metadata: Some(http),
                         });
                     }
                     emit_progress(
@@ -410,7 +472,10 @@ fn load_unprocessed_image_once(
                     );
                     stale_disk_entry = Some(entry);
                 } else {
+                    let cache_ttl_ms = remaining_disk_ttl_ms(entry.expires_ms);
+                    let http = entry.http.as_ref().clone();
                     let bytes = shared_bytes(entry.bytes);
+                    validate_cached_image_limits(bytes.as_ref(), request, "decode")?;
                     let prepared = prepare_decodable_image(bytes.clone(), request, progress_sink)?;
                     if request.cache_mode.write_memory() {
                         memory_cache()
@@ -422,18 +487,20 @@ fn load_unprocessed_image_once(
                                     "memory cache lock poisoned",
                                 )
                             })?
-                            .put(
+                            .put_with_http_metadata(
                                 &request.namespace,
                                 request.encoded_cache_key.clone(),
                                 bytes.clone(),
-                                request.ttl_ms,
+                                cache_ttl_ms,
+                                Some(http.clone()),
                             );
                     }
                     maybe_write_prepared_final_cache(
                         &disk,
                         request,
                         &prepared,
-                        request.ttl_ms,
+                        cache_ttl_ms,
+                        Some(&http),
                         progress_sink,
                     )?;
                     record_disk_hit()?;
@@ -449,6 +516,9 @@ fn load_unprocessed_image_once(
                         bytes: prepared.bytes,
                         cache_status: CacheStatus::DiskHit,
                         source_label: "disk-cache".to_string(),
+                        cacheable: true,
+                        cache_ttl_ms,
+                        http_cache_metadata: Some(http),
                     });
                 }
             }
@@ -492,39 +562,59 @@ fn load_unprocessed_image_once(
             RuntimeError::new("cache", true, "received 304 without stale cache entry")
         })?;
         let stale_bytes = shared_bytes(stale_entry.bytes);
+        validate_cached_image_limits(stale_bytes.as_ref(), request, "decode")?;
         let prepared = prepare_decodable_image(stale_bytes.clone(), request, progress_sink)?;
         let merged_metadata = merge_http_metadata(&stale_entry.http, fetched.http_cache_metadata);
         let effective_ttl_ms = effective_ttl_ms_from_disk_metadata(request, &merged_metadata);
-        disk.write_with_http_metadata(
-            &request.namespace,
-            &request.encoded_cache_key,
-            stale_bytes.as_ref(),
-            effective_ttl_ms,
-            Some(&merged_metadata),
-        )?;
-        emit_progress(
-            progress_sink,
-            RuntimeProgressEvent::new(RuntimeProgressStage::CacheWrite, "cache.disk.revalidated")
-                .with_bytes(stale_bytes.len(), Some(stale_bytes.len())),
-        );
-        if request.cache_mode.write_memory() {
-            memory_cache()
-                .lock()
-                .map_err(|_| RuntimeError::new("memory_cache", true, "memory cache lock poisoned"))?
-                .put(
+        let allow_storage = disk_http_metadata_allows_storage(&merged_metadata);
+        let allow_disk = allow_storage
+            && request.cache_mode.write_disk()
+            && should_store_disk_metadata_on_disk(request, Some(&merged_metadata));
+        if allow_storage {
+            if allow_disk {
+                disk.write_with_http_metadata(
                     &request.namespace,
-                    request.encoded_cache_key.clone(),
-                    stale_bytes.clone(),
+                    &request.encoded_cache_key,
+                    stale_bytes.as_ref(),
                     effective_ttl_ms,
+                    Some(&merged_metadata),
+                )?;
+                emit_progress(
+                    progress_sink,
+                    RuntimeProgressEvent::new(
+                        RuntimeProgressStage::CacheWrite,
+                        "cache.disk.revalidated",
+                    )
+                    .with_bytes(stale_bytes.len(), Some(stale_bytes.len())),
                 );
+            } else {
+                evict_request_disk_cache_entries(&disk, request)?;
+            }
+            if request.cache_mode.write_memory() {
+                memory_cache()
+                    .lock()
+                    .map_err(|_| {
+                        RuntimeError::new("memory_cache", true, "memory cache lock poisoned")
+                    })?
+                    .put_with_http_metadata(
+                        &request.namespace,
+                        request.encoded_cache_key.clone(),
+                        stale_bytes.clone(),
+                        effective_ttl_ms,
+                        Some(merged_metadata.clone()),
+                    );
+            }
+            maybe_write_prepared_final_cache(
+                &disk,
+                request,
+                &prepared,
+                effective_ttl_ms,
+                Some(&merged_metadata),
+                progress_sink,
+            )?;
+        } else {
+            evict_request_cache_entries(&disk, request)?;
         }
-        maybe_write_prepared_final_cache(
-            &disk,
-            request,
-            &prepared,
-            effective_ttl_ms,
-            progress_sink,
-        )?;
         record_disk_hit()?;
         emit_progress(
             progress_sink,
@@ -535,6 +625,9 @@ fn load_unprocessed_image_once(
             bytes: prepared.bytes,
             cache_status: CacheStatus::DiskHit,
             source_label: fetched.source_label,
+            cacheable: allow_storage,
+            cache_ttl_ms: effective_ttl_ms,
+            http_cache_metadata: Some(merged_metadata),
         });
     }
 
@@ -546,14 +639,16 @@ fn load_unprocessed_image_once(
             .with_bytes(prepared.bytes.len(), Some(prepared.bytes.len())),
     );
 
-    let allow_disk = request.cache_mode.write_disk()
+    let allow_storage = http_metadata_allows_storage(fetched.http_cache_metadata.as_ref());
+    let allow_disk = allow_storage
+        && request.cache_mode.write_disk()
         && should_store_on_disk(request, fetched.http_cache_metadata.as_ref());
     let effective_ttl_ms = effective_ttl_ms(request, fetched.http_cache_metadata.as_ref());
+    let disk_metadata = fetched
+        .http_cache_metadata
+        .as_ref()
+        .map(DiskCacheHttpMetadata::from);
     if allow_disk {
-        let disk_metadata = fetched
-            .http_cache_metadata
-            .as_ref()
-            .map(DiskCacheHttpMetadata::from);
         disk.write_with_http_metadata(
             &request.namespace,
             &request.encoded_cache_key,
@@ -570,15 +665,16 @@ fn load_unprocessed_image_once(
                 .with_bytes(fetched.bytes.len(), Some(fetched.bytes.len())),
         );
     }
-    if request.cache_mode.write_memory() {
+    if allow_storage && request.cache_mode.write_memory() {
         memory_cache()
             .lock()
             .map_err(|_| RuntimeError::new("memory_cache", true, "memory cache lock poisoned"))?
-            .put(
+            .put_with_http_metadata(
                 &request.namespace,
                 request.encoded_cache_key.clone(),
                 fetched.bytes.clone(),
                 effective_ttl_ms,
+                disk_metadata.clone(),
             );
         emit_progress(
             progress_sink,
@@ -586,7 +682,18 @@ fn load_unprocessed_image_once(
                 .with_bytes(fetched.bytes.len(), Some(fetched.bytes.len())),
         );
     }
-    maybe_write_prepared_final_cache(&disk, request, &prepared, effective_ttl_ms, progress_sink)?;
+    if allow_storage {
+        maybe_write_prepared_final_cache(
+            &disk,
+            request,
+            &prepared,
+            effective_ttl_ms,
+            disk_metadata.as_ref(),
+            progress_sink,
+        )?;
+    } else {
+        evict_request_cache_entries(&disk, request)?;
+    }
 
     Ok(LoadOutcome {
         bytes: prepared.bytes,
@@ -596,6 +703,9 @@ fn load_unprocessed_image_once(
             CacheStatus::Miss
         },
         source_label: fetched.source_label,
+        cacheable: allow_storage,
+        cache_ttl_ms: effective_ttl_ms,
+        http_cache_metadata: disk_metadata,
     })
 }
 
@@ -613,61 +723,92 @@ fn load_processed_image_once(
         RuntimeProgressEvent::new(RuntimeProgressStage::CacheLookup, "cache.processed.lookup"),
     );
     if request.cache_mode.read_memory() {
-        if let Some(bytes) = memory_cache()
+        let memory_entry = memory_cache()
             .lock()
             .map_err(|_| RuntimeError::new("memory_cache", true, "memory cache lock poisoned"))?
-            .get_processed(&request.cache_key)
-        {
-            let prepared = prepare_decodable_image(bytes.clone(), request, progress_sink)?;
-            emit_progress(
-                progress_sink,
-                RuntimeProgressEvent::new(
-                    RuntimeProgressStage::CacheLookup,
-                    "cache.processed.memory.hit",
-                )
-                .with_bytes(prepared.bytes.len(), Some(prepared.bytes.len())),
-            );
-            return Ok(LoadOutcome {
-                bytes: prepared.bytes,
-                cache_status: CacheStatus::MemoryHit,
-                source_label: "processed-memory-cache".to_string(),
-            });
-        }
-    }
-
-    if request.cache_mode.read_disk() {
-        match disk.read_entry(&request.namespace, &request.cache_key)? {
-            DiskCacheRead::Hit(entry) if !entry.is_expired => {
-                let bytes = shared_bytes(entry.bytes);
+            .get_processed_entry(&request.cache_key);
+        if let Some(entry) = memory_entry {
+            if !cache_entry_reusable(request, entry.http.as_ref())? {
+                memory_remove(&request.cache_key)?;
+            } else {
+                let cache_ttl_ms = remaining_ttl_ms(entry.expires_ms);
+                let bytes = entry.bytes;
+                validate_processed_cache_hit(bytes.as_ref(), request)?;
+                validate_cached_image_limits(bytes.as_ref(), request, "processor")?;
                 let prepared = prepare_decodable_image(bytes.clone(), request, progress_sink)?;
-                if request.cache_mode.write_memory() {
-                    memory_cache()
-                        .lock()
-                        .map_err(|_| {
-                            RuntimeError::new("memory_cache", true, "memory cache lock poisoned")
-                        })?
-                        .put_processed(
-                            &request.namespace,
-                            request.cache_key.clone(),
-                            prepared.bytes.clone(),
-                            request.ttl_ms,
-                        );
-                }
-                record_disk_hit()?;
-                record_processed_disk_hit()?;
                 emit_progress(
                     progress_sink,
                     RuntimeProgressEvent::new(
                         RuntimeProgressStage::CacheLookup,
-                        "cache.processed.disk.hit",
+                        "cache.processed.memory.hit",
                     )
                     .with_bytes(prepared.bytes.len(), Some(prepared.bytes.len())),
                 );
                 return Ok(LoadOutcome {
                     bytes: prepared.bytes,
-                    cache_status: CacheStatus::DiskHit,
-                    source_label: "processed-disk-cache".to_string(),
+                    cache_status: CacheStatus::MemoryHit,
+                    source_label: "processed-memory-cache".to_string(),
+                    cacheable: true,
+                    cache_ttl_ms,
+                    http_cache_metadata: entry.http,
                 });
+            }
+        }
+    }
+
+    if request.cache_mode.read_disk() {
+        match disk.read_entry_limited(
+            &request.namespace,
+            &request.cache_key,
+            request.limits.max_processor_output_bytes,
+            "processor",
+            "cached processor output exceeds max processor output byte limit",
+        )? {
+            DiskCacheRead::Hit(entry) if !entry.is_expired => {
+                if cache_entry_reusable(request, Some(&entry.http))? {
+                    let cache_ttl_ms = remaining_disk_ttl_ms(entry.expires_ms);
+                    let http = entry.http.as_ref().clone();
+                    let bytes = shared_bytes(entry.bytes);
+                    validate_processed_cache_hit(bytes.as_ref(), request)?;
+                    validate_cached_image_limits(bytes.as_ref(), request, "processor")?;
+                    let prepared = prepare_decodable_image(bytes.clone(), request, progress_sink)?;
+                    if request.cache_mode.write_memory() {
+                        memory_cache()
+                            .lock()
+                            .map_err(|_| {
+                                RuntimeError::new(
+                                    "memory_cache",
+                                    true,
+                                    "memory cache lock poisoned",
+                                )
+                            })?
+                            .put_processed_with_http_metadata(
+                                &request.namespace,
+                                request.cache_key.clone(),
+                                prepared.bytes.clone(),
+                                cache_ttl_ms,
+                                Some(http.clone()),
+                            );
+                    }
+                    record_disk_hit()?;
+                    record_processed_disk_hit()?;
+                    emit_progress(
+                        progress_sink,
+                        RuntimeProgressEvent::new(
+                            RuntimeProgressStage::CacheLookup,
+                            "cache.processed.disk.hit",
+                        )
+                        .with_bytes(prepared.bytes.len(), Some(prepared.bytes.len())),
+                    );
+                    return Ok(LoadOutcome {
+                        bytes: prepared.bytes,
+                        cache_status: CacheStatus::DiskHit,
+                        source_label: "processed-disk-cache".to_string(),
+                        cacheable: true,
+                        cache_ttl_ms,
+                        http_cache_metadata: Some(http),
+                    });
+                }
             }
             DiskCacheRead::Hit(_) => {
                 record_processed_disk_stale_hit()?;
@@ -729,13 +870,16 @@ fn load_processed_image_once(
             .with_bytes(processed.len(), Some(processed.len())),
     );
 
-    let allow_disk = request.cache_mode.write_disk();
+    let allow_disk = origin.cacheable
+        && request.cache_mode.write_disk()
+        && should_store_disk_metadata_on_disk(request, origin.http_cache_metadata.as_ref());
     if allow_disk {
-        disk.write(
+        disk.write_with_http_metadata(
             &request.namespace,
             &request.cache_key,
             processed.as_ref(),
-            request.ttl_ms,
+            origin.cache_ttl_ms,
+            origin.http_cache_metadata.as_ref(),
         )?;
         let disk_cache_bytes = disk_cache_byte_budget()?;
         disk.trim_to_bytes(disk_cache_bytes)?;
@@ -750,15 +894,16 @@ fn load_processed_image_once(
             .with_bytes(processed.len(), Some(processed.len())),
         );
     }
-    if request.cache_mode.write_memory() {
+    if origin.cacheable && request.cache_mode.write_memory() {
         memory_cache()
             .lock()
             .map_err(|_| RuntimeError::new("memory_cache", true, "memory cache lock poisoned"))?
-            .put_processed(
+            .put_processed_with_http_metadata(
                 &request.namespace,
                 request.cache_key.clone(),
                 processed.clone(),
-                request.ttl_ms,
+                origin.cache_ttl_ms,
+                origin.http_cache_metadata.clone(),
             );
         emit_progress(
             progress_sink,
@@ -778,6 +923,9 @@ fn load_processed_image_once(
             origin.cache_status
         },
         source_label: format!("processed:{}", origin.source_label),
+        cacheable: origin.cacheable,
+        cache_ttl_ms: origin.cache_ttl_ms,
+        http_cache_metadata: origin.http_cache_metadata,
     })
 }
 
@@ -946,6 +1094,7 @@ fn runtime_inflight_processor_inputs(
 struct RuntimeInflightLoad {
     state: Mutex<Option<RuntimeResult<LoadOutcome>>>,
     ready: Condvar,
+    cancellation: Arc<RuntimeInflightCancellation>,
 }
 
 impl RuntimeInflightLoad {
@@ -953,6 +1102,7 @@ impl RuntimeInflightLoad {
         Self {
             state: Mutex::new(None),
             ready: Condvar::new(),
+            cancellation: Arc::new(RuntimeInflightCancellation::new()),
         }
     }
 }
@@ -971,6 +1121,7 @@ impl RuntimeCancelWaker for RuntimeInflightLoad {
 struct RuntimeInflightFetch {
     state: Mutex<Option<RuntimeResult<FetchOutcome>>>,
     ready: Condvar,
+    cancellation: Arc<RuntimeInflightCancellation>,
 }
 
 impl RuntimeInflightFetch {
@@ -978,6 +1129,7 @@ impl RuntimeInflightFetch {
         Self {
             state: Mutex::new(None),
             ready: Condvar::new(),
+            cancellation: Arc::new(RuntimeInflightCancellation::new()),
         }
     }
 }
@@ -989,6 +1141,72 @@ impl RuntimeCancelWaker for RuntimeInflightFetch {
         } else {
             self.ready.notify_all();
         }
+    }
+}
+
+#[derive(Debug)]
+struct RuntimeInflightCancellation {
+    listeners: AtomicUsize,
+    work_cancel: RuntimeCancelToken,
+}
+
+impl RuntimeInflightCancellation {
+    fn new() -> Self {
+        Self {
+            listeners: AtomicUsize::new(0),
+            work_cancel: RuntimeCancelToken::new(),
+        }
+    }
+
+    fn subscribe(
+        self: &Arc<Self>,
+        cancel_token: Option<&RuntimeCancelToken>,
+    ) -> Arc<RuntimeInflightListener> {
+        self.listeners.fetch_add(1, Ordering::AcqRel);
+        let listener = Arc::new(RuntimeInflightListener {
+            cancellation: self.clone(),
+            released: AtomicBool::new(false),
+        });
+        if let Some(token) = cancel_token {
+            token.register_waker(&listener);
+        }
+        listener
+    }
+
+    fn work_token(&self) -> RuntimeCancelToken {
+        self.work_cancel.clone()
+    }
+
+    fn release_listener(&self) {
+        if self.listeners.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.work_cancel.cancel();
+        }
+    }
+}
+
+#[derive(Debug)]
+struct RuntimeInflightListener {
+    cancellation: Arc<RuntimeInflightCancellation>,
+    released: AtomicBool,
+}
+
+impl RuntimeInflightListener {
+    fn release(&self) {
+        if !self.released.swap(true, Ordering::AcqRel) {
+            self.cancellation.release_listener();
+        }
+    }
+}
+
+impl RuntimeCancelWaker for RuntimeInflightListener {
+    fn wake_cancelled(&self) {
+        self.release();
+    }
+}
+
+impl Drop for RuntimeInflightListener {
+    fn drop(&mut self) {
+        self.release();
     }
 }
 
@@ -1017,20 +1235,29 @@ impl RuntimeCancelWaker for RuntimeInflightProcessorInput {
     }
 }
 
-fn runtime_inflight_entry(key: &str) -> RuntimeResult<(Arc<RuntimeInflightLoad>, bool)> {
+fn runtime_inflight_entry(
+    key: &str,
+    cancel_token: Option<&RuntimeCancelToken>,
+) -> RuntimeResult<(Arc<RuntimeInflightLoad>, Arc<RuntimeInflightListener>, bool)> {
     let mut loads = runtime_inflight_loads()
         .lock()
         .map_err(|_| RuntimeError::new("scheduler", true, "runtime inflight lock poisoned"))?;
-    if let Some(inflight) = loads.get(key) {
-        return Ok((inflight.clone(), false));
+    if let Some(inflight) = loads
+        .get(key)
+        .filter(|inflight| !inflight.cancellation.work_cancel.is_cancelled())
+    {
+        let listener = inflight.cancellation.subscribe(cancel_token);
+        return Ok((inflight.clone(), listener, false));
     }
     let inflight = Arc::new(RuntimeInflightLoad::new());
+    let listener = inflight.cancellation.subscribe(cancel_token);
     loads.insert(key.to_string(), inflight.clone());
-    Ok((inflight, true))
+    Ok((inflight, listener, true))
 }
 
 fn wait_for_runtime_inflight(
     inflight: Arc<RuntimeInflightLoad>,
+    _listener: Arc<RuntimeInflightListener>,
     request: &RuntimeRequest,
     cancel_token: Option<&RuntimeCancelToken>,
 ) -> RuntimeResult<LoadOutcome> {
@@ -1074,20 +1301,33 @@ fn publish_runtime_inflight_result(
     }
 }
 
-fn runtime_inflight_fetch_entry(key: &str) -> RuntimeResult<(Arc<RuntimeInflightFetch>, bool)> {
+fn runtime_inflight_fetch_entry(
+    key: &str,
+    cancel_token: Option<&RuntimeCancelToken>,
+) -> RuntimeResult<(
+    Arc<RuntimeInflightFetch>,
+    Arc<RuntimeInflightListener>,
+    bool,
+)> {
     let mut fetches = runtime_inflight_fetches().lock().map_err(|_| {
         RuntimeError::new("scheduler", true, "runtime fetch inflight lock poisoned")
     })?;
-    if let Some(inflight) = fetches.get(key) {
-        return Ok((inflight.clone(), false));
+    if let Some(inflight) = fetches
+        .get(key)
+        .filter(|inflight| !inflight.cancellation.work_cancel.is_cancelled())
+    {
+        let listener = inflight.cancellation.subscribe(cancel_token);
+        return Ok((inflight.clone(), listener, false));
     }
     let inflight = Arc::new(RuntimeInflightFetch::new());
+    let listener = inflight.cancellation.subscribe(cancel_token);
     fetches.insert(key.to_string(), inflight.clone());
-    Ok((inflight, true))
+    Ok((inflight, listener, true))
 }
 
 fn wait_for_runtime_inflight_fetch(
     inflight: Arc<RuntimeInflightFetch>,
+    _listener: Arc<RuntimeInflightListener>,
     request: &RuntimeRequest,
     cancel_token: Option<&RuntimeCancelToken>,
 ) -> RuntimeResult<FetchOutcome> {
@@ -1186,25 +1426,24 @@ fn publish_runtime_inflight_processor_input_result(
 }
 
 fn runtime_inflight_key(root: &str, request: &RuntimeRequest) -> String {
-    format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        root,
-        request.namespace,
-        request.cache_key,
-        request.encoded_cache_key,
-        source_identity(&request.source),
-        runtime_headers_identity(request),
-        request.processors.join("\u{1f}"),
-        request
-            .ttl_ms
-            .map(|ttl| ttl.to_string())
-            .unwrap_or_else(|| "-".to_string()),
-        request.private_cache,
-        runtime_cache_mode_identity(request.cache_mode),
-        runtime_limits_identity(&request.limits),
-        runtime_retry_identity(request.retry),
-        runtime_redirect_identity(request.redirect_policy),
-    )
+    let mut identity = CanonicalIdentity::new("pixa.runtime.inflight.load.v2");
+    identity.text(1, root);
+    identity.text(2, &request.namespace);
+    identity.text(3, &request.cache_key);
+    identity.text(4, &request.encoded_cache_key);
+    identity.text(5, &source_identity(&request.source));
+    identity.text(6, &runtime_headers_identity(request));
+    identity.usize(7, request.processors.len());
+    for processor in &request.processors {
+        identity.text(8, processor);
+    }
+    identity.optional_i64(9, 10, request.ttl_ms);
+    identity.boolean(11, request.private_cache);
+    identity.byte(12, runtime_cache_mode_identity(request.cache_mode));
+    append_runtime_limits(&mut identity, 20, &request.limits);
+    append_runtime_retry(&mut identity, 40, request.retry);
+    append_runtime_redirect(&mut identity, 50, request.redirect_policy);
+    identity.finish()
 }
 
 fn runtime_inflight_fetch_key(
@@ -1212,33 +1451,30 @@ fn runtime_inflight_fetch_key(
     conditional: Option<&HttpConditionalHeaders>,
     inline_bytes: Option<&[u8]>,
 ) -> String {
-    format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        request.namespace,
-        request.encoded_cache_key,
-        source_identity(&request.source),
-        runtime_headers_identity(request),
-        runtime_conditional_identity(conditional),
-        request.limits.max_encoded_bytes,
-        request.limits.max_redirects,
-        request.limits.timeout_ms,
-        request.limits.connect_timeout_ms,
-        request.limits.idle_timeout_ms,
-        request.redirect_policy.allow_cross_host_redirects,
-        request.redirect_policy.allow_https_to_http,
-        runtime_inline_bytes_identity(inline_bytes),
-    )
+    let mut identity = CanonicalIdentity::new("pixa.runtime.inflight.fetch.v2");
+    identity.text(1, &request.namespace);
+    identity.text(2, &request.encoded_cache_key);
+    identity.text(3, &source_identity(&request.source));
+    identity.text(4, &runtime_headers_identity(request));
+    identity.text(5, &runtime_conditional_identity(conditional));
+    identity.usize(6, request.limits.max_encoded_bytes);
+    identity.usize(7, request.limits.max_redirects);
+    identity.u64(8, request.limits.timeout_ms);
+    identity.u64(9, request.limits.connect_timeout_ms);
+    identity.u64(10, request.limits.idle_timeout_ms);
+    append_runtime_redirect(&mut identity, 20, request.redirect_policy);
+    identity.text(30, &runtime_inline_bytes_identity(inline_bytes));
+    identity.finish()
 }
 
 fn runtime_processor_input_key(request: &RuntimeRequest, bytes: &SharedBytes) -> String {
-    format!(
-        "{}|{}|{}|{}|{}",
-        request.namespace,
-        request.encoded_cache_key,
-        source_identity(&request.source),
-        bytes.len(),
-        runtime_limits_identity(&request.limits),
-    )
+    let mut identity = CanonicalIdentity::new("pixa.runtime.inflight.processor-input.v2");
+    identity.text(1, &request.namespace);
+    identity.text(2, &request.encoded_cache_key);
+    identity.text(3, &source_identity(&request.source));
+    identity.bytes(4, bytes.as_ref());
+    append_runtime_limits(&mut identity, 20, &request.limits);
+    identity.finish()
 }
 
 fn runtime_inflight_coalescing_allowed(request: &RuntimeRequest) -> bool {
@@ -1276,99 +1512,199 @@ fn runtime_retry_mode_identity(mode: RuntimeRetryMode) -> u8 {
     }
 }
 
+#[cfg(test)]
 fn runtime_limits_identity(limits: &RuntimeLimits) -> String {
-    format!(
-        "{}:{}:{}:{}:{}:{}:{}:{}:{}",
-        limits.max_encoded_bytes,
-        limits.max_decoded_pixels,
-        limits.max_animation_frames,
-        limits.max_animation_duration_ms,
-        limits.max_processor_output_bytes,
-        limits.max_redirects,
-        limits.timeout_ms,
-        limits.connect_timeout_ms,
-        limits.idle_timeout_ms,
-    )
-}
-
-fn runtime_retry_identity(retry: RuntimeRetryPolicy) -> String {
-    format!(
-        "{}:{}:{}:{}",
-        runtime_retry_mode_identity(retry.mode),
-        retry.max_attempts,
-        retry.delay_ms,
-        retry.jitter_ms,
-    )
-}
-
-fn runtime_redirect_identity(policy: RuntimeRedirectPolicy) -> String {
-    format!(
-        "{}:{}",
-        policy.allow_cross_host_redirects, policy.allow_https_to_http
-    )
+    let mut identity = CanonicalIdentity::new("pixa.runtime.limits.v2");
+    append_runtime_limits(&mut identity, 1, limits);
+    identity.finish()
 }
 
 fn source_identity(source: &RuntimeSource) -> String {
+    let mut identity = CanonicalIdentity::new("pixa.runtime.source.v2");
     match source {
-        RuntimeSource::Network { uri } => format!("network:{}", identity_digest(uri)),
-        RuntimeSource::File { path } => format!("file:{}", identity_digest(path)),
-        RuntimeSource::Bytes { id } => format!("bytes:{}", identity_digest(id)),
-        RuntimeSource::AssetBytes { id } => format!("asset:{}", identity_digest(id)),
+        RuntimeSource::Network { uri } => {
+            identity.byte(1, 1);
+            identity.text(2, &identity_digest(uri));
+        }
+        RuntimeSource::File { path } => {
+            identity.byte(1, 2);
+            identity.text(2, &identity_digest(path));
+        }
+        RuntimeSource::Bytes { id } => {
+            identity.byte(1, 3);
+            identity.text(2, &identity_digest(id));
+        }
+        RuntimeSource::AssetBytes { id } => {
+            identity.byte(1, 4);
+            identity.text(2, &identity_digest(id));
+        }
         RuntimeSource::ExifThumbnail { path } => {
-            format!("exif-thumbnail:{}", identity_digest(path))
+            identity.byte(1, 5);
+            identity.text(2, &identity_digest(path));
         }
         RuntimeSource::RuntimePlugin {
             source_kind,
             locator,
-        } => format!(
-            "runtime-plugin:{}:{}",
-            source_kind.trim().to_ascii_lowercase(),
-            identity_digest(locator)
-        ),
+        } => {
+            identity.byte(1, 6);
+            identity.text(2, &source_kind.trim().to_ascii_lowercase());
+            identity.text(3, &identity_digest(locator));
+        }
         RuntimeSource::VideoFrame {
             locator,
             timestamp_micros,
             exact,
             backend,
-        } => format!(
-            "video-frame:{}:{}:{}:{}",
-            backend.as_deref().unwrap_or("default"),
-            timestamp_micros,
-            exact,
-            identity_digest(locator)
-        ),
+        } => {
+            identity.byte(1, 7);
+            identity.text(2, &identity_digest(locator));
+            identity.i64(3, *timestamp_micros);
+            identity.boolean(4, *exact);
+            identity.optional_text(5, 6, backend.as_deref());
+        }
     }
+    identity.finish()
 }
 
 fn identity_digest(value: &str) -> String {
-    format!("{}:{:016x}", value.len(), crate::fnv1a64(value.as_bytes()))
+    let mut identity = CanonicalIdentity::new("pixa.runtime.value.v2");
+    identity.text(1, value);
+    identity.finish()
 }
 
 fn runtime_headers_identity(request: &RuntimeRequest) -> String {
-    request
-        .headers
-        .iter()
-        .map(|(name, value)| format!("{}={}", name.to_ascii_lowercase(), value))
-        .collect::<Vec<_>>()
-        .join("\u{1e}")
+    let mut normalized = BTreeMap::<String, &str>::new();
+    for (name, value) in &request.headers {
+        normalized.insert(name.to_ascii_lowercase(), value);
+    }
+    let mut identity = CanonicalIdentity::new("pixa.runtime.headers.v2");
+    identity.usize(1, normalized.len());
+    for (name, value) in normalized {
+        identity.text(2, &name);
+        identity.text(3, value);
+    }
+    identity.finish()
 }
 
 fn runtime_conditional_identity(conditional: Option<&HttpConditionalHeaders>) -> String {
-    let Some(conditional) = conditional else {
-        return "-".to_string();
-    };
-    format!(
-        "etag={}|last_modified={}",
-        conditional.etag.as_deref().unwrap_or("-"),
-        conditional.last_modified.as_deref().unwrap_or("-")
-    )
+    let mut identity = CanonicalIdentity::new("pixa.runtime.conditional.v2");
+    identity.boolean(1, conditional.is_some());
+    if let Some(conditional) = conditional {
+        identity.optional_text(2, 3, conditional.etag.as_deref());
+        identity.optional_text(4, 5, conditional.last_modified.as_deref());
+    }
+    identity.finish()
 }
 
 fn runtime_inline_bytes_identity(inline_bytes: Option<&[u8]>) -> String {
-    let Some(bytes) = inline_bytes else {
-        return "-".to_string();
-    };
-    format!("{}:{:016x}", bytes.len(), crate::fnv1a64(bytes))
+    let mut identity = CanonicalIdentity::new("pixa.runtime.inline-bytes.v2");
+    identity.boolean(1, inline_bytes.is_some());
+    if let Some(bytes) = inline_bytes {
+        identity.bytes(2, bytes);
+    }
+    identity.finish()
+}
+
+fn append_runtime_limits(identity: &mut CanonicalIdentity, base: u8, limits: &RuntimeLimits) {
+    identity.usize(base, limits.max_encoded_bytes);
+    identity.u64(base + 1, limits.max_decoded_pixels);
+    identity.usize(base + 2, limits.max_animation_frames);
+    identity.u64(base + 3, limits.max_animation_duration_ms);
+    identity.usize(base + 4, limits.max_processor_output_bytes);
+    identity.usize(base + 5, limits.max_redirects);
+    identity.u64(base + 6, limits.timeout_ms);
+    identity.u64(base + 7, limits.connect_timeout_ms);
+    identity.u64(base + 8, limits.idle_timeout_ms);
+}
+
+fn append_runtime_retry(identity: &mut CanonicalIdentity, base: u8, retry: RuntimeRetryPolicy) {
+    identity.byte(base, runtime_retry_mode_identity(retry.mode));
+    identity.usize(base + 1, retry.max_attempts);
+    identity.u64(base + 2, retry.delay_ms);
+    identity.u64(base + 3, retry.jitter_ms);
+}
+
+fn append_runtime_redirect(
+    identity: &mut CanonicalIdentity,
+    base: u8,
+    policy: RuntimeRedirectPolicy,
+) {
+    identity.boolean(base, policy.allow_cross_host_redirects);
+    identity.boolean(base + 1, policy.allow_https_to_http);
+}
+
+struct CanonicalIdentity {
+    hasher: Sha256,
+}
+
+impl CanonicalIdentity {
+    fn new(domain: &str) -> Self {
+        let mut identity = Self {
+            hasher: Sha256::new(),
+        };
+        identity.text(0, domain);
+        identity
+    }
+
+    fn bytes(&mut self, tag: u8, value: &[u8]) {
+        self.hasher.update([tag]);
+        self.hasher
+            .update(u64::try_from(value.len()).unwrap_or(u64::MAX).to_be_bytes());
+        self.hasher.update(value);
+    }
+
+    fn text(&mut self, tag: u8, value: &str) {
+        self.bytes(tag, value.as_bytes());
+    }
+
+    fn byte(&mut self, tag: u8, value: u8) {
+        self.bytes(tag, &[value]);
+    }
+
+    fn boolean(&mut self, tag: u8, value: bool) {
+        self.byte(tag, u8::from(value));
+    }
+
+    fn usize(&mut self, tag: u8, value: usize) {
+        self.u64(tag, u64::try_from(value).unwrap_or(u64::MAX));
+    }
+
+    fn u64(&mut self, tag: u8, value: u64) {
+        self.bytes(tag, &value.to_be_bytes());
+    }
+
+    fn i64(&mut self, tag: u8, value: i64) {
+        self.bytes(tag, &value.to_be_bytes());
+    }
+
+    fn optional_i64(&mut self, presence_tag: u8, value_tag: u8, value: Option<i64>) {
+        self.boolean(presence_tag, value.is_some());
+        if let Some(value) = value {
+            self.i64(value_tag, value);
+        }
+    }
+
+    fn optional_text(&mut self, presence_tag: u8, value_tag: u8, value: Option<&str>) {
+        self.boolean(presence_tag, value.is_some());
+        if let Some(value) = value {
+            self.text(value_tag, value);
+        }
+    }
+
+    fn finish(self) -> String {
+        let digest = self.hasher.finalize();
+        format!("sha256:{}", hex_lower(&digest))
+    }
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    output
 }
 
 fn spawn_stale_revalidate(root: &str, request: &RuntimeRequest) {
@@ -1377,25 +1713,30 @@ fn spawn_stale_revalidate(root: &str, request: &RuntimeRequest) {
         return;
     }
 
-    let max_refreshes = pipeline_config()
+    let network_concurrency = pipeline_config()
         .lock()
-        .map(|config| config.network_concurrency.clamp(1, 16))
+        .map(|config| config.network_concurrency)
         .unwrap_or(1);
-    if BACKGROUND_REFRESH_COUNT.load(Ordering::Relaxed) >= max_refreshes {
+    let available_parallelism = std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get())
+        .unwrap_or(1);
+    let max_refreshes = background_refresh_slot_limit(network_concurrency, available_parallelism);
+    if !try_reserve_background_refresh_slot(&BACKGROUND_REFRESH_COUNT, max_refreshes) {
         STALE_REVALIDATES_SKIPPED.fetch_add(1, Ordering::Relaxed);
         return;
     }
 
     let refresh_key = format!("{}:{}", request.namespace, request.encoded_cache_key);
     let Ok(mut refreshes) = background_refreshes().lock() else {
+        release_background_refresh_slot(&BACKGROUND_REFRESH_COUNT);
         return;
     };
     if !refreshes.insert(refresh_key.clone()) {
+        release_background_refresh_slot(&BACKGROUND_REFRESH_COUNT);
         STALE_REVALIDATES_SKIPPED.fetch_add(1, Ordering::Relaxed);
         return;
     }
     STALE_REVALIDATES_STARTED.fetch_add(1, Ordering::Relaxed);
-    BACKGROUND_REFRESH_COUNT.fetch_add(1, Ordering::Relaxed);
     drop(refreshes);
 
     let root = root.to_string();
@@ -1427,7 +1768,27 @@ fn finish_stale_revalidate(refresh_key: &str) {
     if let Ok(mut refreshes) = background_refreshes().lock() {
         refreshes.remove(refresh_key);
     }
-    BACKGROUND_REFRESH_COUNT
+    release_background_refresh_slot(&BACKGROUND_REFRESH_COUNT);
+}
+
+fn background_refresh_slot_limit(
+    network_concurrency: usize,
+    available_parallelism: usize,
+) -> usize {
+    let thread_budget = available_parallelism.max(1).saturating_mul(2);
+    network_concurrency.max(1).min(thread_budget)
+}
+
+fn try_reserve_background_refresh_slot(counter: &AtomicUsize, max_slots: usize) -> bool {
+    counter
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            (current < max_slots).then_some(current + 1)
+        })
+        .is_ok()
+}
+
+fn release_background_refresh_slot(counter: &AtomicUsize) {
+    counter
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
             Some(value.saturating_sub(1))
         })
@@ -1568,6 +1929,14 @@ fn shared_bytes(bytes: Vec<u8>) -> SharedBytes {
     Arc::<[u8]>::from(bytes.into_boxed_slice())
 }
 
+fn remaining_ttl_ms(expires_ms: Option<i64>) -> Option<i64> {
+    expires_ms.map(|expires| expires.saturating_sub(now_millis()).max(0))
+}
+
+fn remaining_disk_ttl_ms(expires_ms: i64) -> Option<i64> {
+    (expires_ms >= 0).then(|| expires_ms.saturating_sub(now_millis()).max(0))
+}
+
 fn read_prepared_final_memory_cache(
     request: &RuntimeRequest,
     progress_sink: Option<&dyn RuntimeProgressSink>,
@@ -1575,14 +1944,21 @@ fn read_prepared_final_memory_cache(
     if !has_distinct_final_cache_key(request) || !request.cache_mode.read_memory() {
         return Ok(None);
     }
-    let Some(bytes) = memory_cache()
+    let Some(entry) = memory_cache()
         .lock()
         .map_err(|_| RuntimeError::new("memory_cache", true, "memory cache lock poisoned"))?
-        .get_processed(&request.cache_key)
+        .get_processed_entry(&request.cache_key)
     else {
         return Ok(None);
     };
-    validate_supported_image(bytes.as_ref(), &request.limits)?;
+    if !cache_entry_reusable(request, entry.http.as_ref())? {
+        memory_remove(&request.cache_key)?;
+        return Ok(None);
+    }
+    let cache_ttl_ms = remaining_ttl_ms(entry.expires_ms);
+    let bytes = entry.bytes;
+    validate_processed_cache_hit(bytes.as_ref(), request)?;
+    validate_cached_image_limits(bytes.as_ref(), request, "decode")?;
     emit_progress(
         progress_sink,
         RuntimeProgressEvent::new(
@@ -1595,6 +1971,9 @@ fn read_prepared_final_memory_cache(
         bytes,
         cache_status: CacheStatus::MemoryHit,
         source_label: "decoder-memory-cache".to_string(),
+        cacheable: true,
+        cache_ttl_ms,
+        http_cache_metadata: entry.http,
     }))
 }
 
@@ -1606,21 +1985,34 @@ fn read_prepared_final_disk_cache(
     if !has_distinct_final_cache_key(request) || !request.cache_mode.read_disk() {
         return Ok(None);
     }
-    match disk.read_entry(&request.namespace, &request.cache_key)? {
+    match disk.read_entry_limited(
+        &request.namespace,
+        &request.cache_key,
+        request.limits.max_processor_output_bytes,
+        "decode",
+        "cached decoder output exceeds max processor output byte limit",
+    )? {
         DiskCacheRead::Hit(entry) if !entry.is_expired => {
+            if !cache_entry_reusable(request, Some(&entry.http))? {
+                return Ok(None);
+            }
+            let cache_ttl_ms = remaining_disk_ttl_ms(entry.expires_ms);
+            let http = entry.http.as_ref().clone();
             let bytes = shared_bytes(entry.bytes);
-            validate_supported_image(bytes.as_ref(), &request.limits)?;
+            validate_processed_cache_hit(bytes.as_ref(), request)?;
+            validate_cached_image_limits(bytes.as_ref(), request, "decode")?;
             if request.cache_mode.write_memory() {
                 memory_cache()
                     .lock()
                     .map_err(|_| {
                         RuntimeError::new("memory_cache", true, "memory cache lock poisoned")
                     })?
-                    .put_processed(
+                    .put_processed_with_http_metadata(
                         &request.namespace,
                         request.cache_key.clone(),
                         bytes.clone(),
-                        request.ttl_ms,
+                        cache_ttl_ms,
+                        Some(http.clone()),
                     );
             }
             record_disk_hit()?;
@@ -1637,6 +2029,9 @@ fn read_prepared_final_disk_cache(
                 bytes,
                 cache_status: CacheStatus::DiskHit,
                 source_label: "decoder-disk-cache".to_string(),
+                cacheable: true,
+                cache_ttl_ms,
+                http_cache_metadata: Some(http),
             }))
         }
         DiskCacheRead::Hit(_) => {
@@ -1675,20 +2070,23 @@ fn maybe_write_prepared_final_cache(
     request: &RuntimeRequest,
     prepared: &PreparedImage,
     ttl_ms: Option<i64>,
+    http: Option<&DiskCacheHttpMetadata>,
     progress_sink: Option<&dyn RuntimeProgressSink>,
 ) -> RuntimeResult<()> {
-    maybe_write_prepared_final_memory_cache(request, prepared, progress_sink)?;
+    maybe_write_prepared_final_memory_cache(request, prepared, ttl_ms, http, progress_sink)?;
     if !prepared.transformed
         || !has_distinct_final_cache_key(request)
         || !request.cache_mode.write_disk()
+        || !should_store_disk_metadata_on_disk(request, http)
     {
         return Ok(());
     }
-    disk.write(
+    disk.write_with_http_metadata(
         &request.namespace,
         &request.cache_key,
         prepared.bytes.as_ref(),
         ttl_ms,
+        http,
     )?;
     let disk_cache_bytes = disk_cache_byte_budget()?;
     disk.trim_to_bytes(disk_cache_bytes)?;
@@ -1705,6 +2103,8 @@ fn maybe_write_prepared_final_cache(
 fn maybe_write_prepared_final_memory_cache(
     request: &RuntimeRequest,
     prepared: &PreparedImage,
+    ttl_ms: Option<i64>,
+    http: Option<&DiskCacheHttpMetadata>,
     progress_sink: Option<&dyn RuntimeProgressSink>,
 ) -> RuntimeResult<()> {
     if !prepared.transformed
@@ -1716,11 +2116,12 @@ fn maybe_write_prepared_final_memory_cache(
     memory_cache()
         .lock()
         .map_err(|_| RuntimeError::new("memory_cache", true, "memory cache lock poisoned"))?
-        .put_processed(
+        .put_processed_with_http_metadata(
             &request.namespace,
             request.cache_key.clone(),
             prepared.bytes.clone(),
-            request.ttl_ms,
+            ttl_ms,
+            http.cloned(),
         );
     emit_progress(
         progress_sink,
@@ -1757,9 +2158,11 @@ impl From<&HttpCacheMetadata> for DiskCacheHttpMetadata {
             etag: metadata.etag.clone(),
             last_modified: metadata.last_modified.clone(),
             cache_control: metadata.cache_control.clone(),
+            date: metadata.date.clone(),
             expires: metadata.expires.clone(),
             age: metadata.age.clone(),
             vary: metadata.vary.clone(),
+            vary_request_key: metadata.vary_request_key.clone(),
             fetched_at_ms: Some(metadata.fetched_at_ms),
         }
     }
@@ -1774,23 +2177,27 @@ fn fetch_source(
 ) -> RuntimeResult<FetchOutcome> {
     if runtime_fetch_coalescing_allowed(request) {
         let inflight_key = runtime_inflight_fetch_key(request, conditional, inline_bytes);
-        let (inflight, is_leader) = runtime_inflight_fetch_entry(&inflight_key)?;
+        let (inflight, listener, is_leader) =
+            runtime_inflight_fetch_entry(&inflight_key, cancel_token)?;
         if !is_leader {
             emit_progress(
                 progress_sink,
                 RuntimeProgressEvent::new(RuntimeProgressStage::Fetch, "fetch.coalesced"),
             );
-            return wait_for_runtime_inflight_fetch(inflight, request, cancel_token);
+            return wait_for_runtime_inflight_fetch(inflight, listener, request, cancel_token);
         }
 
+        let work_cancel = inflight.cancellation.work_token();
         let result = fetch_source_uncached(
             request,
             inline_bytes,
             conditional,
-            cancel_token,
+            Some(&work_cancel),
             progress_sink,
         );
         publish_runtime_inflight_fetch_result(&inflight_key, inflight, result.clone());
+        ensure_not_cancelled(cancel_token)?;
+        drop(listener);
         return result;
     }
 
@@ -2073,32 +2480,40 @@ fn fetch_file(
     path: &str,
     progress_sink: Option<&dyn RuntimeProgressSink>,
 ) -> RuntimeResult<FetchOutcome> {
-    let metadata = std::fs::metadata(path).map_err(|error| {
+    let file = std::fs::File::open(path).map_err(|error| {
+        RuntimeError::new(
+            "fetch",
+            false,
+            format!("failed to open image file: {error}"),
+        )
+    })?;
+    let metadata = file.metadata().map_err(|error| {
         RuntimeError::new(
             "fetch",
             false,
             format!("failed to stat image file: {error}"),
         )
     })?;
-    if metadata.len() as usize > request.limits.max_encoded_bytes {
-        return Err(RuntimeError::new(
-            "fetch",
-            false,
-            "file exceeds max encoded byte limit",
-        ));
-    }
+    let expected_length = checked_file_length(metadata.len(), request.limits.max_encoded_bytes)?;
     emit_progress(
         progress_sink,
         RuntimeProgressEvent::new(RuntimeProgressStage::Fetch, "fetch.file")
-            .with_bytes(0, Some(metadata.len() as usize)),
+            .with_bytes(0, Some(expected_length)),
     );
-    let bytes = std::fs::read(path).map_err(|error| {
-        RuntimeError::new(
-            "fetch",
-            false,
-            format!("failed to read image file: {error}"),
-        )
-    })?;
+    let read_limit = u64::try_from(request.limits.max_encoded_bytes)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    let mut bytes = Vec::with_capacity(expected_length);
+    file.take(read_limit)
+        .read_to_end(&mut bytes)
+        .map_err(|error| {
+            RuntimeError::new(
+                "fetch",
+                false,
+                format!("failed to read image file: {error}"),
+            )
+        })?;
+    validate_encoded_byte_limit(&bytes, request.limits.max_encoded_bytes, "fetch")?;
     emit_progress(
         progress_sink,
         RuntimeProgressEvent::new(RuntimeProgressStage::Fetch, "fetch.file.complete")
@@ -2110,6 +2525,24 @@ fn fetch_file(
         http_cache_metadata: None,
         not_modified: false,
     })
+}
+
+fn checked_file_length(length: u64, max_encoded_bytes: usize) -> RuntimeResult<usize> {
+    let length = usize::try_from(length).map_err(|_| {
+        RuntimeError::new(
+            "fetch",
+            false,
+            "file length exceeds this platform's addressable memory",
+        )
+    })?;
+    if length > max_encoded_bytes {
+        return Err(RuntimeError::new(
+            "fetch",
+            false,
+            "file exceeds max encoded byte limit",
+        ));
+    }
+    Ok(length)
 }
 
 fn fetch_network(
@@ -3725,9 +4158,13 @@ fn merge_http_metadata(
         etag: fresh.etag.or_else(|| stale.etag.clone()),
         last_modified: fresh.last_modified.or_else(|| stale.last_modified.clone()),
         cache_control: fresh.cache_control.or_else(|| stale.cache_control.clone()),
+        date: fresh.date,
         expires: fresh.expires.or_else(|| stale.expires.clone()),
-        age: fresh.age.or_else(|| stale.age.clone()),
+        age: fresh.age,
         vary: fresh.vary.or_else(|| stale.vary.clone()),
+        vary_request_key: fresh
+            .vary_request_key
+            .or_else(|| stale.vary_request_key.clone()),
         fetched_at_ms: Some(fresh.fetched_at_ms),
     }
 }
@@ -3736,11 +4173,30 @@ fn should_store_on_disk(
     request: &RuntimeRequest,
     http_metadata: Option<&HttpCacheMetadata>,
 ) -> bool {
+    should_store_on_disk_with_cache_control(
+        request,
+        http_metadata.and_then(|metadata| metadata.cache_control.as_deref()),
+    )
+}
+
+fn should_store_disk_metadata_on_disk(
+    request: &RuntimeRequest,
+    http_metadata: Option<&DiskCacheHttpMetadata>,
+) -> bool {
+    should_store_on_disk_with_cache_control(
+        request,
+        http_metadata.and_then(|metadata| metadata.cache_control.as_deref()),
+    )
+}
+
+fn should_store_on_disk_with_cache_control(
+    request: &RuntimeRequest,
+    cache_control: Option<&str>,
+) -> bool {
     if has_private_headers(request) && !request.private_cache {
         return false;
     }
-    let Some(cache_control) = http_metadata.and_then(|metadata| metadata.cache_control.as_deref())
-    else {
+    let Some(cache_control) = cache_control else {
         return true;
     };
     let directives = cache_control_directives(cache_control);
@@ -3760,14 +4216,88 @@ fn should_store_on_disk(
     true
 }
 
+fn http_metadata_allows_storage(http_metadata: Option<&HttpCacheMetadata>) -> bool {
+    http_metadata.is_none_or(|metadata| {
+        cache_headers_allow_storage(metadata.cache_control.as_deref(), metadata.vary.as_deref())
+    })
+}
+
+fn disk_http_metadata_allows_storage(metadata: &DiskCacheHttpMetadata) -> bool {
+    cache_headers_allow_storage(metadata.cache_control.as_deref(), metadata.vary.as_deref())
+}
+
+fn cache_headers_allow_storage(cache_control: Option<&str>, vary: Option<&str>) -> bool {
+    let no_store = cache_control.is_some_and(|value| {
+        cache_control_directives(value)
+            .iter()
+            .any(|directive| directive.name.eq_ignore_ascii_case("no-store"))
+    });
+    let vary_star = vary.is_some_and(|value| {
+        value
+            .split(',')
+            .any(|name| name.trim().eq_ignore_ascii_case("*"))
+    });
+    !no_store && !vary_star
+}
+
+fn cache_entry_reusable(
+    request: &RuntimeRequest,
+    metadata: Option<&DiskCacheHttpMetadata>,
+) -> RuntimeResult<bool> {
+    let Some(metadata) = metadata else {
+        return Ok(true);
+    };
+    if !disk_http_metadata_allows_storage(metadata) {
+        return Ok(false);
+    }
+    let Some(vary) = metadata
+        .vary
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Ok(true);
+    };
+    let Some(stored_key) = metadata.vary_request_key.as_deref() else {
+        return Ok(false);
+    };
+    Ok(http_transport::request_vary_key(vary, &request.headers)?.as_deref() == Some(stored_key))
+}
+
+fn evict_request_cache_entries(disk: &DiskCache, request: &RuntimeRequest) -> RuntimeResult<()> {
+    let mut memory = memory_cache()
+        .lock()
+        .map_err(|_| RuntimeError::new("memory_cache", true, "memory cache lock poisoned"))?;
+    memory.remove(&request.encoded_cache_key);
+    if has_distinct_final_cache_key(request) {
+        memory.remove(&request.cache_key);
+    }
+    drop(memory);
+    if request.cache_mode.write_disk() {
+        evict_request_disk_cache_entries(disk, request)?;
+    }
+    Ok(())
+}
+
+fn evict_request_disk_cache_entries(
+    disk: &DiskCache,
+    request: &RuntimeRequest,
+) -> RuntimeResult<()> {
+    disk.remove(&request.namespace, &request.encoded_cache_key)?;
+    if has_distinct_final_cache_key(request) {
+        disk.remove(&request.namespace, &request.cache_key)?;
+    }
+    Ok(())
+}
+
 fn effective_ttl_ms_from_disk_metadata(
     request: &RuntimeRequest,
     metadata: &DiskCacheHttpMetadata,
 ) -> Option<i64> {
-    let Some(cache_control) = metadata.cache_control.as_deref() else {
-        return request.ttl_ms;
-    };
-    let directives = cache_control_directives(cache_control);
+    let directives = metadata
+        .cache_control
+        .as_deref()
+        .map(cache_control_directives)
+        .unwrap_or_default();
     if directives.iter().any(|directive| {
         directive.name.eq_ignore_ascii_case("no-cache")
             || directive.name.eq_ignore_ascii_case("must-revalidate")
@@ -3779,32 +4309,36 @@ fn effective_ttl_ms_from_disk_metadata(
         .find(|directive| directive.name.eq_ignore_ascii_case("max-age"))
         .and_then(|directive| directive.value)
         .and_then(|value| value.parse::<i64>().ok());
-    let Some(max_age_seconds) = max_age_seconds else {
-        return request.ttl_ms;
-    };
     let age_seconds = metadata
         .age
         .as_deref()
-        .and_then(|age| age.parse::<i64>().ok())
-        .unwrap_or(0)
-        .max(0);
-    Some(
-        max_age_seconds
-            .saturating_sub(age_seconds)
-            .max(0)
-            .saturating_mul(1000),
+        .and_then(parse_age_seconds)
+        .unwrap_or(0);
+    if let Some(max_age_seconds) = max_age_seconds {
+        return Some(
+            max_age_seconds
+                .saturating_sub(age_seconds)
+                .max(0)
+                .saturating_mul(1000),
+        );
+    }
+    expires_ttl_ms(
+        metadata.expires.as_deref(),
+        metadata.date.as_deref(),
+        metadata.fetched_at_ms,
+        age_seconds,
     )
+    .or(request.ttl_ms)
 }
 
 fn effective_ttl_ms(
     request: &RuntimeRequest,
     http_metadata: Option<&HttpCacheMetadata>,
 ) -> Option<i64> {
-    let Some(cache_control) = http_metadata.and_then(|metadata| metadata.cache_control.as_deref())
-    else {
-        return request.ttl_ms;
-    };
-    let directives = cache_control_directives(cache_control);
+    let directives = http_metadata
+        .and_then(|metadata| metadata.cache_control.as_deref())
+        .map(cache_control_directives)
+        .unwrap_or_default();
     if directives.iter().any(|directive| {
         directive.name.eq_ignore_ascii_case("no-cache")
             || directive.name.eq_ignore_ascii_case("must-revalidate")
@@ -3816,19 +4350,56 @@ fn effective_ttl_ms(
         .find(|directive| directive.name.eq_ignore_ascii_case("max-age"))
         .and_then(|directive| directive.value)
         .and_then(|value| value.parse::<i64>().ok());
-    let Some(max_age_seconds) = max_age_seconds else {
-        return request.ttl_ms;
-    };
     let age_seconds = http_metadata
         .and_then(|metadata| metadata.age.as_deref())
-        .and_then(|age| age.parse::<i64>().ok())
-        .unwrap_or(0)
-        .max(0);
+        .and_then(parse_age_seconds)
+        .unwrap_or(0);
+    if let Some(max_age_seconds) = max_age_seconds {
+        return Some(
+            max_age_seconds
+                .saturating_sub(age_seconds)
+                .max(0)
+                .saturating_mul(1000),
+        );
+    }
+    let Some(metadata) = http_metadata else {
+        return request.ttl_ms;
+    };
+    expires_ttl_ms(
+        metadata.expires.as_deref(),
+        metadata.date.as_deref(),
+        Some(metadata.fetched_at_ms),
+        age_seconds,
+    )
+    .or(request.ttl_ms)
+}
+
+fn parse_age_seconds(value: &str) -> Option<i64> {
+    value.trim().parse::<i64>().ok().map(|age| age.max(0))
+}
+
+fn expires_ttl_ms(
+    expires: Option<&str>,
+    date: Option<&str>,
+    fetched_at_ms: Option<i64>,
+    age_seconds: i64,
+) -> Option<i64> {
+    let expires = httpdate::parse_http_date(expires?).ok()?;
+    let expires_ms = expires
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis()
+        .min(i64::MAX as u128) as i64;
+    let reference_ms = date
+        .and_then(|value| httpdate::parse_http_date(value).ok())
+        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|value| value.as_millis().min(i64::MAX as u128) as i64)
+        .or(fetched_at_ms)?;
     Some(
-        max_age_seconds
-            .saturating_sub(age_seconds)
-            .max(0)
-            .saturating_mul(1000),
+        expires_ms
+            .saturating_sub(reference_ms)
+            .saturating_sub(age_seconds.saturating_mul(1000))
+            .max(0),
     )
 }
 
@@ -3951,6 +4522,7 @@ fn prepare_decodable_image(
 }
 
 fn validate_supported_image(bytes: &[u8], limits: &RuntimeLimits) -> RuntimeResult<()> {
+    validate_encoded_byte_limit(bytes, limits.max_encoded_bytes, "decode")?;
     if !looks_like_supported_image(bytes) {
         return Err(RuntimeError::new(
             "decode",
@@ -3962,6 +4534,43 @@ fn validate_supported_image(bytes: &[u8], limits: &RuntimeLimits) -> RuntimeResu
         validate_gif_animation_limits(bytes, limits)?;
     } else if is_webp(bytes) {
         validate_webp_animation_limits(bytes, limits)?;
+    }
+    Ok(())
+}
+
+fn validate_cached_image_limits(
+    bytes: &[u8],
+    request: &RuntimeRequest,
+    stage: &'static str,
+) -> RuntimeResult<()> {
+    validate_encoded_byte_limit(bytes, request.limits.max_encoded_bytes, stage)?;
+    let format = select_runtime_image_format(bytes, stage, "cached image")?;
+    let _ = preflight_decoded_dimensions(format, bytes, stage, request.limits.max_decoded_pixels)?;
+    validate_supported_image(bytes, &request.limits)
+}
+
+fn validate_encoded_byte_limit(
+    bytes: &[u8],
+    max_encoded_bytes: usize,
+    stage: &'static str,
+) -> RuntimeResult<()> {
+    if bytes.len() > max_encoded_bytes {
+        return Err(RuntimeError::new(
+            stage,
+            false,
+            "encoded bytes exceed max encoded byte limit",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_processed_cache_hit(bytes: &[u8], request: &RuntimeRequest) -> RuntimeResult<()> {
+    if bytes.len() > request.limits.max_processor_output_bytes {
+        return Err(RuntimeError::new(
+            "processor",
+            false,
+            "cached processor output exceeds max processor output byte limit",
+        ));
     }
     Ok(())
 }
@@ -4536,6 +5145,20 @@ mod tests {
         }
     }
 
+    struct ReplacingFileProgressSink {
+        path: std::path::PathBuf,
+        replacement: Vec<u8>,
+    }
+
+    impl RuntimeProgressSink for ReplacingFileProgressSink {
+        fn emit(&self, event: RuntimeProgressEvent) {
+            if event.name == "fetch.file" {
+                std::fs::write(&self.path, &self.replacement)
+                    .expect("test should replace file after metadata validation");
+            }
+        }
+    }
+
     #[test]
     fn coalesces_concurrent_runtime_loads_for_same_key() {
         let server = SlowImageServer::spawn(minimal_gif(1, 0));
@@ -4839,6 +5462,87 @@ mod tests {
         let second_key = runtime_inflight_fetch_key(&request, None, Some(&second));
 
         assert_ne!(first_key, second_key);
+        assert!(runtime_inline_bytes_identity(Some(&first)).starts_with("sha256:"));
+    }
+
+    #[test]
+    fn inflight_keys_are_cryptographic_and_do_not_expose_secrets() {
+        let mut request = bytes_request(RuntimeLimits::default());
+        request.source = RuntimeSource::RuntimePlugin {
+            source_kind: "s3".to_string(),
+            locator: "s3://private-bucket/image.gif?signature=locator-secret".to_string(),
+        };
+        request.headers.insert(
+            "authorization".to_string(),
+            "Bearer authorization-secret".to_string(),
+        );
+        request
+            .headers
+            .insert("cookie".to_string(), "session=cookie-secret".to_string());
+        request.headers.insert(
+            "x-pixa-s3-secret-access-key".to_string(),
+            "s3-header-secret".to_string(),
+        );
+        let mut different_secret = request.clone();
+        different_secret.headers.insert(
+            "authorization".to_string(),
+            "Bearer different-secret".to_string(),
+        );
+
+        let full_key = runtime_inflight_key("/cache", &request);
+        let fetch_key = runtime_inflight_fetch_key(&request, None, None);
+        let headers_key = runtime_headers_identity(&request);
+        let source_key = source_identity(&request.source);
+        for key in [&full_key, &fetch_key, &headers_key, &source_key] {
+            assert!(key.starts_with("sha256:"), "unexpected identity: {key}");
+            for secret in [
+                "authorization-secret",
+                "cookie-secret",
+                "s3-header-secret",
+                "locator-secret",
+                "private-bucket",
+            ] {
+                assert!(!key.contains(secret), "identity exposed {secret}: {key}");
+            }
+        }
+        assert_ne!(full_key, runtime_inflight_key("/cache", &different_secret));
+        assert_ne!(
+            fetch_key,
+            runtime_inflight_fetch_key(&different_secret, None, None)
+        );
+    }
+
+    #[test]
+    fn canonical_header_identity_resists_delimiter_collisions() {
+        let mut first = bytes_request(RuntimeLimits::default());
+        first
+            .headers
+            .insert("a".to_string(), "b\u{1e}c=d".to_string());
+        let mut second = bytes_request(RuntimeLimits::default());
+        second.headers.insert("a".to_string(), "b".to_string());
+        second.headers.insert("c".to_string(), "d".to_string());
+
+        assert_ne!(
+            runtime_headers_identity(&first),
+            runtime_headers_identity(&second)
+        );
+        assert_ne!(
+            runtime_inflight_fetch_key(&first, None, None),
+            runtime_inflight_fetch_key(&second, None, None)
+        );
+    }
+
+    #[test]
+    fn canonical_full_load_identity_resists_processor_delimiter_collisions() {
+        let mut first = bytes_request(RuntimeLimits::default());
+        first.processors = vec!["a\u{1f}b".to_string(), "c".to_string()];
+        let mut second = first.clone();
+        second.processors = vec!["a".to_string(), "b\u{1f}c".to_string()];
+
+        assert_ne!(
+            runtime_inflight_key("/cache", &first),
+            runtime_inflight_key("/cache", &second)
+        );
     }
 
     #[test]
@@ -4880,11 +5584,10 @@ mod tests {
             Some(60_000),
         )
         .expect("seed disk cache entry should be written");
-        let data_path = std::path::Path::new(&root)
-            .join("pixa")
-            .join(&request.namespace)
-            .join(&request.encoded_cache_key[0..2])
-            .join(format!("{}.bin", request.encoded_cache_key));
+        let data_path = disk
+            .entry_paths(&request.namespace, &request.encoded_cache_key)
+            .expect("cache entry path should resolve")
+            .data;
         std::fs::write(data_path, b"corrupt").expect("test should be able to corrupt cache data");
         let before = cache_stats().expect("cache stats should be available");
 
@@ -4959,6 +5662,44 @@ mod tests {
     }
 
     #[test]
+    fn private_304_response_removes_previously_public_disk_entry() {
+        let stale_image = minimal_gif(1, 0);
+        let server = OneShotHttpServer::spawn(
+            "HTTP/1.1 304 Not Modified\r\nETag: \"v2\"\r\nCache-Control: private, max-age=60\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_string(),
+        );
+        let root = temp_cache_root("private-disk-304");
+        let mut request = network_request(server.url.clone(), "0123456789abcde3");
+        request.cache_mode = CacheMode::DiskOnly;
+        request.encoded_cache_key = "0123456789abcde4".to_string();
+        let disk = DiskCache::new(&root);
+        disk.write_with_http_metadata(
+            &request.namespace,
+            &request.encoded_cache_key,
+            &stale_image,
+            Some(-1),
+            Some(&DiskCacheHttpMetadata {
+                etag: Some("\"v1\"".to_string()),
+                cache_control: Some("max-age=0".to_string()),
+                fetched_at_ms: Some(now_millis().saturating_sub(1_000)),
+                ..Default::default()
+            }),
+        )
+        .expect("public stale disk entry should be seeded");
+
+        let outcome = load_image(&root, request.clone(), None)
+            .expect("private 304 response should still reuse the validated bytes");
+        server.join();
+        let disk_read = disk
+            .read_entry(&request.namespace, &request.encoded_cache_key)
+            .expect("post-revalidation disk lookup should succeed");
+        let _ = std::fs::remove_dir_all(root);
+
+        assert_eq!(outcome.bytes.as_ref(), stale_image.as_slice());
+        assert!(matches!(disk_read, DiskCacheRead::Miss));
+    }
+
+    #[test]
     fn network_200_writes_disk_entry_with_http_metadata_for_cache_only_reuse() {
         let image = minimal_gif(1, 0);
         let mut response = format!(
@@ -5013,6 +5754,255 @@ mod tests {
     }
 
     #[test]
+    fn http_no_store_prevents_encoded_memory_and_disk_writes() {
+        let image = minimal_gif(1, 0);
+        let mut response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+            image.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(&image);
+        let server = FixedResponseServer::spawn(response);
+        let root = temp_cache_root("http-no-store");
+        let mut request = network_request(server.url.clone(), "9999000011112222");
+        request.cache_mode = CacheMode::MemoryAndDisk;
+        request.encoded_cache_key = "9999000011112223".to_string();
+        let disk = DiskCache::new(&root);
+
+        load_image(&root, request.clone(), None).expect("no-store response should still load");
+
+        let memory_had_entry = memory_remove(&request.encoded_cache_key).unwrap();
+        let disk_read = disk
+            .read_entry(&request.namespace, &request.encoded_cache_key)
+            .expect("disk lookup should succeed");
+        let request_count = server.stop();
+        let _ = std::fs::remove_dir_all(root);
+
+        assert!(
+            !memory_had_entry,
+            "no-store must prevent encoded memory writes"
+        );
+        assert!(matches!(disk_read, DiskCacheRead::Miss));
+        assert_eq!(request_count, 1);
+    }
+
+    #[test]
+    fn repeated_cache_control_fields_preserve_no_store() {
+        let image = minimal_gif(1, 0);
+        let mut response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nCache-Control: max-age=60\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+            image.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(&image);
+        let server = OneShotHttpServer::spawn(response);
+        let root = temp_cache_root("repeated-cache-control");
+        let mut request = network_request(server.url.clone(), "9999000011112242");
+        request.cache_mode = CacheMode::MemoryAndDisk;
+        request.encoded_cache_key = "9999000011112243".to_string();
+
+        load_image(&root, request.clone(), None).expect("response should load");
+        server.join();
+
+        assert!(!memory_remove(&request.encoded_cache_key).unwrap());
+        assert!(matches!(
+            DiskCache::new(&root)
+                .read_entry(&request.namespace, &request.encoded_cache_key)
+                .unwrap(),
+            DiskCacheRead::Miss
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn http_no_store_prevents_processed_memory_and_disk_writes() {
+        let image = minimal_gif(1, 0);
+        let mut response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+            image.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(&image);
+        let server = OneShotHttpServer::spawn(response);
+        let root = temp_cache_root("http-no-store-processed");
+        let mut request = network_request(server.url.clone(), "9999000011113332");
+        request.cache_mode = CacheMode::MemoryAndDisk;
+        request.encoded_cache_key = "9999000011113333".to_string();
+        request.processors = vec!["resize(width=1,height=1,mode=exact,filter=nearest)".to_string()];
+        let disk = DiskCache::new(&root);
+
+        load_image(&root, request.clone(), None)
+            .expect("processed no-store response should still load");
+        server.join();
+
+        let encoded_memory = memory_remove(&request.encoded_cache_key).unwrap();
+        let processed_memory = memory_remove(&request.cache_key).unwrap();
+        let encoded_disk = disk
+            .read_entry(&request.namespace, &request.encoded_cache_key)
+            .unwrap();
+        let processed_disk = disk
+            .read_entry(&request.namespace, &request.cache_key)
+            .unwrap();
+        let _ = std::fs::remove_dir_all(root);
+
+        assert!(!encoded_memory);
+        assert!(!processed_memory);
+        assert!(matches!(encoded_disk, DiskCacheRead::Miss));
+        assert!(matches!(processed_disk, DiskCacheRead::Miss));
+    }
+
+    #[test]
+    fn expires_and_age_define_remaining_ttl_without_cache_control() {
+        let request = network_request("http://127.0.0.1/image.gif".to_string(), "ttl-test");
+        let http = HttpCacheMetadata {
+            expires: Some("Thu, 01 Jan 1970 00:02:00 GMT".to_string()),
+            age: Some("30".to_string()),
+            fetched_at_ms: 60_000,
+            ..Default::default()
+        };
+        let disk = DiskCacheHttpMetadata::from(&http);
+
+        assert_eq!(effective_ttl_ms(&request, Some(&http)), Some(30_000));
+        assert_eq!(
+            effective_ttl_ms_from_disk_metadata(&request, &disk),
+            Some(30_000)
+        );
+    }
+
+    #[test]
+    fn expires_uses_response_date_before_local_fetch_time() {
+        let request = network_request("http://127.0.0.1/image.gif".to_string(), "date-ttl-test");
+        let http = HttpCacheMetadata {
+            date: Some("Thu, 01 Jan 1970 00:01:00 GMT".to_string()),
+            expires: Some("Thu, 01 Jan 1970 00:02:00 GMT".to_string()),
+            age: Some("30".to_string()),
+            fetched_at_ms: 0,
+            ..Default::default()
+        };
+
+        assert_eq!(effective_ttl_ms(&request, Some(&http)), Some(30_000));
+    }
+
+    #[test]
+    fn encoded_disk_hit_does_not_extend_remaining_ttl_in_memory() {
+        let body = minimal_gif(1, 0);
+        let mut response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(&body);
+        let server = FixedResponseServer::spawn(response);
+        let root = temp_cache_root("disk-memory-ttl");
+        let mut request = network_request(server.url.clone(), "aaaabbbb00000001");
+        request.encoded_cache_key = "aaaabbbb00000002".to_string();
+        request.cache_mode = CacheMode::MemoryAndDisk;
+        request.ttl_ms = Some(60_000);
+        DiskCache::new(&root)
+            .write(
+                &request.namespace,
+                &request.encoded_cache_key,
+                &body,
+                Some(40),
+            )
+            .expect("short-lived disk entry should write");
+
+        load_image(&root, request.clone(), None).expect("fresh disk response should load");
+        thread::sleep(Duration::from_millis(60));
+        load_image(&root, request, None).expect("expired disk response should refetch");
+
+        let request_count = server.stop();
+        let _ = std::fs::remove_dir_all(root);
+        assert_eq!(request_count, 1);
+    }
+
+    #[test]
+    fn http_age_expiry_is_not_extended_by_processed_memory_cache() {
+        let body = minimal_png(2, 2);
+        let mut response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nCache-Control: max-age=60\r\nAge: 60\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(&body);
+        let server = FixedResponseServer::spawn(response);
+        let root = temp_cache_root("http-processed-memory-ttl");
+        let mut request = network_request(server.url.clone(), "aaaabbbb00000003");
+        request.encoded_cache_key = "aaaabbbb00000004".to_string();
+        request.cache_mode = CacheMode::MemoryAndDisk;
+        request.ttl_ms = Some(60_000);
+        request.processors = vec!["resize(width=1,height=1,mode=exact,filter=nearest)".to_string()];
+
+        load_image(&root, request.clone(), None).expect("first response should process");
+        thread::sleep(Duration::from_millis(2));
+        load_image(&root, request, None).expect("expired processed response should refetch");
+
+        let request_count = server.stop();
+        let _ = std::fs::remove_dir_all(root);
+        assert_eq!(request_count, 2);
+    }
+
+    #[test]
+    fn vary_star_prevents_memory_and_disk_reuse() {
+        let image = minimal_gif(1, 0);
+        let mut response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nCache-Control: max-age=60\r\nVary: *\r\nConnection: close\r\n\r\n",
+            image.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(&image);
+        let server = OneShotHttpServer::spawn(response);
+        let root = temp_cache_root("vary-star");
+        let mut request = network_request(server.url.clone(), "aaaaffff11112222");
+        request.cache_mode = CacheMode::MemoryAndDisk;
+        request.encoded_cache_key = "aaaaffff11112223".to_string();
+        let disk = DiskCache::new(&root);
+
+        load_image(&root, request.clone(), None).expect("Vary star response should load");
+        server.join();
+
+        assert!(!memory_remove(&request.encoded_cache_key).unwrap());
+        assert!(matches!(
+            disk.read_entry(&request.namespace, &request.encoded_cache_key)
+                .unwrap(),
+            DiskCacheRead::Miss
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn vary_reuses_only_matching_request_header_values() {
+        let image = minimal_gif(1, 0);
+        let mut response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nCache-Control: max-age=60\r\nVary: Accept\r\n\r\n",
+            image.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(&image);
+        let server = FixedResponseServer::spawn(response);
+        let root = temp_cache_root("vary-request-headers");
+        let mut request = network_request(server.url.clone(), "bbbbffff11112222");
+        request.cache_mode = CacheMode::MemoryAndDisk;
+        request.encoded_cache_key = "bbbbffff11112223".to_string();
+        request
+            .headers
+            .insert("accept".to_string(), "image/gif".to_string());
+
+        load_image(&root, request.clone(), None).expect("first variant should load");
+        request
+            .headers
+            .insert("accept".to_string(), "image/webp".to_string());
+        load_image(&root, request.clone(), None)
+            .expect("different Vary value should fetch a new representation");
+        request.cache_mode = CacheMode::CacheOnly;
+        load_image(&root, request, None).expect("matching Vary value should reuse the cache");
+
+        let request_count = server.stop();
+        let _ = std::fs::remove_dir_all(root);
+        assert_eq!(request_count, 2);
+    }
+
+    #[test]
     fn authenticated_response_requires_explicit_private_disk_cache() {
         let image = minimal_gif(1, 0);
         let server = SlowImageServer::spawn(image.clone());
@@ -5054,6 +6044,43 @@ mod tests {
     }
 
     #[test]
+    fn authenticated_processed_response_does_not_bypass_private_disk_policy() {
+        let image = minimal_png(2, 2);
+        let mut response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            image.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(&image);
+        let server = OneShotHttpServer::spawn(response);
+        let root = temp_cache_root("private-processed-disk-cache");
+        let disk = DiskCache::new(&root);
+        let mut request = network_request(server.url.clone(), "3333333333333331");
+        request.cache_mode = CacheMode::DiskOnly;
+        request.encoded_cache_key = "3333333333333332".to_string();
+        request.headers.insert(
+            "authorization".to_string(),
+            "Bearer private-token".to_string(),
+        );
+        request.processors = vec!["resize(width=1,height=1,mode=exact,filter=nearest)".to_string()];
+
+        load_image(&root, request.clone(), None)
+            .expect("authenticated processed response should still load");
+        server.join();
+
+        let encoded = disk
+            .read_entry(&request.namespace, &request.encoded_cache_key)
+            .expect("encoded disk lookup should succeed");
+        let processed = disk
+            .read_entry(&request.namespace, &request.cache_key)
+            .expect("processed disk lookup should succeed");
+        let _ = std::fs::remove_dir_all(root);
+
+        assert!(matches!(encoded, DiskCacheRead::Miss));
+        assert!(matches!(processed, DiskCacheRead::Miss));
+    }
+
+    #[test]
     fn follower_cancellation_does_not_cancel_coalesced_leader() {
         let server = SlowImageServer::spawn(minimal_gif(1, 0));
         let mut request = network_request(server.url.clone(), "runtime-coalesced-cancel-key");
@@ -5081,6 +6108,172 @@ mod tests {
 
         assert_eq!(follower_error.stage, "cancel");
         assert_eq!(request_count, 1);
+    }
+
+    #[test]
+    fn full_load_leader_cancellation_does_not_poison_uncancelled_follower() {
+        let server =
+            SlowImageServer::spawn_with_delay(minimal_gif(1, 0), Duration::from_millis(500));
+        let mut request = network_request(server.url.clone(), "full-load-leader-cancel");
+        request.cache_mode = CacheMode::MemoryOnly;
+        request.encoded_cache_key = "aaaabbbbcccc0001".to_string();
+        request.cache_key = "aaaabbbbcccc0002".to_string();
+        let inflight_key = runtime_inflight_key("", &request);
+        let leader_request = request.clone();
+        let follower_request = request;
+        let cancel_id = create_cancel_token().unwrap();
+        let leader_cancel = cancel_token_handle(cancel_id).unwrap();
+
+        let leader = thread::spawn(move || {
+            load_image_with_cancel("", leader_request, None, leader_cancel)
+                .expect_err("cancelled leader should return cancellation")
+        });
+        server.wait_for_requests(1);
+        let follower = thread::spawn(move || {
+            load_image("", follower_request, None)
+                .expect("uncancelled follower should receive the shared successful load")
+        });
+        wait_for_inflight_participants(runtime_inflight_loads(), &inflight_key, 3);
+        cancel_token(cancel_id).unwrap();
+
+        let leader_error = leader.join().unwrap();
+        let follower_outcome = follower.join().unwrap();
+        free_cancel_token(cancel_id).unwrap();
+        let request_count = server.stop();
+
+        assert_eq!(leader_error.stage, "cancel");
+        assert!(looks_like_supported_image(&follower_outcome.bytes));
+        assert_eq!(request_count, 1);
+    }
+
+    #[test]
+    fn origin_fetch_leader_cancellation_does_not_poison_other_variant() {
+        let server =
+            SlowImageServer::spawn_with_delay(minimal_gif(1, 0), Duration::from_millis(500));
+        let mut leader_request = network_request(server.url.clone(), "origin-leader-cancel-final");
+        leader_request.cache_mode = CacheMode::MemoryOnly;
+        leader_request.encoded_cache_key = "aaaabbbbdddd0001".to_string();
+        let mut follower_request = leader_request.clone();
+        follower_request.cache_key = "origin-follower-final".to_string();
+        let fetch_key = runtime_inflight_fetch_key(&leader_request, None, None);
+        let cancel_id = create_cancel_token().unwrap();
+        let leader_cancel = cancel_token_handle(cancel_id).unwrap();
+
+        let leader = thread::spawn(move || {
+            load_image_with_cancel("", leader_request, None, leader_cancel)
+                .expect_err("cancelled origin leader should return cancellation")
+        });
+        server.wait_for_requests(1);
+        let follower = thread::spawn(move || {
+            load_image("", follower_request, None)
+                .expect("uncancelled variant should receive the shared origin bytes")
+        });
+        wait_for_inflight_participants(runtime_inflight_fetches(), &fetch_key, 3);
+        cancel_token(cancel_id).unwrap();
+
+        let leader_error = leader.join().unwrap();
+        let follower_outcome = follower.join().unwrap();
+        free_cancel_token(cancel_id).unwrap();
+        let request_count = server.stop();
+
+        assert_eq!(leader_error.stage, "cancel");
+        assert!(looks_like_supported_image(&follower_outcome.bytes));
+        assert_eq!(request_count, 1);
+    }
+
+    #[test]
+    fn full_load_cancels_shared_work_after_every_listener_cancels() {
+        let server = SlowImageServer::spawn_with_delay(minimal_gif(1, 0), Duration::from_secs(3));
+        let mut request = network_request(server.url.clone(), "all-listeners-cancel");
+        request.cache_mode = CacheMode::MemoryOnly;
+        request.encoded_cache_key = "aaaabbbbeeee0001".to_string();
+        request.cache_key = "aaaabbbbeeee0002".to_string();
+        let inflight_key = runtime_inflight_key("", &request);
+        let first_id = create_cancel_token().unwrap();
+        let second_id = create_cancel_token().unwrap();
+        let first_cancel = cancel_token_handle(first_id).unwrap();
+        let second_cancel = cancel_token_handle(second_id).unwrap();
+        let first_request = request.clone();
+
+        let first = thread::spawn(move || {
+            load_image_with_cancel("", first_request, None, first_cancel)
+                .expect_err("first listener should be cancelled")
+        });
+        server.wait_for_requests(1);
+        let second = thread::spawn(move || {
+            load_image_with_cancel("", request, None, second_cancel)
+                .expect_err("second listener should be cancelled")
+        });
+        wait_for_inflight_participants(runtime_inflight_loads(), &inflight_key, 3);
+        let cancelled_at = Instant::now();
+        cancel_token(first_id).unwrap();
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            !second.is_finished(),
+            "shared work must stay alive while the second listener remains interested"
+        );
+        cancel_token(second_id).unwrap();
+
+        let first_error = first.join().unwrap();
+        let second_error = second.join().unwrap();
+        let cancel_elapsed = cancelled_at.elapsed();
+        free_cancel_token(first_id).unwrap();
+        free_cancel_token(second_id).unwrap();
+        let request_count = server.stop();
+
+        assert_eq!(first_error.stage, "cancel");
+        assert_eq!(second_error.stage, "cancel");
+        assert!(cancel_elapsed < Duration::from_secs(1));
+        assert_eq!(request_count, 1);
+    }
+
+    #[test]
+    fn background_refresh_limit_has_no_fixed_sixteen_request_cap() {
+        assert_eq!(background_refresh_slot_limit(64, 12), 24);
+        assert_eq!(background_refresh_slot_limit(4, 12), 4);
+        assert_eq!(background_refresh_slot_limit(0, 1), 1);
+    }
+
+    #[test]
+    fn runtime_config_rejects_zero_network_concurrency_without_an_upper_cap() {
+        let invalid = RuntimePipelineConfig {
+            network_concurrency: 0,
+            ..RuntimePipelineConfig::default()
+        };
+        let high = RuntimePipelineConfig {
+            network_concurrency: 64,
+            ..RuntimePipelineConfig::default()
+        };
+
+        assert!(validate_pipeline_config(invalid).is_err());
+        assert!(validate_pipeline_config(high).is_ok());
+    }
+
+    #[test]
+    fn stale_revalidate_slot_reservation_never_exceeds_limit() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let contenders = 64;
+        let max_slots = 3;
+        let barrier = Arc::new(Barrier::new(contenders + 1));
+        let mut workers = Vec::with_capacity(contenders);
+        for _ in 0..contenders {
+            let counter = counter.clone();
+            let barrier = barrier.clone();
+            workers.push(thread::spawn(move || {
+                barrier.wait();
+                try_reserve_background_refresh_slot(&counter, max_slots)
+            }));
+        }
+
+        barrier.wait();
+        let reservations = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .filter(|reserved| *reserved)
+            .count();
+
+        assert_eq!(reservations, max_slots);
+        assert_eq!(counter.load(Ordering::Acquire), max_slots);
     }
 
     #[test]
@@ -5352,6 +6545,155 @@ mod tests {
 
         assert_eq!(error.stage, "processor");
         assert!(error.message.contains("decoded pixel count exceeds limit"));
+    }
+
+    #[test]
+    fn encoded_memory_hit_reapplies_encoded_and_decoded_limits() {
+        let bytes = minimal_png(4, 4);
+        let mut request = bytes_request(RuntimeLimits::default());
+        request.cache_mode = CacheMode::MemoryOnly;
+        request.cache_key = "encoded-memory-limit-final".to_string();
+        request.encoded_cache_key = "encoded-memory-limit-origin".to_string();
+        load_image("", request.clone(), Some(&bytes)).expect("cache seed should load");
+
+        request.limits.max_encoded_bytes = bytes.len().saturating_sub(1);
+        request.limits.max_decoded_pixels = 1;
+        let error = load_image("", request.clone(), None)
+            .expect_err("encoded memory hit must reapply current request limits");
+        memory_remove(&request.encoded_cache_key).unwrap();
+
+        assert!(error.message.contains("max encoded byte limit"));
+    }
+
+    #[test]
+    fn encoded_disk_hit_reapplies_encoded_and_decoded_limits() {
+        let root = temp_cache_root("encoded-disk-limits");
+        let bytes = minimal_png(4, 4);
+        let mut request = bytes_request(RuntimeLimits::default());
+        request.cache_mode = CacheMode::DiskOnly;
+        request.cache_key = "1111222233334444".to_string();
+        request.encoded_cache_key = "1111222233334445".to_string();
+        load_image(&root, request.clone(), Some(&bytes)).expect("cache seed should load");
+
+        request.cache_mode = CacheMode::CacheOnly;
+        request.limits.max_encoded_bytes = bytes.len().saturating_sub(1);
+        request.limits.max_decoded_pixels = 1;
+        let error = load_image(&root, request, None)
+            .expect_err("encoded disk hit must reapply current request limits");
+        let _ = std::fs::remove_dir_all(root);
+
+        assert!(error.message.contains("max encoded byte limit"));
+    }
+
+    #[test]
+    fn encoded_disk_hit_rejects_metadata_length_before_reading_data() {
+        let root = temp_cache_root("encoded-disk-preflight");
+        let bytes = minimal_png(4, 4);
+        let mut request = bytes_request(RuntimeLimits::default());
+        request.cache_mode = CacheMode::DiskOnly;
+        request.cache_key = "2222333344445555".to_string();
+        request.encoded_cache_key = "2222333344445556".to_string();
+        load_image(&root, request.clone(), Some(&bytes)).expect("cache seed should load");
+        let disk = DiskCache::new(&root);
+        let data_path = disk
+            .entry_paths(&request.namespace, &request.encoded_cache_key)
+            .unwrap()
+            .data;
+        std::fs::remove_file(&data_path).unwrap();
+        std::fs::create_dir(&data_path).unwrap();
+
+        request.cache_mode = CacheMode::CacheOnly;
+        request.limits.max_encoded_bytes = 1;
+        let error = load_image(&root, request, None)
+            .expect_err("metadata length should reject before opening cache data");
+        let _ = std::fs::remove_dir_all(root);
+
+        assert!(error.message.contains("max encoded byte limit"));
+    }
+
+    #[test]
+    fn encoded_memory_hit_reapplies_decoded_pixel_limit() {
+        let bytes = minimal_png(4, 4);
+        let mut request = bytes_request(RuntimeLimits::default());
+        request.cache_mode = CacheMode::MemoryOnly;
+        request.cache_key = "encoded-memory-pixels-final".to_string();
+        request.encoded_cache_key = "encoded-memory-pixels-origin".to_string();
+        load_image("", request.clone(), Some(&bytes)).expect("cache seed should load");
+
+        request.limits.max_decoded_pixels = 1;
+        let error = load_image("", request.clone(), None)
+            .expect_err("encoded memory hit must reapply decoded pixel limit");
+        memory_remove(&request.encoded_cache_key).unwrap();
+
+        assert!(error.message.contains("decoded pixel count exceeds limit"));
+    }
+
+    #[test]
+    fn processed_memory_hit_reapplies_output_limit() {
+        let mut request = bytes_request(RuntimeLimits::default());
+        request.cache_mode = CacheMode::MemoryOnly;
+        request.cache_key = "processed-memory-output-limit".to_string();
+        request.encoded_cache_key = "processed-memory-output-origin".to_string();
+        request.processors = vec!["resize(width=2,height=2,mode=exact,filter=nearest)".to_string()];
+        load_image("", request.clone(), Some(&minimal_png(4, 4)))
+            .expect("processed cache seed should load");
+
+        request.limits.max_processor_output_bytes = 1;
+        let error = load_image("", request.clone(), None)
+            .expect_err("processed memory hit must reapply output limit");
+        memory_remove(&request.cache_key).unwrap();
+        memory_remove(&request.encoded_cache_key).unwrap();
+
+        assert!(error.message.contains("processor output"));
+    }
+
+    #[test]
+    fn processed_disk_hit_reapplies_output_limit() {
+        let root = temp_cache_root("processed-disk-output-limit");
+        let mut request = bytes_request(RuntimeLimits::default());
+        request.cache_mode = CacheMode::DiskOnly;
+        request.cache_key = "5555666677778888".to_string();
+        request.encoded_cache_key = "5555666677778889".to_string();
+        request.processors = vec!["resize(width=2,height=2,mode=exact,filter=nearest)".to_string()];
+        load_image(&root, request.clone(), Some(&minimal_png(4, 4)))
+            .expect("processed cache seed should load");
+
+        request.cache_mode = CacheMode::CacheOnly;
+        request.limits.max_processor_output_bytes = 1;
+        let error = load_image(&root, request, None)
+            .expect_err("processed disk hit must reapply output limit");
+        let _ = std::fs::remove_dir_all(root);
+
+        assert!(error.message.contains("processor output"));
+    }
+
+    #[test]
+    fn file_fetch_rechecks_limit_after_stat_read_race() {
+        let root = temp_cache_root("file-read-race");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = std::path::PathBuf::from(&root).join("image.gif");
+        let initial = minimal_gif(1, 0);
+        let mut replacement = initial.clone();
+        replacement.extend(std::iter::repeat_n(0, 1024));
+        std::fs::write(&path, &initial).unwrap();
+        let sink = ReplacingFileProgressSink {
+            path: path.clone(),
+            replacement,
+        };
+        let mut request = bytes_request(RuntimeLimits {
+            max_encoded_bytes: initial.len(),
+            ..RuntimeLimits::default()
+        });
+        request.source = RuntimeSource::File {
+            path: path.to_string_lossy().into_owned(),
+        };
+
+        let error = load_image_with_cancel_and_progress("", request, None, None, Some(&sink))
+            .expect_err("file growth after stat must not bypass encoded byte limit");
+        let _ = std::fs::remove_dir_all(root);
+
+        assert_eq!(error.stage, "fetch");
+        assert!(error.message.contains("max encoded byte limit"));
     }
 
     #[test]
@@ -5843,11 +7185,10 @@ mod tests {
         let corrupt_key = "6666666666666605";
         disk.write("test", corrupt_key, &minimal_png(2, 2), Some(60_000))
             .expect("corrupt seed should write");
-        let corrupt_data = std::path::PathBuf::from(&root)
-            .join("pixa")
-            .join("test")
-            .join("66")
-            .join(format!("{corrupt_key}.bin"));
+        let corrupt_data = disk
+            .entry_paths("test", corrupt_key)
+            .expect("processed cache entry path should resolve")
+            .data;
         std::fs::write(corrupt_data, b"corrupt").expect("corrupt data should overwrite");
         let mut corrupt_request = disk_request;
         corrupt_request.cache_mode = CacheMode::CacheOnly;
@@ -6339,6 +7680,64 @@ mod tests {
         handle: thread::JoinHandle<()>,
     }
 
+    fn wait_for_inflight_participants<T>(
+        inflight: &Mutex<HashMap<String, Arc<T>>>,
+        key: &str,
+        expected_strong_count: usize,
+    ) {
+        let started = Instant::now();
+        loop {
+            let participant_count = inflight
+                .lock()
+                .expect("inflight test lock should not be poisoned")
+                .get(key)
+                .map(Arc::strong_count)
+                .unwrap_or(0);
+            if participant_count >= expected_strong_count {
+                return;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "timed out waiting for {expected_strong_count} in-flight participants; observed {participant_count}"
+            );
+            thread::yield_now();
+        }
+    }
+
+    fn finish_http_test_response(stream: &mut std::net::TcpStream) {
+        let _ = stream.shutdown(Shutdown::Write);
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+        let mut drain = [0_u8; 64];
+        while stream.read(&mut drain).is_ok_and(|length| length > 0) {}
+    }
+
+    fn read_http_test_request(stream: &mut std::net::TcpStream, stop: &AtomicBool) -> bool {
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 256];
+        loop {
+            match stream.read(&mut buffer) {
+                Ok(0) => return false,
+                Ok(length) => {
+                    request.extend_from_slice(&buffer[..length]);
+                    if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                        return true;
+                    }
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    if stop.load(Ordering::Relaxed) {
+                        return false;
+                    }
+                }
+                Err(_) => return false,
+            }
+        }
+    }
+
     impl SlowImageServer {
         fn spawn(body: Vec<u8>) -> Self {
             Self::spawn_with_delay(body, Duration::from_millis(150))
@@ -6387,7 +7786,7 @@ mod tests {
                                 let _ = stream.write_all(response.as_bytes());
                                 let _ = stream.write_all(&body);
                                 let _ = stream.flush();
-                                let _ = stream.shutdown(Shutdown::Both);
+                                finish_http_test_response(&mut stream);
                             });
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -6450,7 +7849,7 @@ mod tests {
                 }
                 let _ = stream.write_all(&response);
                 let _ = stream.flush();
-                let _ = stream.shutdown(Shutdown::Both);
+                finish_http_test_response(&mut stream);
                 String::from_utf8_lossy(&request).to_string()
             });
             Self {
@@ -6472,7 +7871,16 @@ mod tests {
     }
 
     impl FixedResponseServer {
-        fn spawn(response: String) -> Self {
+        fn spawn(response: impl Into<Vec<u8>>) -> Self {
+            let response = response.into();
+            let header_end = response
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .map(|index| index + 4)
+                .unwrap_or(response.len());
+            let closes_connection = String::from_utf8_lossy(&response[..header_end])
+                .to_ascii_lowercase()
+                .contains("\r\nconnection: close\r\n");
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             listener.set_nonblocking(true).unwrap();
             let address = listener.local_addr().unwrap();
@@ -6487,24 +7895,18 @@ mod tests {
                 {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
-                            thread_count.fetch_add(1, Ordering::Relaxed);
-                            let mut request = Vec::new();
-                            let mut buffer = [0_u8; 256];
-                            loop {
-                                match stream.read(&mut buffer) {
-                                    Ok(0) => break,
-                                    Ok(length) => {
-                                        request.extend_from_slice(&buffer[..length]);
-                                        if request.windows(4).any(|window| window == b"\r\n\r\n") {
-                                            break;
-                                        }
-                                    }
-                                    Err(_) => break,
+                            let _ = stream.set_read_timeout(Some(Duration::from_millis(50)));
+                            while !thread_stop.load(Ordering::Relaxed)
+                                && read_http_test_request(&mut stream, &thread_stop)
+                            {
+                                thread_count.fetch_add(1, Ordering::Relaxed);
+                                let _ = stream.write_all(&response);
+                                let _ = stream.flush();
+                                if closes_connection {
+                                    finish_http_test_response(&mut stream);
+                                    break;
                                 }
                             }
-                            let _ = stream.write_all(response.as_bytes());
-                            let _ = stream.flush();
-                            let _ = stream.shutdown(Shutdown::Both);
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                             thread::sleep(Duration::from_millis(5));

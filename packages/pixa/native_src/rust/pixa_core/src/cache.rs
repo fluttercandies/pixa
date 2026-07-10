@@ -1,7 +1,9 @@
 use crate::{fnv1a64, RuntimeError, RuntimeResult};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
+use std::fmt::Write as FmtWrite;
 use std::fs::{self, File};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -47,15 +49,29 @@ impl MemoryCache {
 
     /// Reads one entry and updates recency.
     pub fn get(&mut self, key: &str) -> Option<SharedBytes> {
-        self.get_with_kind(key, MemoryEntryKind::Encoded)
+        self.get_entry_with_kind(key, MemoryEntryKind::Encoded)
+            .map(|entry| entry.bytes)
     }
 
     /// Reads one processed variant entry and updates recency.
     pub fn get_processed(&mut self, key: &str) -> Option<SharedBytes> {
-        self.get_with_kind(key, MemoryEntryKind::Processed)
+        self.get_entry_with_kind(key, MemoryEntryKind::Processed)
+            .map(|entry| entry.bytes)
     }
 
-    fn get_with_kind(&mut self, key: &str, requested_kind: MemoryEntryKind) -> Option<SharedBytes> {
+    pub(crate) fn get_entry(&mut self, key: &str) -> Option<MemoryCacheValue> {
+        self.get_entry_with_kind(key, MemoryEntryKind::Encoded)
+    }
+
+    pub(crate) fn get_processed_entry(&mut self, key: &str) -> Option<MemoryCacheValue> {
+        self.get_entry_with_kind(key, MemoryEntryKind::Processed)
+    }
+
+    fn get_entry_with_kind(
+        &mut self,
+        key: &str,
+        requested_kind: MemoryEntryKind,
+    ) -> Option<MemoryCacheValue> {
         match self.entries.get(key) {
             Some(entry) if entry.is_expired() => {
                 self.remove_entry(key, true);
@@ -63,10 +79,14 @@ impl MemoryCache {
                 None
             }
             Some(entry) if entry.kind == requested_kind => {
-                let bytes = entry.bytes.clone();
+                let value = MemoryCacheValue {
+                    bytes: entry.bytes.clone(),
+                    http: entry.http.clone(),
+                    expires_ms: entry.expires_ms,
+                };
                 self.record_hit(requested_kind);
                 self.touch(key);
-                Some(bytes)
+                Some(value)
             }
             Some(_) | None => {
                 self.record_miss(requested_kind);
@@ -77,7 +97,32 @@ impl MemoryCache {
 
     /// Writes one entry.
     pub fn put(&mut self, namespace: &str, key: String, bytes: SharedBytes, ttl_ms: Option<i64>) {
-        self.put_with_kind(namespace, key, bytes, ttl_ms, MemoryEntryKind::Encoded);
+        self.put_with_kind(
+            namespace,
+            key,
+            bytes,
+            ttl_ms,
+            MemoryEntryKind::Encoded,
+            None,
+        );
+    }
+
+    pub(crate) fn put_with_http_metadata(
+        &mut self,
+        namespace: &str,
+        key: String,
+        bytes: SharedBytes,
+        ttl_ms: Option<i64>,
+        http: Option<DiskCacheHttpMetadata>,
+    ) {
+        self.put_with_kind(
+            namespace,
+            key,
+            bytes,
+            ttl_ms,
+            MemoryEntryKind::Encoded,
+            http,
+        );
     }
 
     /// Writes one processed variant entry.
@@ -88,7 +133,32 @@ impl MemoryCache {
         bytes: SharedBytes,
         ttl_ms: Option<i64>,
     ) {
-        self.put_with_kind(namespace, key, bytes, ttl_ms, MemoryEntryKind::Processed);
+        self.put_with_kind(
+            namespace,
+            key,
+            bytes,
+            ttl_ms,
+            MemoryEntryKind::Processed,
+            None,
+        );
+    }
+
+    pub(crate) fn put_processed_with_http_metadata(
+        &mut self,
+        namespace: &str,
+        key: String,
+        bytes: SharedBytes,
+        ttl_ms: Option<i64>,
+        http: Option<DiskCacheHttpMetadata>,
+    ) {
+        self.put_with_kind(
+            namespace,
+            key,
+            bytes,
+            ttl_ms,
+            MemoryEntryKind::Processed,
+            http,
+        );
     }
 
     fn put_with_kind(
@@ -98,6 +168,7 @@ impl MemoryCache {
         bytes: SharedBytes,
         ttl_ms: Option<i64>,
         kind: MemoryEntryKind,
+        http: Option<DiskCacheHttpMetadata>,
     ) {
         if bytes.len() > self.max_bytes {
             return;
@@ -113,6 +184,7 @@ impl MemoryCache {
                 expires_ms: ttl_ms.map(|ttl| now_millis().saturating_add(ttl)),
                 pins: 0,
                 kind,
+                http,
             },
         );
         self.trim();
@@ -298,6 +370,14 @@ struct MemoryEntry {
     expires_ms: Option<i64>,
     pins: usize,
     kind: MemoryEntryKind,
+    http: Option<DiskCacheHttpMetadata>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct MemoryCacheValue {
+    pub(crate) bytes: SharedBytes,
+    pub(crate) http: Option<DiskCacheHttpMetadata>,
+    pub(crate) expires_ms: Option<i64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -309,7 +389,7 @@ enum MemoryEntryKind {
 impl MemoryEntry {
     fn is_expired(&self) -> bool {
         self.expires_ms
-            .is_some_and(|expires| expires >= 0 && expires < now_millis())
+            .is_some_and(|expires| expires >= 0 && expires <= now_millis())
     }
 }
 
@@ -325,9 +405,11 @@ pub struct DiskCacheHttpMetadata {
     pub etag: Option<String>,
     pub last_modified: Option<String>,
     pub cache_control: Option<String>,
+    pub date: Option<String>,
     pub expires: Option<String>,
     pub age: Option<String>,
     pub vary: Option<String>,
+    pub vary_request_key: Option<String>,
     pub fetched_at_ms: Option<i64>,
 }
 
@@ -337,7 +419,7 @@ pub struct DiskCacheEntry {
     pub bytes: Vec<u8>,
     pub expires_ms: i64,
     pub is_expired: bool,
-    pub http: DiskCacheHttpMetadata,
+    pub http: Box<DiskCacheHttpMetadata>,
 }
 
 /// Result of a disk cache lookup.
@@ -370,6 +452,34 @@ impl DiskCache {
 
     /// Reads one cache entry even when stale, preserving parsed metadata.
     pub fn read_entry(&self, namespace: &str, key: &str) -> RuntimeResult<DiskCacheRead> {
+        self.read_entry_with_limit(namespace, key, None)
+    }
+
+    pub(crate) fn read_entry_limited(
+        &self,
+        namespace: &str,
+        key: &str,
+        max_bytes: usize,
+        stage: &'static str,
+        message: &'static str,
+    ) -> RuntimeResult<DiskCacheRead> {
+        self.read_entry_with_limit(
+            namespace,
+            key,
+            Some(DiskCacheReadLimit {
+                max_bytes,
+                stage,
+                message,
+            }),
+        )
+    }
+
+    fn read_entry_with_limit(
+        &self,
+        namespace: &str,
+        key: &str,
+        limit: Option<DiskCacheReadLimit>,
+    ) -> RuntimeResult<DiskCacheRead> {
         let paths = self.entry_paths(namespace, key)?;
         let _maintenance_guard = disk_maintenance_read()?;
         let entry_lock = disk_entry_lock(namespace, key)?;
@@ -380,29 +490,45 @@ impl DiskCache {
             return Ok(DiskCacheRead::Miss);
         }
 
-        let metadata = self.read_metadata(&paths.meta)?;
-        let bytes = fs::read(&paths.data).map_err(|error| {
-            RuntimeError::new(
-                "disk_cache",
-                true,
-                format!("failed to read disk cache: {error}"),
-            )
-        })?;
-        if !self.metadata_matches(&metadata, bytes.len(), fnv1a64(&bytes))? {
+        let Some(metadata) = self.read_metadata(&paths.meta)? else {
+            remove_entry_paths(&paths)?;
+            return Ok(DiskCacheRead::RecoveredCorruption);
+        };
+        let Some(required) = parse_required_disk_metadata(&metadata) else {
+            remove_entry_paths(&paths)?;
+            return Ok(DiskCacheRead::RecoveredCorruption);
+        };
+        if let Some(limit) = limit {
+            if required.length > limit.max_bytes {
+                return Err(RuntimeError::new(limit.stage, false, limit.message));
+            }
+        }
+        let actual_length = fs::metadata(&paths.data)
+            .map_err(|error| {
+                RuntimeError::new(
+                    "disk_cache",
+                    true,
+                    format!("failed to stat disk cache: {error}"),
+                )
+            })?
+            .len();
+        if usize::try_from(actual_length).ok() != Some(required.length) {
             remove_entry_paths(&paths)?;
             return Ok(DiskCacheRead::RecoveredCorruption);
         }
-        let expires_ms = metadata_value(&metadata, "expires_ms")
-            .and_then(|value| value.parse::<i64>().ok())
-            .unwrap_or(-1);
-        if expires_ms < 0 || expires_ms >= now_millis() {
+        let bytes = read_cache_data(&paths.data, limit)?;
+        if bytes.len() != required.length || fnv1a64(&bytes) != required.checksum {
+            remove_entry_paths(&paths)?;
+            return Ok(DiskCacheRead::RecoveredCorruption);
+        }
+        if required.expires_ms < 0 || required.expires_ms > now_millis() {
             record_disk_access(namespace, key)?;
         }
         Ok(DiskCacheRead::Hit(DiskCacheEntry {
             bytes,
-            expires_ms,
-            is_expired: expires_ms >= 0 && expires_ms < now_millis(),
-            http: parse_http_metadata(&metadata),
+            expires_ms: required.expires_ms,
+            is_expired: required.expires_ms >= 0 && required.expires_ms <= now_millis(),
+            http: Box::new(parse_http_metadata(&metadata)),
         }))
     }
 
@@ -418,22 +544,23 @@ impl DiskCache {
             return Ok(false);
         }
 
-        let metadata = self.read_metadata(&paths.meta)?;
-        let expected_length = metadata_value(&metadata, "length")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(usize::MAX);
+        let Some(metadata) = self.read_metadata(&paths.meta)? else {
+            remove_entry_paths(&paths)?;
+            return Ok(false);
+        };
+        let Some(required) = parse_required_disk_metadata(&metadata) else {
+            remove_entry_paths(&paths)?;
+            return Ok(false);
+        };
         let actual_length = fs::metadata(&paths.data)
-            .map(|metadata| metadata.len().min(usize::MAX as u64) as usize)
-            .unwrap_or(usize::MAX);
-        if expected_length != actual_length {
+            .ok()
+            .map(|metadata| metadata.len());
+        if actual_length.and_then(|length| usize::try_from(length).ok()) != Some(required.length) {
             remove_entry_paths(&paths)?;
             return Ok(false);
         }
 
-        let expires_ms = metadata_value(&metadata, "expires_ms")
-            .and_then(|value| value.parse::<i64>().ok())
-            .unwrap_or(-1);
-        let is_expired = expires_ms >= 0 && expires_ms < now_millis();
+        let is_expired = required.expires_ms >= 0 && required.expires_ms <= now_millis();
         if is_expired && !allow_stale {
             return Ok(false);
         }
@@ -486,9 +613,15 @@ impl DiskCache {
                 "http_cache_control",
                 http.cache_control.as_deref(),
             );
+            append_metadata_line(&mut metadata, "http_date", http.date.as_deref());
             append_metadata_line(&mut metadata, "http_expires", http.expires.as_deref());
             append_metadata_line(&mut metadata, "http_age", http.age.as_deref());
             append_metadata_line(&mut metadata, "http_vary", http.vary.as_deref());
+            append_metadata_line(
+                &mut metadata,
+                "http_vary_request_key",
+                http.vary_request_key.as_deref(),
+            );
             if let Some(fetched_at_ms) = http.fetched_at_ms {
                 metadata.push_str(&format!("http_fetched_at_ms={fetched_at_ms}\n"));
             }
@@ -513,7 +646,7 @@ impl DiskCache {
     /// Clears one namespace.
     pub fn clear_namespace(&self, namespace: &str) -> RuntimeResult<()> {
         let _maintenance_guard = disk_maintenance_write()?;
-        let path = self.root.join("pixa").join(sanitize_segment(namespace));
+        let path = self.root.join("pixa").join(namespace_directory(namespace));
         match fs::remove_dir_all(path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -565,13 +698,13 @@ impl DiskCache {
         Ok(())
     }
 
-    fn entry_paths(&self, namespace: &str, key: &str) -> RuntimeResult<EntryPaths> {
+    pub(crate) fn entry_paths(&self, namespace: &str, key: &str) -> RuntimeResult<EntryPaths> {
         let safe_key = sanitize_key(key)?;
         let prefix = safe_key.get(0..2).unwrap_or("xx");
         let directory = self
             .root
             .join("pixa")
-            .join(sanitize_segment(namespace))
+            .join(namespace_directory(namespace))
             .join(prefix);
         Ok(EntryPaths {
             data: directory.join(format!("{safe_key}.bin")),
@@ -579,34 +712,75 @@ impl DiskCache {
         })
     }
 
-    fn read_metadata(&self, meta_path: &Path) -> RuntimeResult<String> {
-        fs::read_to_string(meta_path).map_err(|error| {
-            RuntimeError::new(
+    fn read_metadata(&self, meta_path: &Path) -> RuntimeResult<Option<String>> {
+        match fs::read_to_string(meta_path) {
+            Ok(metadata) => Ok(Some(metadata)),
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => Ok(None),
+            Err(error) => Err(RuntimeError::new(
                 "disk_cache",
                 true,
                 format!("failed to read metadata: {error}"),
-            )
-        })
-    }
-
-    fn metadata_matches(
-        &self,
-        metadata: &str,
-        length: usize,
-        checksum: u64,
-    ) -> RuntimeResult<bool> {
-        let expected_length = metadata_value(metadata, "length")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(usize::MAX);
-        let expected_checksum = metadata_value(metadata, "checksum").unwrap_or("");
-        Ok(expected_length == length && expected_checksum == format!("{checksum:016x}"))
+            )),
+        }
     }
 }
 
+#[derive(Clone, Copy)]
+struct RequiredDiskMetadata {
+    length: usize,
+    checksum: u64,
+    created_ms: i64,
+    last_access_ms: i64,
+    expires_ms: i64,
+}
+
+#[derive(Clone, Copy)]
+struct DiskCacheReadLimit {
+    max_bytes: usize,
+    stage: &'static str,
+    message: &'static str,
+}
+
 #[derive(Debug)]
-struct EntryPaths {
-    data: PathBuf,
-    meta: PathBuf,
+pub(crate) struct EntryPaths {
+    pub(crate) data: PathBuf,
+    pub(crate) meta: PathBuf,
+}
+
+fn read_cache_data(path: &Path, limit: Option<DiskCacheReadLimit>) -> RuntimeResult<Vec<u8>> {
+    let Some(limit) = limit else {
+        return fs::read(path).map_err(|error| {
+            RuntimeError::new(
+                "disk_cache",
+                true,
+                format!("failed to read disk cache: {error}"),
+            )
+        });
+    };
+    let file = File::open(path).map_err(|error| {
+        RuntimeError::new(
+            "disk_cache",
+            true,
+            format!("failed to open disk cache: {error}"),
+        )
+    })?;
+    let read_limit = u64::try_from(limit.max_bytes)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    let mut bytes = Vec::with_capacity(limit.max_bytes.min(64 * 1024));
+    file.take(read_limit)
+        .read_to_end(&mut bytes)
+        .map_err(|error| {
+            RuntimeError::new(
+                "disk_cache",
+                true,
+                format!("failed to read disk cache: {error}"),
+            )
+        })?;
+    if bytes.len() > limit.max_bytes {
+        return Err(RuntimeError::new(limit.stage, false, limit.message));
+    }
+    Ok(bytes)
 }
 
 #[derive(Debug)]
@@ -645,29 +819,27 @@ fn collect_disk_entries(path: &Path, entries: &mut Vec<DiskEntryInfo>) -> Runtim
         if path.extension().and_then(|value| value.to_str()) != Some("bin") {
             continue;
         }
-        let meta = path.with_extension("meta");
-        let metadata = match fs::read_to_string(&meta) {
+        let paths = EntryPaths {
+            meta: path.with_extension("meta"),
+            data: path,
+        };
+        let metadata = match fs::read_to_string(&paths.meta) {
             Ok(metadata) => metadata,
             Err(_) => {
-                remove_file_if_exists(&path)?;
+                remove_entry_paths(&paths)?;
                 continue;
             }
         };
-        let length = metadata_value(&metadata, "length")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or_else(|| file_len(&path));
-        let created_ms = metadata_value(&metadata, "created_ms")
-            .and_then(|value| value.parse::<i64>().ok())
-            .unwrap_or(0);
-        let metadata_last_access_ms = metadata_value(&metadata, "last_access_ms")
-            .and_then(|value| value.parse::<i64>().ok())
-            .unwrap_or(created_ms);
-        let last_access_ms = path_disk_access_time(&path).unwrap_or(metadata_last_access_ms);
+        let Some(required) = parse_required_disk_metadata(&metadata) else {
+            remove_entry_paths(&paths)?;
+            continue;
+        };
+        let last_access_ms = path_disk_access_time(&paths.data).unwrap_or(required.last_access_ms);
         entries.push(DiskEntryInfo {
-            data: path,
-            meta,
-            length,
-            created_ms,
+            data: paths.data,
+            meta: paths.meta,
+            length: required.length,
+            created_ms: required.created_ms,
             last_access_ms,
         });
     }
@@ -681,12 +853,6 @@ fn is_temp_cache_file(path: &Path) -> bool {
         .and_then(|value| value.to_str())
         .is_some_and(|name| name.starts_with('.'));
     is_tmp && is_hidden
-}
-
-fn file_len(path: &Path) -> usize {
-    fs::metadata(path)
-        .map(|metadata| metadata.len().min(usize::MAX as u64) as usize)
-        .unwrap_or(0)
 }
 
 fn append_metadata_line(metadata: &mut String, key: &str, value: Option<&str>) {
@@ -716,9 +882,12 @@ fn parse_http_metadata(metadata: &str) -> DiskCacheHttpMetadata {
         etag: metadata_value(metadata, "http_etag").map(unescape_metadata_value),
         last_modified: metadata_value(metadata, "http_last_modified").map(unescape_metadata_value),
         cache_control: metadata_value(metadata, "http_cache_control").map(unescape_metadata_value),
+        date: metadata_value(metadata, "http_date").map(unescape_metadata_value),
         expires: metadata_value(metadata, "http_expires").map(unescape_metadata_value),
         age: metadata_value(metadata, "http_age").map(unescape_metadata_value),
         vary: metadata_value(metadata, "http_vary").map(unescape_metadata_value),
+        vary_request_key: metadata_value(metadata, "http_vary_request_key")
+            .map(unescape_metadata_value),
         fetched_at_ms: metadata_value(metadata, "http_fetched_at_ms")
             .and_then(|value| value.parse::<i64>().ok()),
     }
@@ -753,17 +922,14 @@ fn sanitize_key(key: &str) -> RuntimeResult<String> {
     Ok(key.to_ascii_lowercase())
 }
 
-fn sanitize_segment(segment: &str) -> String {
-    segment
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect()
+fn namespace_directory(namespace: &str) -> String {
+    let digest = Sha256::digest(namespace.as_bytes());
+    let mut directory = String::with_capacity(3 + digest.len() * 2);
+    directory.push_str("v2-");
+    for byte in digest {
+        write!(&mut directory, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    directory
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> RuntimeResult<()> {
@@ -916,9 +1082,33 @@ fn path_disk_access_time(path: &Path) -> Option<i64> {
 fn disk_access_key(namespace: &str, key: &str) -> RuntimeResult<String> {
     Ok(format!(
         "{}:{}",
-        sanitize_segment(namespace),
+        namespace_directory(namespace),
         sanitize_key(key)?
     ))
+}
+
+fn parse_required_disk_metadata(metadata: &str) -> Option<RequiredDiskMetadata> {
+    if metadata_value(metadata, "version")? != "1" {
+        return None;
+    }
+    let created_ms = metadata_value(metadata, "created_ms")?
+        .parse::<i64>()
+        .ok()?;
+    let last_access_ms = metadata_value(metadata, "last_access_ms")?
+        .parse::<i64>()
+        .ok()?;
+    let expires_ms = metadata_value(metadata, "expires_ms")?
+        .parse::<i64>()
+        .ok()?;
+    let length = metadata_value(metadata, "length")?.parse::<usize>().ok()?;
+    let checksum = u64::from_str_radix(metadata_value(metadata, "checksum")?, 16).ok()?;
+    Some(RequiredDiskMetadata {
+        length,
+        checksum,
+        created_ms,
+        last_access_ms,
+        expires_ms,
+    })
 }
 
 fn metadata_value<'a>(metadata: &'a str, key: &str) -> Option<&'a str> {
@@ -1086,6 +1276,111 @@ mod tests {
     }
 
     #[test]
+    fn disk_cache_namespace_identity_is_collision_and_case_safe() {
+        let root = temp_cache_root("namespace-identity");
+        let cache = DiskCache::new(&root);
+        let key = "abcdabcdabcdabcd";
+        let fixtures = [
+            ("a/b", b"slash".as_slice()),
+            ("a?b", b"question".as_slice()),
+            ("Gallery", b"upper".as_slice()),
+            ("gallery", b"lower".as_slice()),
+        ];
+        for (namespace, bytes) in fixtures {
+            cache
+                .write(namespace, key, bytes, Some(60_000))
+                .expect("namespace entry should write");
+        }
+
+        for (namespace, expected) in fixtures {
+            let actual = cache
+                .read(namespace, key)
+                .expect("namespace entry should read")
+                .expect("namespace entry should remain isolated");
+            assert_eq!(actual, expected, "namespace {namespace}");
+        }
+
+        cache
+            .clear_namespace("a/b")
+            .expect("slash namespace should clear independently");
+        assert!(cache.read("a/b", key).unwrap().is_none());
+        assert_eq!(
+            cache.read("a?b", key).unwrap().as_deref(),
+            Some(b"question".as_slice())
+        );
+        cache
+            .clear_namespace("Gallery")
+            .expect("case-distinct namespace should clear independently");
+        assert!(cache.read("Gallery", key).unwrap().is_none());
+        assert_eq!(
+            cache.read("gallery", key).unwrap().as_deref(),
+            Some(b"lower".as_slice())
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn disk_cache_recovers_invalid_utf8_metadata() {
+        let root = temp_cache_root("invalid-utf8-metadata");
+        let cache = DiskCache::new(&root);
+        let key = "abcdabcdabcdabce";
+        cache
+            .write("default", key, b"cached", Some(60_000))
+            .expect("cache entry should write");
+        let paths = cache.entry_paths("default", key).unwrap();
+        std::fs::write(&paths.meta, [0xff, 0xfe]).expect("metadata should corrupt");
+
+        assert!(matches!(
+            cache.read_entry("default", key),
+            Ok(DiskCacheRead::RecoveredCorruption)
+        ));
+        assert!(!paths.data.exists());
+        assert!(!paths.meta.exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn disk_cache_recovers_truncated_metadata_before_limit_checks() {
+        let root = temp_cache_root("truncated-metadata");
+        let cache = DiskCache::new(&root);
+        let key = "abcdabcdabcdabcf";
+        cache
+            .write("default", key, b"cached", Some(60_000))
+            .expect("cache entry should write");
+        let paths = cache.entry_paths("default", key).unwrap();
+        std::fs::write(&paths.meta, b"version=1\nlength=999999\n")
+            .expect("metadata should truncate");
+
+        assert!(matches!(
+            cache.read_entry_limited("default", key, 1, "decode", "limit"),
+            Ok(DiskCacheRead::RecoveredCorruption)
+        ));
+        assert!(!paths.data.exists());
+        assert!(!paths.meta.exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn disk_cache_trim_removes_the_full_invalid_metadata_pair() {
+        let root = temp_cache_root("trim-invalid-metadata");
+        let cache = DiskCache::new(&root);
+        let key = "abcdabcdabcdabd0";
+        cache
+            .write("default", key, b"cached", Some(60_000))
+            .expect("cache entry should write");
+        let paths = cache.entry_paths("default", key).unwrap();
+        std::fs::write(&paths.meta, [0xff, 0xfe]).expect("metadata should corrupt");
+
+        cache
+            .trim_to_bytes(usize::MAX)
+            .expect("maintenance scan should recover invalid metadata");
+
+        assert!(!paths.data.exists());
+        assert!(!paths.meta.exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn disk_cache_contains_uses_metadata_without_reading_bytes() {
         let root = temp_cache_root("disk-contains");
         let cache = DiskCache::new(&root);
@@ -1098,12 +1393,8 @@ mod tests {
             .contains("default", key, false)
             .expect("contains should succeed"));
 
-        let data_path = PathBuf::from(&root)
-            .join("pixa")
-            .join("default")
-            .join("dd")
-            .join(format!("{key}.bin"));
-        std::fs::write(data_path, b"short").expect("test should corrupt data length");
+        let paths = cache.entry_paths("default", key).unwrap();
+        std::fs::write(paths.data, b"short").expect("test should corrupt data length");
 
         assert!(!cache
             .contains("default", key, false)

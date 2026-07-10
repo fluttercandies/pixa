@@ -25,7 +25,7 @@ pub trait RuntimeCancelWaker: Send + Sync {
 }
 
 impl RuntimeCancelToken {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             inner: Arc::new(RuntimeCancelState {
                 cancelled: AtomicBool::new(false),
