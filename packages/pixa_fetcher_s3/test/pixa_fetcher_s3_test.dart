@@ -1,6 +1,5 @@
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pixa/pixa.dart';
 import 'package:pixa/pixa_plugins.dart';
 import 'package:pixa/src/redaction.dart';
 import 'package:pixa_fetcher_s3/pixa_fetcher_s3.dart';

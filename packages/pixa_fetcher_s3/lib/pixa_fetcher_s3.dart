@@ -1,5 +1,7 @@
 library;
 
+export 'package:pixa/pixa.dart';
+
 import 'package:flutter/material.dart';
 import 'package:pixa/pixa.dart';
 import 'package:pixa/pixa_plugins.dart';

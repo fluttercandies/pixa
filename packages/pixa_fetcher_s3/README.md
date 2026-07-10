@@ -10,17 +10,27 @@ redaction, retry, and runtime-only fetcher path as other sources.
 
 ```yaml
 dependencies:
+  pixa_fetcher_s3: ^1.0.0
+```
+
+```yaml
+dependencies:
   pixa: ^1.0.0
   pixa_fetcher_s3: ^1.0.0
 ```
 
 ```yaml
 dependencies:
-  pixa:
-    path: ../pixa
   pixa_fetcher_s3:
     path: ../pixa_fetcher_s3
+
+dependency_overrides:
+  pixa:
+    path: ../pixa
 ```
+
+This package re-exports `package:pixa/pixa.dart`, so apps that only use S3
+helpers can import `package:pixa_fetcher_s3/pixa_fetcher_s3.dart`.
 
 ## Register
 

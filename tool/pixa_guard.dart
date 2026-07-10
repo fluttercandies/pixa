@@ -1146,10 +1146,29 @@ void _checkPubReleaseReadiness(Directory root, List<String> failures) {
     'packages/pixa_video_frame_mjpeg',
   ];
 
-  if (!File('${root.path}/tool/pixa_pub_dependency_smoke.dart').existsSync()) {
+  final File dependencySmoke = File(
+    '${root.path}/tool/pixa_pub_dependency_smoke.dart',
+  );
+  if (!dependencySmoke.existsSync()) {
     failures.add(
       'pub release readiness: tool/pixa_pub_dependency_smoke.dart is missing',
     );
+  } else {
+    final String dependencySmokeText = dependencySmoke.readAsStringSync();
+    for (final String token in <String>[
+      'core_only',
+      's3_only',
+      'mjpeg_only',
+      's3_and_mjpeg',
+      'all_explicit',
+      'Pixa pub dependency matrix smoke passed.',
+    ]) {
+      if (!dependencySmokeText.contains(token)) {
+        failures.add(
+          'pub release readiness: dependency smoke must cover `$token`',
+        );
+      }
+    }
   }
 
   for (final String packageRoot in packageRoots) {
@@ -1197,6 +1216,26 @@ void _checkPubReleaseReadiness(Directory root, List<String> failures) {
     if (!RegExp(r'^\s*pixa:\s*\^1\.0\.0\s*$', multiLine: true).hasMatch(text)) {
       failures.add(
         'pub release readiness: $pluginPackage must depend on pixa ^1.0.0',
+      );
+    }
+  }
+
+  const Map<String, String> pluginLibraryPaths = <String, String>{
+    'packages/pixa_fetcher_s3': 'lib/pixa_fetcher_s3.dart',
+    'packages/pixa_video_frame_mjpeg': 'lib/pixa_video_frame_mjpeg.dart',
+  };
+  for (final MapEntry<String, String> entry in pluginLibraryPaths.entries) {
+    final File library = File('${root.path}/${entry.key}/${entry.value}');
+    if (!library.existsSync()) {
+      failures.add('pub release readiness: ${library.path} is missing');
+      continue;
+    }
+    if (!library.readAsStringSync().contains(
+      "export 'package:pixa/pixa.dart';",
+    )) {
+      failures.add(
+        'pub release readiness: ${entry.key} must re-export '
+        'package:pixa/pixa.dart for plugin-only consumers',
       );
     }
   }

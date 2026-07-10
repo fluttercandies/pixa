@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pixa/pixa.dart';
 import 'package:pixa/pixa_plugins.dart';
 import 'package:pixa_video_frame_mjpeg/pixa_video_frame_mjpeg.dart';
 

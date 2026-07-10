@@ -15,17 +15,27 @@ root app; the app must explicitly enable this package's runtime manifest.
 
 ```yaml
 dependencies:
+  pixa_video_frame_mjpeg: ^1.0.0
+```
+
+```yaml
+dependencies:
   pixa: ^1.0.0
   pixa_video_frame_mjpeg: ^1.0.0
 ```
 
 ```yaml
 dependencies:
-  pixa:
-    path: ../pixa
   pixa_video_frame_mjpeg:
     path: ../pixa_video_frame_mjpeg
+
+dependency_overrides:
+  pixa:
+    path: ../pixa
 ```
+
+This package re-exports `package:pixa/pixa.dart`, so apps that only use MJPEG
+helpers can import `package:pixa_video_frame_mjpeg/pixa_video_frame_mjpeg.dart`.
 
 ## Enable The Runtime Module
 
