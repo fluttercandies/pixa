@@ -21,6 +21,20 @@ import 'registry.dart';
 import 'scheduler_stats.dart';
 import 'source.dart';
 
+int _requirePositiveSchedulerBound(int value, String name) {
+  if (value <= 0) {
+    throw RangeError.range(value, 1, null, name);
+  }
+  return value;
+}
+
+int _requireNonNegativeSchedulerBound(int value, String name) {
+  if (value < 0) {
+    throw RangeError.range(value, 0, null, name);
+  }
+  return value;
+}
+
 /// runtime-backed Pixa image pipeline.
 final class PixaPipeline {
   /// Creates a pipeline.
@@ -32,10 +46,14 @@ final class PixaPipeline {
     int maxConcurrentRuntimeLoads = 6,
     int maxQueuedRuntimeLoads = 2048,
   }) : registry = registry ?? PixaRegistry(),
-       assert(maxConcurrentRuntimeLoads > 0),
-       assert(maxQueuedRuntimeLoads >= 0),
-       maxConcurrentRuntimeLoads = maxConcurrentRuntimeLoads.clamp(1, 32),
-       maxQueuedRuntimeLoads = maxQueuedRuntimeLoads.clamp(0, 65536).toInt() {
+       maxConcurrentRuntimeLoads = _requirePositiveSchedulerBound(
+         maxConcurrentRuntimeLoads,
+         'maxConcurrentRuntimeLoads',
+       ),
+       maxQueuedRuntimeLoads = _requireNonNegativeSchedulerBound(
+         maxQueuedRuntimeLoads,
+         'maxQueuedRuntimeLoads',
+       ).clamp(0, 65536).toInt() {
     routePlan = this.registry.compileRoutePlan();
   }
 
@@ -552,7 +570,7 @@ final class PixaPipeline {
         transformed = true;
       }
       if (!transformed) {
-        return _PipelineOutput(retainedRuntime);
+        return _PipelineOutput(retainedRuntime, mimeType: payload.mimeType);
       }
       _validatePluginOutput(inflight, request, payload);
       _writePluginFinalCache(

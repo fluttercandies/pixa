@@ -1298,7 +1298,8 @@ mod tests {
     use std::collections::BTreeMap;
     use std::io::{Error, ErrorKind, Read, Write};
     use std::net::{Shutdown, TcpListener};
-    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Barrier, Mutex};
     use std::thread;
     use std::time::Duration;
 
@@ -1336,6 +1337,44 @@ mod tests {
 
         let state = gate.state.lock().unwrap();
         assert_eq!(state.limit, 64);
+    }
+
+    #[test]
+    fn http_transport_exceeds_sixteen_parallel_loopback_fetches() {
+        const REQUESTS: usize = 64;
+        let server = spawn_concurrency_http_server(REQUESTS, Duration::from_millis(300));
+        let transport = Arc::new(
+            HttpTransport::new_with_proxy_policy(
+                REQUESTS,
+                ProxyPolicy::from_values("", "", "", "*"),
+            )
+            .unwrap(),
+        );
+        let start = Arc::new(Barrier::new(REQUESTS + 1));
+        let mut fetches = Vec::with_capacity(REQUESTS);
+        for _ in 0..REQUESTS {
+            let transport = transport.clone();
+            let start = start.clone();
+            let uri = server.url.clone();
+            fetches.push(thread::spawn(move || {
+                let request = test_request(uri.clone());
+                start.wait();
+                let result = transport
+                    .fetch(REQUESTS, &request, uri.parse().unwrap(), None, None, None)
+                    .expect("parallel loopback fetch should complete");
+                assert!(matches!(result, HttpFetchResult::Fetched(_)));
+            }));
+        }
+
+        start.wait();
+        for fetch in fetches {
+            fetch.join().unwrap();
+        }
+        let peak = server.join();
+        assert!(
+            peak >= 17,
+            "64 configured requests only reached {peak} concurrent origin fetches"
+        );
     }
 
     #[test]
@@ -1986,6 +2025,56 @@ mod tests {
         TestServer {
             url: format!("http://{address}"),
             address: address.to_string(),
+            handle,
+        }
+    }
+
+    struct ConcurrencyTestServer {
+        url: String,
+        handle: thread::JoinHandle<usize>,
+    }
+
+    impl ConcurrencyTestServer {
+        fn join(self) -> usize {
+            self.handle.join().unwrap()
+        }
+    }
+
+    fn spawn_concurrency_http_server(
+        request_count: usize,
+        response_delay: Duration,
+    ) -> ConcurrencyTestServer {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            let active = Arc::new(AtomicUsize::new(0));
+            let peak = Arc::new(AtomicUsize::new(0));
+            let mut handlers = Vec::with_capacity(request_count);
+            for _ in 0..request_count {
+                let (mut stream, _) = listener.accept().unwrap();
+                let active = active.clone();
+                let peak = peak.clone();
+                handlers.push(thread::spawn(move || {
+                    let mut buffer = [0_u8; 4096];
+                    let _ = stream.read(&mut buffer);
+                    let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(current, Ordering::SeqCst);
+                    thread::sleep(response_delay);
+                    stream
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                        .unwrap();
+                    stream.flush().unwrap();
+                    finish_http_test_response(&mut stream);
+                    active.fetch_sub(1, Ordering::SeqCst);
+                }));
+            }
+            for handler in handlers {
+                handler.join().unwrap();
+            }
+            peak.load(Ordering::SeqCst)
+        });
+        ConcurrencyTestServer {
+            url: format!("http://{address}"),
             handle,
         }
     }

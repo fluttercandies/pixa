@@ -1,4 +1,5 @@
 import '../cache/cache_stats.dart';
+import '../cache/decoded_cache_registry.dart';
 import '../config.dart';
 import '../display_decoder.dart';
 import '../runtime/capabilities.dart';
@@ -20,6 +21,7 @@ final class PixaDebugSnapshot {
     required this.registryRoutePlan,
     required this.cacheStats,
     required this.decodedCacheStats,
+    this.decodedRegistryEntries = 0,
     required this.schedulerStats,
   });
 
@@ -49,6 +51,9 @@ final class PixaDebugSnapshot {
 
   /// Flutter decoded image cache statistics.
   final PixaDecodedCacheStats decodedCacheStats;
+
+  /// Provider keys retained for request and namespace eviction.
+  final int decodedRegistryEntries;
 
   /// Scheduler statistics, when Pixa is configured.
   final PixaSchedulerStats? schedulerStats;
@@ -149,6 +154,7 @@ final class PixaDebugSnapshot {
         'liveImageCount': decodedCacheStats.liveImageCount,
         'byteUtilization': decodedCacheStats.byteUtilization,
       },
+      'decodedRegistryEntries': decodedRegistryEntries,
       'schedulerStats': schedulerStats?.toJson(),
     };
   }
@@ -200,6 +206,11 @@ String _formatRatio(double value) {
 final class PixaDebugInspector {
   PixaDebugInspector._();
 
+  /// Captures only completion-gate state for low-overhead frame instrumentation.
+  static PixaDisplayDecoderSnapshot displayDecoderSnapshot() {
+    return pixaDisplayDecoder.snapshot();
+  }
+
   /// Captures a point-in-time debug snapshot.
   static PixaDebugSnapshot snapshot() {
     final bool configured = Pixa.isConfigured;
@@ -224,6 +235,7 @@ final class PixaDebugInspector {
           : PixaRegistry().compileRoutePlan().toJson(),
       cacheStats: configured ? Pixa.cacheStats() : null,
       decodedCacheStats: Pixa.decodedCacheStats(),
+      decodedRegistryEntries: pixaDecodedCacheRegistry.entryCount,
       schedulerStats: configured ? Pixa.pipeline.schedulerStats() : null,
     );
   }

@@ -8,6 +8,7 @@ import 'package:pixa/pixa.dart';
 import 'package:pixa/pixa_debug.dart'
     show
         PixaDebugSnapshot,
+        PixaDebugInspector,
         PixaDisplayDecoderBackendSnapshot,
         PixaDisplayDecoderSnapshot,
         PixaRuntimeCapabilities,
@@ -531,6 +532,14 @@ void main() {
     expect(lines.single, contains('image/webp'));
     expect(lines.single, isNot(contains('alpha')));
     expect(lines.single, isNot(contains('Bearer')));
+  });
+
+  test('debug inspector exposes a lightweight display decoder snapshot', () {
+    final PixaDisplayDecoderSnapshot snapshot =
+        PixaDebugInspector.displayDecoderSnapshot();
+
+    expect(snapshot.selector, 'pixa-display-decoder-v1');
+    expect(snapshot.completionQueueDepth, greaterThanOrEqualTo(0));
   });
 
   test('Pixa decoded cache stats reflect Flutter ImageCache budgets', () {

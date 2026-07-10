@@ -320,11 +320,6 @@ final class PixaProvider extends ImageProvider<PixaProvider> {
 
   @override
   Future<PixaProvider> obtainKey(ImageConfiguration configuration) {
-    pixaDecodedCacheRegistry.track(
-      namespace: request.cacheNamespace,
-      cacheKey: request.cacheKey.value,
-      key: this,
-    );
     return SynchronousFuture<PixaProvider>(this);
   }
 
@@ -333,6 +328,11 @@ final class PixaProvider extends ImageProvider<PixaProvider> {
     PixaProvider key,
     ImageDecoderCallback decode,
   ) {
+    pixaDecodedCacheRegistry.track(
+      namespace: key.request.cacheNamespace,
+      cacheKey: key.request.cacheKey.value,
+      key: key,
+    );
     final _ProviderLoadTicket ticket = _ProviderLoadTicket();
     final ImageStreamCompleter completer = pixaDisplayDecoder.loadImage(
       request: key.request,

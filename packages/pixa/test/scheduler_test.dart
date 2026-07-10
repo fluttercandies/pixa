@@ -1191,6 +1191,26 @@ void main() {
     }
   });
 
+  test('runtime load exposes MIME detected from untransformed bytes', () async {
+    final PixaPipeline pipeline = PixaPipeline(
+      cacheRootPath: '',
+      maxConcurrentRuntimeLoads: 1,
+    );
+    final PixaRequest request = PixaRequest(
+      source: PixaSource.custom('mime-runtime-buffer', () async {
+        return _minimalGif();
+      }),
+      cachePolicy: const PixaCachePolicy.noStore(),
+    );
+
+    final PixaPipelineLoad load = await pipeline.load(request);
+    try {
+      expect(load.mimeType, 'image/gif');
+    } finally {
+      load.dispose();
+    }
+  });
+
   test('runtime retry progress reaches terminal completion', () async {
     final HttpServer server = await HttpServer.bind(
       InternetAddress.loopbackIPv4,
