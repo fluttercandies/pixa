@@ -1,6 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
+const String _rustWorkspacePath = 'packages/pixa/native_src/rust';
+const String _rustManifestPath = '$_rustWorkspacePath/Cargo.toml';
+const String _rustLockPath = '$_rustWorkspacePath/Cargo.lock';
+
 void main() {
   final Directory root = Directory.current;
   final List<String> failures = <String>[];
@@ -186,8 +190,8 @@ Iterable<File> _dependencyFiles(Directory root) sync* {
     'pubspec.yaml',
     'pubspec.lock',
     'melos.yaml',
-    'rust/Cargo.toml',
-    'rust/Cargo.lock',
+    _rustManifestPath,
+    _rustLockPath,
   ];
   for (final String path in paths) {
     final File file = File('${root.path}/$path');
@@ -197,7 +201,7 @@ Iterable<File> _dependencyFiles(Directory root) sync* {
   }
   yield* _filesUnder(root, 'packages', extensions: <String>{'.yaml'});
   yield* _filesUnder(root, 'examples', extensions: <String>{'.yaml'});
-  yield* _filesUnder(root, 'rust', extensions: <String>{'.toml'});
+  yield* _filesUnder(root, _rustWorkspacePath, extensions: <String>{'.toml'});
 }
 
 Iterable<File> _sourceFiles(Directory root) sync* {
@@ -213,7 +217,7 @@ Iterable<File> _sourceFiles(Directory root) sync* {
   );
   yield* _filesUnder(
     root,
-    'rust',
+    _rustWorkspacePath,
     extensions: <String>{'.rs', '.toml', '.lock'},
   );
 }
@@ -227,8 +231,8 @@ Iterable<File> _unsupportedFormatClaimFiles(Directory root) sync* {
     'packages/pixa/plugins/pixa_plugins.json',
     'packages/pixa/pubspec.yaml',
     'packages/pixa/README.md',
-    'rust/pixa_core/Cargo.toml',
-    'rust/pixa_core/src/image_format.rs',
+    '$_rustWorkspacePath/pixa_core/Cargo.toml',
+    '$_rustWorkspacePath/pixa_core/src/image_format.rs',
     'examples/pixa_gallery/pubspec.yaml',
   ];
   for (final String path in exactPaths) {
@@ -301,10 +305,10 @@ bool _isBrandSvgReferenceLine(File file, String line) {
 void _checkStableRasterFormatMatrix(Directory root, List<String> failures) {
   final Map<String, String> sources = <String, String>{};
   for (final String path in <String>[
-    'rust/pixa_core/src/image_format.rs',
-    'rust/pixa_core/src/metadata.rs',
-    'rust/pixa_core/src/pipeline.rs',
-    'rust/pixa_core/examples/core_benchmark.rs',
+    '$_rustWorkspacePath/pixa_core/src/image_format.rs',
+    '$_rustWorkspacePath/pixa_core/src/metadata.rs',
+    '$_rustWorkspacePath/pixa_core/src/pipeline.rs',
+    '$_rustWorkspacePath/pixa_core/examples/core_benchmark.rs',
     'tool/pixa_benchmark_report.dart',
     'packages/pixa/lib/src/image_metadata.dart',
     'packages/pixa/lib/src/image_format.dart',
@@ -327,49 +331,49 @@ void _checkStableRasterFormatMatrix(Directory root, List<String> failures) {
     _requireToken(
       sources,
       failures,
-      'rust/pixa_core/src/image_format.rs',
+      '$_rustWorkspacePath/pixa_core/src/image_format.rs',
       'RuntimeImageFormat::${format.rustVariant}',
       format,
     );
     _requireToken(
       sources,
       failures,
-      'rust/pixa_core/src/image_format.rs',
+      '$_rustWorkspacePath/pixa_core/src/image_format.rs',
       'format_id: "${format.id}"',
       format,
     );
     _requireToken(
       sources,
       failures,
-      'rust/pixa_core/src/image_format.rs',
+      '$_rustWorkspacePath/pixa_core/src/image_format.rs',
       'primary_mime_type: "${format.primaryMimeType}"',
       format,
     );
     _requireToken(
       sources,
       failures,
-      'rust/pixa_core/src/image_format.rs',
+      '$_rustWorkspacePath/pixa_core/src/image_format.rs',
       'label: "${format.label}"',
       format,
     );
     _requireToken(
       sources,
       failures,
-      'rust/pixa_core/src/metadata.rs',
+      '$_rustWorkspacePath/pixa_core/src/metadata.rs',
       'ImageMetadataFormat::${format.rustVariant}',
       format,
     );
     _requireToken(
       sources,
       failures,
-      'rust/pixa_core/src/pipeline.rs',
+      '$_rustWorkspacePath/pixa_core/src/pipeline.rs',
       'label: "${format.id}"',
       format,
     );
     _requireToken(
       sources,
       failures,
-      'rust/pixa_core/examples/core_benchmark.rs',
+      '$_rustWorkspacePath/pixa_core/examples/core_benchmark.rs',
       '("${format.id}",',
       format,
     );
@@ -447,10 +451,10 @@ void _requireToken(
 void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
   final Map<String, String> sources = <String, String>{};
   for (final String path in <String>[
-    'rust/Cargo.toml',
-    'rust/pixa_core/Cargo.toml',
-    'rust/pixa_runtime/Cargo.toml',
-    'rust/pixa_runtime/build.rs',
+    _rustManifestPath,
+    '$_rustWorkspacePath/pixa_core/Cargo.toml',
+    '$_rustWorkspacePath/pixa_runtime/Cargo.toml',
+    '$_rustWorkspacePath/pixa_runtime/build.rs',
     'packages/pixa/hook/build.dart',
     'packages/pixa/plugins/pixa_plugins.json',
     'packages/pixa/plugins/optional/pixa_jpeg_turbo_processor.json',
@@ -481,7 +485,7 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
     sources,
     failures,
     'runtime packaging discipline',
-    'rust/Cargo.toml',
+    _rustManifestPath,
     '[profile.release]',
   );
   for (final String token in <String>[
@@ -495,7 +499,7 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
       sources,
       failures,
       'runtime packaging discipline',
-      'rust/Cargo.toml',
+      _rustManifestPath,
       token,
     );
   }
@@ -504,7 +508,7 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
     sources,
     failures,
     'runtime packaging discipline',
-    'rust/pixa_runtime/Cargo.toml',
+    '$_rustWorkspacePath/pixa_runtime/Cargo.toml',
     RegExp(r'^default\s*=\s*\[\s*\]$', multiLine: true),
     'default feature set must stay empty',
   );
@@ -516,7 +520,7 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
       sources,
       failures,
       'runtime packaging discipline',
-      'rust/pixa_runtime/Cargo.toml',
+      '$_rustWorkspacePath/pixa_runtime/Cargo.toml',
       pattern,
       pattern.pattern,
     );
@@ -529,7 +533,7 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
       sources,
       failures,
       'runtime packaging discipline',
-      'rust/pixa_runtime/Cargo.toml',
+      '$_rustWorkspacePath/pixa_runtime/Cargo.toml',
       token,
     );
   }
@@ -538,20 +542,22 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
     sources,
     failures,
     'runtime packaging discipline',
-    'rust/pixa_core/Cargo.toml',
+    '$_rustWorkspacePath/pixa_core/Cargo.toml',
     'image = { version = "0.25.10", default-features = false',
   );
   _requireRawToken(
     sources,
     failures,
     'runtime packaging discipline',
-    'rust/pixa_core/Cargo.toml',
+    '$_rustWorkspacePath/pixa_core/Cargo.toml',
     'image-extras = { version = "0.1.1", default-features = false',
   );
   for (final String blocked in <String>['avif', 'exr']) {
-    if (sources['rust/pixa_core/Cargo.toml']!.toLowerCase().contains(blocked)) {
+    if (sources['$_rustWorkspacePath/pixa_core/Cargo.toml']!
+        .toLowerCase()
+        .contains(blocked)) {
       failures.add(
-        'runtime packaging discipline: rust/pixa_core/Cargo.toml must not '
+        'runtime packaging discipline: $_rustWorkspacePath/pixa_core/Cargo.toml must not '
         'enable heavy unsupported image feature `$blocked` by default',
       );
     }
@@ -591,7 +597,7 @@ void _checkRuntimePackagingDiscipline(Directory root, List<String> failures) {
       sources,
       failures,
       'runtime packaging discipline',
-      'rust/pixa_runtime/build.rs',
+      '$_rustWorkspacePath/pixa_runtime/build.rs',
       token,
     );
   }
@@ -1269,93 +1275,84 @@ void _checkPubReleaseReadiness(Directory root, List<String> failures) {
   }
 
   _checkPublishedRustSource(root, failures);
+  _checkSingleRustWorkspaceReferences(root, failures);
 }
 
 void _checkPublishedRustSource(Directory root, List<String> failures) {
-  final Directory rootRust = Directory('${root.path}/rust');
-  final Directory packageRust = Directory(
-    '${root.path}/packages/pixa/native_src/rust',
-  );
-  if (!rootRust.existsSync()) {
-    failures.add('pub release readiness: rust source root is missing');
+  final Directory packageRust = Directory('${root.path}/$_rustWorkspacePath');
+  if (!packageRust.existsSync()) {
+    failures.add('pub release readiness: $_rustWorkspacePath is missing');
     return;
   }
-  if (!packageRust.existsSync()) {
+  final Directory rootRust = Directory('${root.path}/rust');
+  if (rootRust.existsSync()) {
     failures.add(
-      'pub release readiness: packages/pixa/native_src/rust is missing',
+      'pub release readiness: root rust/ must not exist; '
+      '$_rustWorkspacePath is the single Rust source of truth',
     );
-    return;
   }
 
   final Directory packageTarget = Directory('${packageRust.path}/target');
   if (packageTarget.existsSync()) {
     failures.add(
-      'pub release readiness: packages/pixa/native_src/rust must not include '
+      'pub release readiness: $_rustWorkspacePath must not include '
       'Cargo target build output',
     );
   }
 
-  final Set<String> extensions = <String>{'.lock', '.rs', '.toml'};
-  final List<File> rootFiles = _filesUnderDirectory(
-    rootRust,
-    extensions: extensions,
-  ).toList();
-  for (final File rootFile in rootFiles) {
-    final String relative = _relativePath(rootRust, rootFile);
-    final File packageFile = File('${packageRust.path}/$relative');
-    if (!packageFile.existsSync()) {
-      failures.add(
-        'pub release readiness: native_src/rust missing copied $relative',
-      );
-      continue;
-    }
-    if (rootFile.readAsStringSync() != packageFile.readAsStringSync()) {
-      failures.add(
-        'pub release readiness: native_src/rust/$relative is not in sync '
-        'with rust/$relative',
-      );
-    }
-  }
-
-  for (final File packageFile in _filesUnderDirectory(
-    packageRust,
-    extensions: extensions,
-  )) {
-    final String relative = _relativePath(packageRust, packageFile);
-    final File rootFile = File('${rootRust.path}/$relative');
-    if (!rootFile.existsSync()) {
-      failures.add(
-        'pub release readiness: native_src/rust has extra $relative',
-      );
+  for (final String path in <String>[
+    _rustManifestPath,
+    _rustLockPath,
+    '$_rustWorkspacePath/pixa_core/Cargo.toml',
+    '$_rustWorkspacePath/pixa_core/src/lib.rs',
+    '$_rustWorkspacePath/pixa_runtime/Cargo.toml',
+    '$_rustWorkspacePath/pixa_runtime/src/lib.rs',
+  ]) {
+    if (!File('${root.path}/$path').existsSync()) {
+      failures.add('pub release readiness: $path is missing');
     }
   }
 }
 
-Iterable<File> _filesUnderDirectory(
-  Directory directory, {
-  required Set<String> extensions,
-}) sync* {
-  if (!directory.existsSync()) {
-    return;
-  }
-  for (final FileSystemEntity entity in directory.listSync(recursive: true)) {
-    if (entity is! File) {
+void _checkSingleRustWorkspaceReferences(
+  Directory root,
+  List<String> failures,
+) {
+  const List<String> files = <String>[
+    'melos.yaml',
+    'pubspec.yaml',
+    '.github/workflows/ci.yml',
+    'tool/pixa_benchmark_report.dart',
+    'tool/pixa_release_preflight.dart',
+    'tool/pixa_guard.dart',
+  ];
+  for (final String path in files) {
+    final File file = File('${root.path}/$path');
+    if (!file.existsSync()) {
       continue;
     }
-    final String path = entity.path.replaceAll(r'\', '/');
-    if (path.contains('/target/')) {
-      continue;
+    final String text = file.readAsStringSync();
+    final RegExp oldRootCargoPathPattern = RegExp(
+      r'''(^|[\s'"])rust/Cargo\.(?:toml|lock)\b''',
+      multiLine: true,
+    );
+    if (oldRootCargoPathPattern.hasMatch(text)) {
+      failures.add(
+        'pub release readiness: $path must reference $_rustWorkspacePath, '
+        'not root rust/Cargo.*',
+      );
     }
-    if (extensions.any(path.endsWith)) {
-      yield entity;
+    if ((text.contains('cargo test') ||
+            text.contains('cargo clippy') ||
+            text.contains('cargo run')) &&
+        !text.contains('--target-dir') &&
+        path != 'tool/pixa_guard.dart') {
+      failures.add(
+        'pub release readiness: $path must route Cargo build output through '
+        '--target-dir build/rust-target',
+      );
     }
   }
-}
-
-String _relativePath(Directory base, File file) {
-  final String basePath = base.absolute.path.replaceAll(r'\', '/');
-  final String filePath = file.absolute.path.replaceAll(r'\', '/');
-  return filePath.substring(basePath.length + 1);
 }
 
 void _checkExplicitPluginVersionConstraints(
@@ -1781,13 +1778,13 @@ List<Object?> _manifestModules(
 void _checkUnsafeBoundary(Directory root, List<String> failures) {
   for (final File file in _filesUnder(
     root,
-    'rust',
+    _rustWorkspacePath,
     extensions: <String>{'.rs'},
   )) {
     final String path = _relative(root, file);
     final bool allowed =
-        path.startsWith('rust/pixa_runtime/') ||
-        path.startsWith('rust/pixa_runtime/examples/');
+        path.startsWith('$_rustWorkspacePath/pixa_runtime/') ||
+        path.startsWith('$_rustWorkspacePath/pixa_runtime/examples/');
     if (allowed) {
       continue;
     }
@@ -1806,7 +1803,7 @@ void _checkRustResolvedLicenses(Directory root, List<String> failures) {
   final ProcessResult result = Process.runSync('cargo', <String>[
     'metadata',
     '--manifest-path',
-    'rust/Cargo.toml',
+    _rustManifestPath,
     '--format-version',
     '1',
     '--locked',
@@ -1924,15 +1921,15 @@ Iterable<String> _exportPaths(String source) sync* {
 }
 
 void _checkRustDependencyAdvisories(Directory root, List<String> failures) {
-  final File lockFile = File('${root.path}/rust/Cargo.lock');
+  final File lockFile = File('${root.path}/$_rustLockPath');
   if (!lockFile.existsSync()) {
-    failures.add('rust dependency audit: rust/Cargo.lock is missing');
+    failures.add('rust dependency audit: $_rustLockPath is missing');
     return;
   }
   final List<String> args = <String>[
     'audit',
     '-f',
-    'rust/Cargo.lock',
+    _rustLockPath,
     '-D',
     'warnings',
   ];
@@ -1961,7 +1958,7 @@ bool _isMissingCargoAudit(ProcessResult result) {
 }
 
 ProcessResult _runCargoAuditExecutable(Directory root) {
-  final List<String> args = <String>['-f', 'rust/Cargo.lock', '-D', 'warnings'];
+  final List<String> args = <String>['-f', _rustLockPath, '-D', 'warnings'];
   final ProcessResult pathResult = Process.runSync(
     'cargo-audit',
     args,

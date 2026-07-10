@@ -25,19 +25,19 @@ scripts:
     run: melos exec --scope=pixa --concurrency=1 -- "flutter test test/pixa_image_golden_test.dart"
     description: Run Pixa golden tests.
   test:rust:
-    run: cargo test --manifest-path rust/Cargo.toml --all
+    run: cargo test --manifest-path packages/pixa/native_src/rust/Cargo.toml --target-dir build/rust-target --all
     description: Run Rust tests.
   rust:fmt:
-    run: cargo fmt --manifest-path rust/Cargo.toml --all --check
+    run: cargo fmt --manifest-path packages/pixa/native_src/rust/Cargo.toml --all --check
     description: Check Rust formatting.
   rust:clippy:
-    run: cargo clippy --manifest-path rust/Cargo.toml --all-targets --all-features -- -D warnings
+    run: cargo clippy --manifest-path packages/pixa/native_src/rust/Cargo.toml --target-dir build/rust-target --all-targets --all-features -- -D warnings
     description: Run Rust clippy with warnings denied.
   audit:rust:
-    run: cargo audit -f rust/Cargo.lock -D warnings
+    run: cargo audit -f packages/pixa/native_src/rust/Cargo.lock -D warnings
     description: Audit Rust dependencies with RustSec advisories.
   benchmark:rust:
-    run: cargo run --release --manifest-path rust/Cargo.toml -p pixa_core --example core_benchmark && cargo run --release --manifest-path rust/Cargo.toml -p pixa_runtime --example runtime_benchmark
+    run: cargo run --release --manifest-path packages/pixa/native_src/rust/Cargo.toml --target-dir build/rust-target -p pixa_core --example core_benchmark && cargo run --release --manifest-path packages/pixa/native_src/rust/Cargo.toml --target-dir build/rust-target -p pixa_runtime --example runtime_benchmark
     description: Run Rust runtime hot-path benchmarks.
   benchmark:dart:
     run: melos exec --scope=pixa --concurrency=1 -- "flutter test benchmark/predictive_prefetch_benchmark_test.dart"

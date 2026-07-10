@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 
 mod build_json;
@@ -12,7 +12,6 @@ use build_render::render_generated_source;
 
 const ABI_VERSION: i64 = 1;
 const PACKAGE_MANIFEST_RELATIVE_PATH: &str = "../../../plugins/pixa_plugins.json";
-const WORKSPACE_MANIFEST_RELATIVE_PATH: &str = "../../packages/pixa/plugins/pixa_plugins.json";
 const JPEG_TURBO_PROCESSOR_ENTRYPOINT: &str = "pixa_jpeg_turbo_processor_plugin_init";
 const WEBP_PROCESSOR_ENTRYPOINT: &str = "pixa_webp_processor_plugin_init";
 const MJPEG_VIDEO_FRAME_ENTRYPOINT: &str = "pixa_mjpeg_video_frame_plugin_init";
@@ -93,26 +92,20 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn plugin_plan_path(manifest_dir: &PathBuf) -> Result<PathBuf, String> {
+fn plugin_plan_path(manifest_dir: &Path) -> Result<PathBuf, String> {
     if let Some(value) = env::var_os("PIXA_PLUGIN_PLAN").filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(value));
     }
 
-    let candidates = [
-        manifest_dir.join(PACKAGE_MANIFEST_RELATIVE_PATH),
-        manifest_dir.join(WORKSPACE_MANIFEST_RELATIVE_PATH),
-    ];
-    for candidate in candidates {
-        if candidate.exists() {
-            return Ok(candidate);
-        }
+    let candidate = manifest_dir.join(PACKAGE_MANIFEST_RELATIVE_PATH);
+    if candidate.exists() {
+        return Ok(candidate);
     }
 
     Err(format!(
-        "failed to find default Pixa plugin manifest from {}. Checked {} and {}",
+        "failed to find default Pixa plugin manifest from {}. Checked {}",
         manifest_dir.display(),
-        PACKAGE_MANIFEST_RELATIVE_PATH,
-        WORKSPACE_MANIFEST_RELATIVE_PATH
+        PACKAGE_MANIFEST_RELATIVE_PATH
     ))
 }
 
