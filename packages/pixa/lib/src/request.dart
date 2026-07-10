@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
@@ -73,7 +75,7 @@ final class PixaPluginExecutionPolicy {
     this.dart = false,
     this.platform = false,
     this.external = false,
-  }) : assert(runtime || dart || platform || external);
+  });
 
   /// Uses only runtime modules on the hot path.
   const PixaPluginExecutionPolicy.runtimeOnly()
@@ -252,7 +254,7 @@ final class PixaRetryPolicy {
     this.maxAttempts = 1,
     this.delay = const Duration(milliseconds: 250),
     this.jitter = Duration.zero,
-  }) : assert(maxAttempts > 0);
+  });
 
   /// No retry.
   const PixaRetryPolicy.none() : this();
@@ -297,9 +299,7 @@ final class PixaRetryPolicy {
 @immutable
 final class PixaTargetSize {
   /// Creates a target size.
-  const PixaTargetSize({this.width, this.height})
-    : assert(width == null || width > 0),
-      assert(height == null || height > 0);
+  const PixaTargetSize({this.width, this.height});
 
   /// Creates a target size from a Flutter size.
   factory PixaTargetSize.fromSize(Size size, double devicePixelRatio) {
@@ -500,6 +500,8 @@ final class PixaRequest {
       targetSize: targetSize,
       retryPolicy: retryPolicy,
       limits: limits,
+      pluginExecutionPolicy: pluginExecutionPolicy,
+      cachePolicy: cachePolicy,
     );
     return PixaRequest._(
       source: source,
@@ -908,9 +910,11 @@ final class PixaRequest {
 
   /// Stable decoder option material that affects decoded output identity.
   ///
-  /// Values should be deterministic scalar/list/map data. These options do not
-  /// affect the original encoded byte cache key, so decode variants can still
-  /// share the same source fetch and encoded cache entry.
+  /// Values must be deterministic null/bool/int/finite-double/String,
+  /// Uint8List, List, or Map data without identity cycles. Common typed lists
+  /// remain typed after the immutable snapshot. These options do not affect the
+  /// original encoded byte cache key, so decode variants can still share the
+  /// same source fetch and encoded cache entry.
   final Map<String, Object?> decoderOptions;
 
   /// Which plugin execution layers this request explicitly permits.
@@ -1065,23 +1069,20 @@ Map<String, Object?> _snapshotObjectMap(
   Map<String, Object?> values, {
   required String argumentName,
 }) {
-  final Map<String, Object?> snapshot = <String, Object?>{};
-  int index = 0;
-  for (final MapEntry<String, Object?> entry in values.entries) {
-    snapshot[entry.key] = _snapshotSupportedValue(
-      entry.value,
-      argumentName: argumentName,
-      path: '$argumentName.value[$index]',
-    );
-    index += 1;
-  }
-  return Map<String, Object?>.unmodifiable(snapshot);
+  return _snapshotSupportedValue(
+        values,
+        argumentName: argumentName,
+        path: argumentName,
+        activeCollections: HashSet<Object>.identity(),
+      )
+      as Map<String, Object?>;
 }
 
 Object? _snapshotSupportedValue(
   Object? value, {
   required String argumentName,
   required String path,
+  required Set<Object> activeCollections,
 }) {
   if (value == null || value is bool || value is int || value is String) {
     return value;
@@ -1098,32 +1099,20 @@ Object? _snapshotSupportedValue(
     return Uint8List.fromList(value).asUnmodifiableView();
   }
   if (value is List) {
-    return List<Object?>.unmodifiable(<Object?>[
-      for (int index = 0; index < value.length; index++)
-        _snapshotSupportedValue(
-          value[index],
-          argumentName: argumentName,
-          path: '$path[$index]',
-        ),
-    ]);
+    return _snapshotList(
+      value,
+      argumentName: argumentName,
+      path: path,
+      activeCollections: activeCollections,
+    );
   }
   if (value is Map) {
-    final Map<Object?, Object?> snapshot = <Object?, Object?>{};
-    int index = 0;
-    for (final MapEntry<dynamic, dynamic> entry in value.entries) {
-      final Object? key = _snapshotSupportedValue(
-        entry.key,
-        argumentName: argumentName,
-        path: '$path.key[$index]',
-      );
-      snapshot[key] = _snapshotSupportedValue(
-        entry.value,
-        argumentName: argumentName,
-        path: '$path.value[$index]',
-      );
-      index += 1;
-    }
-    return Map<Object?, Object?>.unmodifiable(snapshot);
+    return _snapshotMap(
+      value,
+      argumentName: argumentName,
+      path: path,
+      activeCollections: activeCollections,
+    );
   }
   throw ArgumentError(
     '$argumentName contains unsupported value type ${value.runtimeType} at '
@@ -1132,21 +1121,168 @@ Object? _snapshotSupportedValue(
   );
 }
 
+Object _snapshotList(
+  List<dynamic> value, {
+  required String argumentName,
+  required String path,
+  required Set<Object> activeCollections,
+}) {
+  _enterSnapshotCollection(value, path, activeCollections);
+  try {
+    if (value is List<int>) {
+      return List<int>.unmodifiable(value);
+    }
+    if (value is List<double>) {
+      return List<double>.unmodifiable(<double>[
+        for (int index = 0; index < value.length; index++)
+          _snapshotSupportedValue(
+                value[index],
+                argumentName: argumentName,
+                path: '$path[$index]',
+                activeCollections: activeCollections,
+              )
+              as double,
+      ]);
+    }
+    if (value is List<String>) {
+      return List<String>.unmodifiable(value);
+    }
+    if (value is List<bool>) {
+      return List<bool>.unmodifiable(value);
+    }
+    if (value is List<Uint8List>) {
+      return List<Uint8List>.unmodifiable(<Uint8List>[
+        for (int index = 0; index < value.length; index++)
+          _snapshotSupportedValue(
+                value[index],
+                argumentName: argumentName,
+                path: '$path[$index]',
+                activeCollections: activeCollections,
+              )
+              as Uint8List,
+      ]);
+    }
+    if (value is List<Map<String, Object?>>) {
+      return List<Map<String, Object?>>.unmodifiable(<Map<String, Object?>>[
+        for (int index = 0; index < value.length; index++)
+          _snapshotSupportedValue(
+                value[index],
+                argumentName: argumentName,
+                path: '$path[$index]',
+                activeCollections: activeCollections,
+              )
+              as Map<String, Object?>,
+      ]);
+    }
+    return List<Object?>.unmodifiable(<Object?>[
+      for (int index = 0; index < value.length; index++)
+        _snapshotSupportedValue(
+          value[index],
+          argumentName: argumentName,
+          path: '$path[$index]',
+          activeCollections: activeCollections,
+        ),
+    ]);
+  } finally {
+    activeCollections.remove(value);
+  }
+}
+
+Object _snapshotMap(
+  Map<dynamic, dynamic> value, {
+  required String argumentName,
+  required String path,
+  required Set<Object> activeCollections,
+}) {
+  _enterSnapshotCollection(value, path, activeCollections);
+  try {
+    if (value is Map<String, String>) {
+      return Map<String, String>.unmodifiable(value);
+    }
+    if (value is Map<String, int>) {
+      return Map<String, int>.unmodifiable(value);
+    }
+    if (value is Map<String, double>) {
+      return Map<String, double>.unmodifiable(<String, double>{
+        for (final MapEntry<String, double> entry in value.entries)
+          entry.key:
+              _snapshotSupportedValue(
+                    entry.value,
+                    argumentName: argumentName,
+                    path: '$path.${entry.key}',
+                    activeCollections: activeCollections,
+                  )
+                  as double,
+      });
+    }
+    if (value is Map<String, bool>) {
+      return Map<String, bool>.unmodifiable(value);
+    }
+    if (value is Map<String, Object?>) {
+      final Map<String, Object?> snapshot = <String, Object?>{};
+      for (final MapEntry<String, Object?> entry in value.entries) {
+        snapshot[entry.key] = _snapshotSupportedValue(
+          entry.value,
+          argumentName: argumentName,
+          path: '$path.${entry.key}',
+          activeCollections: activeCollections,
+        );
+      }
+      return Map<String, Object?>.unmodifiable(snapshot);
+    }
+    final Map<Object?, Object?> snapshot = <Object?, Object?>{};
+    int index = 0;
+    for (final MapEntry<dynamic, dynamic> entry in value.entries) {
+      final Object? key = _snapshotSupportedValue(
+        entry.key,
+        argumentName: argumentName,
+        path: '$path.key[$index]',
+        activeCollections: activeCollections,
+      );
+      snapshot[key] = _snapshotSupportedValue(
+        entry.value,
+        argumentName: argumentName,
+        path: '$path.value[$index]',
+        activeCollections: activeCollections,
+      );
+      index += 1;
+    }
+    return Map<Object?, Object?>.unmodifiable(snapshot);
+  } finally {
+    activeCollections.remove(value);
+  }
+}
+
+void _enterSnapshotCollection(
+  Object value,
+  String path,
+  Set<Object> activeCollections,
+) {
+  if (!activeCollections.add(value)) {
+    throw ArgumentError('Request data contains an identity cycle at $path.');
+  }
+}
+
 void _validateRuntimeRequestValues({
   required double scale,
   required PixaTargetSize? targetSize,
   required PixaRetryPolicy retryPolicy,
   required PixaRequestLimits limits,
+  required PixaPluginExecutionPolicy pluginExecutionPolicy,
+  required PixaCachePolicy cachePolicy,
 }) {
   if (!scale.isFinite || scale <= 0) {
     throw ArgumentError.value(scale, 'scale', 'must be finite and positive');
   }
   _validateDimension(targetSize?.width, 'targetSize.width');
   _validateDimension(targetSize?.height, 'targetSize.height');
-  _validatePositivePortableUsize(
-    retryPolicy.maxAttempts,
-    'retryPolicy.maxAttempts',
-  );
+  if (retryPolicy.maxAttempts < 1 || retryPolicy.maxAttempts > 16) {
+    throw ArgumentError.value(
+      retryPolicy.maxAttempts,
+      'retryPolicy.maxAttempts',
+      'must be between 1 and the runtime maximum of 16',
+    );
+  }
   if (retryPolicy.delay.isNegative) {
     throw ArgumentError.value(
       retryPolicy.delay,
@@ -1158,6 +1294,23 @@ void _validateRuntimeRequestValues({
     throw ArgumentError.value(
       retryPolicy.jitter,
       'retryPolicy.jitter',
+      'must not be negative',
+    );
+  }
+  if (!pluginExecutionPolicy.runtime &&
+      !pluginExecutionPolicy.dart &&
+      !pluginExecutionPolicy.platform &&
+      !pluginExecutionPolicy.external) {
+    throw ArgumentError.value(
+      pluginExecutionPolicy,
+      'pluginExecutionPolicy',
+      'must enable at least one execution layer',
+    );
+  }
+  if (cachePolicy.maxAge?.isNegative ?? false) {
+    throw ArgumentError.value(
+      cachePolicy.maxAge,
+      'cachePolicy.maxAge',
       'must not be negative',
     );
   }

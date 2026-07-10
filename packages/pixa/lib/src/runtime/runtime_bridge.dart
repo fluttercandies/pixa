@@ -3,6 +3,7 @@ import 'dart:ffi';
 import 'package:ffi/ffi.dart' as allocator;
 import 'package:flutter/foundation.dart';
 
+import 'runtime_abi_validation.dart';
 import 'runtime_plugin_stats.dart';
 
 /// Thin runtime bridge for Pixa hot-path primitives.
@@ -132,6 +133,9 @@ final class PixaRuntimeBridge {
     required int diskCacheBytes,
     required int networkConcurrency,
   }) {
+    validatePixaPortableUintPtr(memoryCacheBytes, 'memoryCacheBytes');
+    validatePixaPortableUintPtr(diskCacheBytes, 'diskCacheBytes');
+    validatePixaNetworkConcurrency(networkConcurrency, 'networkConcurrency');
     return _configure(memoryCacheBytes, diskCacheBytes, networkConcurrency) ==
         0;
   }
@@ -153,6 +157,7 @@ int _withRuntimeBytes(
   Uint8List bytes,
   int Function(Pointer<Uint8>, int) operation,
 ) {
+  _validateRuntimeBytes(bytes);
   if (bytes.isEmpty) {
     return operation(nullptr.cast<Uint8>(), 0);
   }
@@ -170,6 +175,7 @@ T _withRuntimeBytesAndHashPair<T>(
   Uint8List bytes,
   T Function(Pointer<Uint8>, int, Pointer<Uint64>, Pointer<Uint64>) operation,
 ) {
+  _validateRuntimeBytes(bytes);
   final Pointer<Uint64> primary = allocator.calloc<Uint64>();
   final Pointer<Uint64> secondary = allocator.calloc<Uint64>();
   try {
@@ -193,6 +199,7 @@ T _withRuntimeBytesAndOut<T>(
   Uint8List bytes,
   T Function(Pointer<Uint8>, int, Pointer<Uint16>) operation,
 ) {
+  _validateRuntimeBytes(bytes);
   final Pointer<Uint16> out = allocator.calloc<Uint16>();
   try {
     if (bytes.isEmpty) {
@@ -214,6 +221,7 @@ Uint8List _withRuntimeBytesAndBuffer(
   Uint8List bytes,
   Pointer<Uint8> Function(Pointer<Uint8>, int, Pointer<UintPtr>) operation,
 ) {
+  _validateRuntimeBytes(bytes);
   final Pointer<UintPtr> outLen = allocator.calloc<UintPtr>();
   try {
     if (bytes.isEmpty) {
@@ -235,6 +243,10 @@ Uint8List _withRuntimeBytesAndBuffer(
   } finally {
     allocator.calloc.free(outLen);
   }
+}
+
+void _validateRuntimeBytes(Uint8List bytes) {
+  validatePixaPortableUintPtr(bytes.length, 'bytes.length');
 }
 
 Uint8List _takeRuntimeBuffer(Pointer<Uint8> ptr, int length) {

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart' as allocator;
 
 import '../cache_key.dart';
+import 'runtime_abi_validation.dart';
 import 'runtime_loader.dart';
 
 /// Thin Dart wrapper around the Rust-backed encoded disk cache.
@@ -90,6 +91,7 @@ final class PixaRuntimeDiskCache {
     required Uint8List bytes,
     Duration? ttl,
   }) {
+    validatePixaOptionalTtl(ttl, 'ttl');
     return _withUtf8(rootPath, (Pointer<Uint8> rootPtr, int rootLen) {
       return _withUtf8(namespace, (
         Pointer<Uint8> namespacePtr,
@@ -169,6 +171,7 @@ T _withUtf8<T>(String value, T Function(Pointer<Uint8>, int) operation) {
 }
 
 T _withBytes<T>(Uint8List bytes, T Function(Pointer<Uint8>, int) operation) {
+  validatePixaPortableUintPtr(bytes.length, 'bytes.length');
   if (bytes.isEmpty) {
     return operation(nullptr.cast<Uint8>(), 0);
   }

@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -13,11 +14,6 @@ final class PixaCacheKey {
     Iterable<Object?> parts, {
     String? debugLabel,
   }) {
-    if (parts is! List) {
-      throw ArgumentError(
-        'Cache-key parts must be a List so their order is deterministic.',
-      );
-    }
     final Uint8List material = _CanonicalCacheKeyEncoder.encode(parts);
     final PixaRuntimeHashPair hashes = PixaRuntimeBridge.cacheKeyHashPair(
       material,
@@ -63,11 +59,16 @@ final class PixaCacheKey {
 final class _CanonicalCacheKeyEncoder {
   _CanonicalCacheKeyEncoder._();
 
-  static Uint8List encode(List<dynamic> parts) {
-    return _encodeValue(parts, 'parts');
+  static Uint8List encode(Iterable<Object?> parts) {
+    final List<Object?> snapshot = List<Object?>.unmodifiable(parts);
+    return _encodeValue(snapshot, 'parts', HashSet<Object>.identity());
   }
 
-  static Uint8List _encodeValue(Object? value, String path) {
+  static Uint8List _encodeValue(
+    Object? value,
+    String path,
+    Set<Object> activeCollections,
+  ) {
     if (value == null) {
       return _frame(0x00, Uint8List(0));
     }
@@ -91,37 +92,65 @@ final class _CanonicalCacheKeyEncoder {
       return _frame(0x05, value);
     }
     if (value is List) {
-      final BytesBuilder payload = BytesBuilder(copy: false);
-      for (int index = 0; index < value.length; index++) {
-        payload.add(_encodeValue(value[index], '$path[$index]'));
+      _enterCollection(value, path, activeCollections);
+      try {
+        final BytesBuilder payload = BytesBuilder(copy: false);
+        for (int index = 0; index < value.length; index++) {
+          payload.add(
+            _encodeValue(value[index], '$path[$index]', activeCollections),
+          );
+        }
+        return _frame(0x06, payload.takeBytes());
+      } finally {
+        activeCollections.remove(value);
       }
-      return _frame(0x06, payload.takeBytes());
     }
     if (value is Map) {
-      final List<_CanonicalMapEntry> entries = <_CanonicalMapEntry>[];
-      int index = 0;
-      for (final MapEntry<dynamic, dynamic> entry in value.entries) {
-        entries.add(
-          _CanonicalMapEntry(
-            _encodeValue(entry.key, '$path.key[$index]'),
-            _encodeValue(entry.value, '$path.value[$index]'),
-          ),
-        );
-        index += 1;
+      _enterCollection(value, path, activeCollections);
+      try {
+        final List<_CanonicalMapEntry> entries = <_CanonicalMapEntry>[];
+        int index = 0;
+        for (final MapEntry<dynamic, dynamic> entry in value.entries) {
+          entries.add(
+            _CanonicalMapEntry(
+              _encodeValue(entry.key, '$path.key[$index]', activeCollections),
+              _encodeValue(
+                entry.value,
+                '$path.value[$index]',
+                activeCollections,
+              ),
+            ),
+          );
+          index += 1;
+        }
+        entries.sort(_compareEntries);
+        final BytesBuilder payload = BytesBuilder(copy: false);
+        for (final _CanonicalMapEntry entry in entries) {
+          payload
+            ..add(entry.key)
+            ..add(entry.value);
+        }
+        return _frame(0x07, payload.takeBytes());
+      } finally {
+        activeCollections.remove(value);
       }
-      entries.sort(_compareEntries);
-      final BytesBuilder payload = BytesBuilder(copy: false);
-      for (final _CanonicalMapEntry entry in entries) {
-        payload
-          ..add(entry.key)
-          ..add(entry.value);
-      }
-      return _frame(0x07, payload.takeBytes());
     }
     throw ArgumentError(
       'Unsupported cache-key value type ${value.runtimeType} at $path; '
       'use null, bool, int, finite double, String, Uint8List, List, or Map.',
     );
+  }
+
+  static void _enterCollection(
+    Object value,
+    String path,
+    Set<Object> activeCollections,
+  ) {
+    if (!activeCollections.add(value)) {
+      throw ArgumentError(
+        'Cache-key material contains an identity cycle at $path.',
+      );
+    }
   }
 
   static Uint8List _frame(int tag, Uint8List payload) {

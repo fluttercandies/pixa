@@ -385,6 +385,29 @@ void main() {
       ),
     );
   });
+
+  test('runtime RGBA decode rejects non-portable output byte limits', () {
+    final Uint8List bytes = _minimalGif();
+    final PixaRuntimeLoadResult load = const PixaRuntimeLoader(rootPath: '')
+        .load(
+          PixaRequest(
+            source: PixaSource.bytes(bytes, id: 'runtime-rgba-portable-limit'),
+            cachePolicy: PixaCachePolicy.noStore(),
+          ),
+          inlineBytes: bytes,
+        );
+    addTearDown(load.dispose);
+    PixaRuntimeRgbaImage? rgba;
+    addTearDown(() => rgba?.dispose());
+
+    expect(
+      () => rgba = load.buffer.decodeRgba(
+        maxDecodedPixels: 1,
+        maxOutputBytes: 0x100000000,
+      ),
+      throwsRangeError,
+    );
+  });
 }
 
 const Map<PixaImageMetadataFormat, String> _primaryMimeTypes =

@@ -10,6 +10,7 @@ import 'cache_warmup.dart';
 import 'config.dart';
 import 'image_analysis.dart';
 import 'runtime/capabilities.dart';
+import 'runtime/runtime_abi_validation.dart';
 import 'runtime/runtime_bridge.dart';
 import 'observer.dart';
 import 'pipeline.dart';
@@ -282,9 +283,11 @@ final class Pixa {
         'memoryCacheBytes',
       );
     }
+    validatePixaPortableUintPtr(config.memoryCacheBytes, 'memoryCacheBytes');
     if (config.diskCacheBytes < 0) {
       throw RangeError.range(config.diskCacheBytes, 0, null, 'diskCacheBytes');
     }
+    validatePixaPortableUintPtr(config.diskCacheBytes, 'diskCacheBytes');
     if (config.networkConcurrency <= 0) {
       throw RangeError.range(
         config.networkConcurrency,
@@ -293,6 +296,10 @@ final class Pixa {
         'networkConcurrency',
       );
     }
+    validatePixaNetworkConcurrency(
+      config.networkConcurrency,
+      'networkConcurrency',
+    );
     if (config.decodeConcurrency <= 0) {
       throw RangeError.range(
         config.decodeConcurrency,

@@ -159,6 +159,10 @@ final class PixaNetworkSource extends PixaSource {
     'port': uri.hasPort ? uri.port : null,
     'path': uri.pathSegments,
     'query': PixaRedactor.redactedQueryMaterial(uri),
+    'private': PixaRedactor.privateNetworkPartitionMaterial(
+      uri,
+      const <String, String>{},
+    ),
   };
 
   @override
@@ -375,9 +379,13 @@ Object _runtimeLocatorKeyMaterial(String locator) {
     return <String, Object?>{
       'scheme': uri.scheme.toLowerCase(),
       'host': uri.host.toLowerCase(),
+      'port': uri.hasPort ? uri.port : null,
       'path': uri.pathSegments,
       'query': PixaRedactor.redactedQueryMaterial(uri),
-      'privateQuery': PixaRedactor.privateUriQueryPartitionMaterial(uri),
+      'private': PixaRedactor.privateNetworkPartitionMaterial(
+        uri,
+        const <String, String>{},
+      ),
     };
   }
   return PixaRedactor.redactText(locator);

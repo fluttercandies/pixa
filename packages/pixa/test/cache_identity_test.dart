@@ -54,6 +54,21 @@ void main() {
     expect(first, second);
   });
 
+  test('cache key snapshots ordered non-List iterables', () {
+    Iterable<Object?> parts() sync* {
+      yield 'network';
+      yield <String, Object?>{'width': 20};
+    }
+
+    expect(
+      PixaCacheKey.fromParts(parts()),
+      PixaCacheKey.fromParts(<Object?>[
+        'network',
+        <String, Object?>{'width': 20},
+      ]),
+    );
+  });
+
   test('cache key rejects unsupported nondeterministic values', () {
     expect(
       () => PixaCacheKey.fromParts(<Object?>[
@@ -134,6 +149,90 @@ void main() {
 
     expect(first.cacheKey, sameBundle.cacheKey);
     expect(first.cacheKey, isNot(second.cacheKey));
+  });
+
+  test('fallback network credentials cryptographically partition identity', () {
+    final PixaRequest first = PixaRequest(
+      source: PixaSource.bytes(Uint8List(1), id: 'primary'),
+      sources: <PixaSource>[
+        PixaSource.network(
+          Uri.parse('https://alice:alpha@fallback.test/a.png?token=one'),
+        ),
+      ],
+    );
+    final PixaRequest second = PixaRequest(
+      source: PixaSource.bytes(Uint8List(1), id: 'primary'),
+      sources: <PixaSource>[
+        PixaSource.network(
+          Uri.parse('https://alice:bravo@fallback.test/a.png?token=two'),
+        ),
+      ],
+    );
+
+    expect(first.cacheKey, isNot(second.cacheKey));
+    expect(first.sources.single.safeLabel, isNot(contains('alice')));
+    expect(first.sources.single.safeLabel, isNot(contains('alpha')));
+    expect(
+      first.sources.single.cacheMaterial.toString(),
+      isNot(contains('one')),
+    );
+  });
+
+  test(
+    'runtime plugin URI identity covers authority and secret partitions',
+    () {
+      PixaRequest request(String locator) => PixaRequest(
+        source: PixaSource.runtimePlugin(
+          sourceKind: 'signed',
+          locator: locator,
+        ),
+      );
+
+      final PixaRequest baseline = request(
+        'https://alice:alpha@media.test:8443/a.png?v=1&token=one',
+      );
+      final List<PixaRequest> variants = <PixaRequest>[
+        request('http://alice:alpha@media.test:8443/a.png?v=1&token=one'),
+        request('https://alice:alpha@other.test:8443/a.png?v=1&token=one'),
+        request('https://alice:alpha@media.test:9443/a.png?v=1&token=one'),
+        request('https://alice:alpha@media.test:8443/b.png?v=1&token=one'),
+        request('https://alice:alpha@media.test:8443/a.png?v=2&token=one'),
+        request('https://alice:bravo@media.test:8443/a.png?v=1&token=one'),
+        request('https://alice:alpha@media.test:8443/a.png?v=1&token=two'),
+      ];
+
+      for (final PixaRequest variant in variants) {
+        expect(variant.cacheKey, isNot(baseline.cacheKey));
+      }
+      expect(baseline.source.safeLabel, isNot(contains('alice')));
+      expect(baseline.source.safeLabel, isNot(contains('alpha')));
+      expect(
+        baseline.source.cacheMaterial.toString(),
+        isNot(contains('alpha')),
+      );
+      expect(baseline.source.cacheMaterial.toString(), isNot(contains('one')));
+    },
+  );
+
+  test('video frame URI identity covers port and userInfo without leakage', () {
+    final PixaRequest first = PixaRequest.videoFrame(
+      'https://alice:alpha@media.test:8443/movie.mp4?token=one',
+      timestamp: const Duration(seconds: 1),
+    );
+    final PixaRequest otherPort = PixaRequest.videoFrame(
+      'https://alice:alpha@media.test:9443/movie.mp4?token=one',
+      timestamp: const Duration(seconds: 1),
+    );
+    final PixaRequest otherUserInfo = PixaRequest.videoFrame(
+      'https://alice:bravo@media.test:8443/movie.mp4?token=one',
+      timestamp: const Duration(seconds: 1),
+    );
+
+    expect(first.cacheKey, isNot(otherPort.cacheKey));
+    expect(first.cacheKey, isNot(otherUserInfo.cacheKey));
+    expect(first.source.safeLabel, isNot(contains('alice')));
+    expect(first.source.safeLabel, isNot(contains('alpha')));
+    expect(first.source.cacheMaterial.toString(), isNot(contains('alpha')));
   });
 }
 

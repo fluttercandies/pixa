@@ -6,6 +6,7 @@ import 'package:ffi/ffi.dart' as allocator;
 
 import '../cache/cache_stats.dart';
 import '../cache_key.dart';
+import 'runtime_abi_validation.dart';
 import 'runtime_binary.dart';
 import 'runtime_loader.dart';
 
@@ -62,6 +63,7 @@ final class PixaRuntimeMemoryCache {
     required Uint8List bytes,
     Duration? ttl,
   }) {
+    validatePixaOptionalTtl(ttl, 'ttl');
     return _withUtf8(namespace, (
       Pointer<Uint8> namespacePtr,
       int namespaceLen,
@@ -112,13 +114,7 @@ final class PixaRuntimeMemoryCache {
 
   /// Trims encoded memory to the target byte budget.
   static bool trimToBytes(int targetBytes) {
-    if (targetBytes < 0) {
-      throw ArgumentError.value(
-        targetBytes,
-        'targetBytes',
-        'must not be negative',
-      );
-    }
+    validatePixaPortableUintPtr(targetBytes, 'targetBytes');
     return _memoryTrimToBytes(targetBytes) == 0;
   }
 
@@ -198,6 +194,7 @@ T _withUtf8<T>(String value, T Function(Pointer<Uint8>, int) operation) {
 }
 
 T _withBytes<T>(Uint8List bytes, T Function(Pointer<Uint8>, int) operation) {
+  validatePixaPortableUintPtr(bytes.length, 'bytes.length');
   if (bytes.isEmpty) {
     return operation(nullptr.cast<Uint8>(), 0);
   }

@@ -8,6 +8,7 @@ import '../failure.dart';
 import '../progress.dart';
 import '../request.dart';
 import '../source.dart';
+import 'runtime_abi_validation.dart';
 import 'runtime_binary.dart';
 
 /// Encoded bytes loaded by the Rust pipeline.
@@ -102,9 +103,7 @@ final class PixaRuntimeOwnedBuffer implements Finalizable {
     if (handleAddress == 0) {
       throw StateError('runtime buffer handle address is zero.');
     }
-    if (length < 0) {
-      throw StateError('runtime buffer length is negative.');
-    }
+    validatePixaPortableUintPtr(length, 'length');
     return PixaRuntimeOwnedBuffer._(
       Pointer<Void>.fromAddress(handleAddress),
       length,
@@ -116,9 +115,7 @@ final class PixaRuntimeOwnedBuffer implements Finalizable {
     Pointer<Uint8> pointer,
     int length,
   ) {
-    if (length < 0) {
-      throw StateError('runtime buffer length is negative.');
-    }
+    validatePixaPortableUintPtr(length, 'length');
     if (pointer == nullptr) {
       throw StateError('runtime buffer pointer is null.');
     }
@@ -183,6 +180,11 @@ final class PixaRuntimeOwnedBuffer implements Finalizable {
         'must be greater than zero',
       );
     }
+    validatePixaPortableUintPtr(
+      maxOutputBytes,
+      'maxOutputBytes',
+      allowZero: false,
+    );
     final Pointer<Uint32> width = allocator.calloc<Uint32>();
     final Pointer<Uint32> height = allocator.calloc<Uint32>();
     final Pointer<UintPtr> rowBytes = allocator.calloc<UintPtr>();
@@ -450,6 +452,12 @@ final class PixaRuntimeLoader {
     int cancelTokenId = 0,
     int progressSessionId = 0,
   }) {
+    if (cancelTokenId < 0) {
+      throw RangeError.value(cancelTokenId, 'cancelTokenId');
+    }
+    if (progressSessionId < 0) {
+      throw RangeError.value(progressSessionId, 'progressSessionId');
+    }
     final _RuntimeInputCopyCounter copyCounter = _RuntimeInputCopyCounter();
     return _withUtf8(rootPath, (Pointer<Uint8> rootPtr, int rootLen) {
       return _withBytes(requestPayload, (
@@ -816,6 +824,7 @@ T _withBytes<T>(
   if (bytes == null || bytes.isEmpty) {
     return operation(nullptr.cast<Uint8>(), 0);
   }
+  validatePixaPortableUintPtr(bytes.length, 'bytes.length');
   final Pointer<Uint8> pointer = allocator.calloc<Uint8>(bytes.length);
   try {
     pointer.asTypedList(bytes.length).setAll(0, bytes);
