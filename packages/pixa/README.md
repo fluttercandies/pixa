@@ -267,7 +267,8 @@ Published plugins that support more than one boundary can use automatic integrat
 candidate during `Pixa.configure`, records it in `adaptivePluginIntegrations`,
 and keeps unselected routes out of the compiled route plan.
 
-Plugin authors should follow [PLUGIN_AUTHORING.md](PLUGIN_AUTHORING.md).
+Plugin authors should follow
+[PLUGIN_AUTHORING.md](https://github.com/fluttercandies/pixa/blob/main/packages/pixa/PLUGIN_AUTHORING.md).
 Pixa's Native Assets hook discovers validated `pixa_plugin.json` manifests
 from the resolved package graph and links host modules into one shared runtime.
 
@@ -333,4 +334,5 @@ The stable public entry points are `package:pixa/pixa.dart`,
 runtime bindings, generated code, cache internals, and scheduler internals are
 not public API.
 
-Chinese documentation: [README_ZH.md](README_ZH.md).
+Chinese documentation:
+[README_ZH.md](https://github.com/fluttercandies/pixa/blob/main/packages/pixa/README_ZH.md).
