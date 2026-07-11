@@ -211,8 +211,17 @@ void main() {
         itemCount: 20,
       );
 
-      expect(built, <int>[1, 2, 3, 4, 5]);
+      expect(built, <int>[1, 2, 3, 4]);
       expect(prefetcher.snapshot().skippedPending, 0);
+
+      final Future<void> third = prefetcher.prefetchAround(
+        firstVisibleIndex: 2,
+        lastVisibleIndex: 2,
+        itemCount: 20,
+      );
+
+      expect(built, <int>[1, 2, 3, 4, 5, 6]);
+      expect(prefetcher.snapshot().skippedPending, 1);
 
       while (completions.isNotEmpty) {
         final List<int> active = List<int>.of(completions.keys);
@@ -221,9 +230,9 @@ void main() {
         }
         await Future<void>.delayed(Duration.zero);
       }
-      await Future.wait<void>(<Future<void>>[first, second]);
+      await Future.wait<void>(<Future<void>>[first, second, third]);
 
-      expect(started, <int>[1, 2, 3, 4, 5]);
+      expect(started, <int>[1, 3, 4, 5, 6]);
     },
   );
 

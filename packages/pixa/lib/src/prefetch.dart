@@ -114,6 +114,8 @@ final class PixaPredictivePrefetcher {
   int _generation = 0;
   int _skippedPending = 0;
   bool _reusePendingOnNextPlan = true;
+  _PrefetchViewport? _lastPlannedViewport;
+  _PrefetchBatch? _currentBatch;
 
   /// Captures current queue state for debug surfaces and benchmarks.
   PixaPredictivePrefetcherSnapshot snapshot() {
@@ -156,6 +158,46 @@ final class PixaPredictivePrefetcher {
     final int first = firstVisibleIndex.clamp(0, itemCount - 1).toInt();
     final int last = lastVisibleIndex.clamp(0, itemCount - 1).toInt();
     final PixaPrefetchTarget effectiveTarget = target ?? this.target;
+    final _PrefetchViewport viewport = _PrefetchViewport(
+      first: first,
+      last: last,
+      itemCount: itemCount,
+      target: effectiveTarget,
+      context: context,
+    );
+    if (_pending.isNotEmpty && _canReusePendingPlan(viewport)) {
+      final List<int> retainedIndexes = <int>[
+        for (final _QueuedPrefetch work in _pending)
+          if (work.index < viewport.first || work.index > viewport.last)
+            work.index,
+      ];
+      if (retainedIndexes.length == _pending.length) {
+        final Future<void>? current = _currentBatch?.future;
+        if (current != null) {
+          await current;
+        }
+        return;
+      }
+      final Future<void>? previous = _currentBatch?.future;
+      final int generation = ++_generation;
+      final List<_QueuedPrefetch> retained = _takeOverlappingPending(
+        retainedIndexes,
+        effectiveTarget,
+        context,
+      );
+      if (retained.isNotEmpty) {
+        await _enqueueBatch(
+          const <_PlannedPrefetch>[],
+          effectiveTarget,
+          context,
+          generation,
+          retained: retained,
+        );
+      } else if (previous != null) {
+        await previous;
+      }
+      return;
+    }
     final List<int> plannedIndexes = _plannedIndexes(
       first,
       last,
@@ -171,6 +213,7 @@ final class PixaPredictivePrefetcher {
       }
       _reusePendingOnNextPlan = true;
       final int generation = ++_generation;
+      _lastPlannedViewport = viewport;
       return _enqueueBatch(requests, effectiveTarget, context, generation);
     }
     final int generation = ++_generation;
@@ -187,6 +230,7 @@ final class PixaPredictivePrefetcher {
     if (requests.isEmpty && retained.isEmpty) {
       return;
     }
+    _lastPlannedViewport = viewport;
     return _enqueueBatch(
       requests,
       effectiveTarget,
@@ -200,6 +244,33 @@ final class PixaPredictivePrefetcher {
   void clearHistory() {
     _recent.clear();
     _reusePendingOnNextPlan = false;
+    _lastPlannedViewport = null;
+  }
+
+  bool _canReusePendingPlan(_PrefetchViewport viewport) {
+    final _PrefetchViewport? previous = _lastPlannedViewport;
+    if (previous == null ||
+        previous.itemCount != viewport.itemCount ||
+        previous.target != viewport.target ||
+        !identical(previous.context, viewport.context)) {
+      return false;
+    }
+    if (previous.first == viewport.first && previous.last == viewport.last) {
+      return true;
+    }
+    final bool movingForward =
+        viewport.first >= previous.first && viewport.last >= previous.last;
+    if (movingForward) {
+      final int threshold = math.max(1, forwardItemCount ~/ 2);
+      return viewport.last - previous.last < threshold;
+    }
+    final bool movingBackward =
+        viewport.first <= previous.first && viewport.last <= previous.last;
+    if (movingBackward) {
+      final int threshold = math.max(1, backwardItemCount ~/ 2);
+      return previous.first - viewport.first < threshold;
+    }
+    return false;
   }
 
   List<_PlannedPrefetch> _plannedRequests(
@@ -259,6 +330,7 @@ final class PixaPredictivePrefetcher {
     final _PrefetchBatch batch = _PrefetchBatch(
       requests.length + retained.length,
     );
+    _currentBatch = batch;
     for (final _QueuedPrefetch work in retained) {
       work
         ..generation = generation
@@ -419,6 +491,22 @@ final class _PlannedPrefetch {
   final int index;
   final PixaRequest request;
   final String key;
+}
+
+final class _PrefetchViewport {
+  const _PrefetchViewport({
+    required this.first,
+    required this.last,
+    required this.itemCount,
+    required this.target,
+    required this.context,
+  });
+
+  final int first;
+  final int last;
+  final int itemCount;
+  final PixaPrefetchTarget target;
+  final BuildContext? context;
 }
 
 final class _PrefetchBatch {
