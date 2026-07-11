@@ -110,10 +110,10 @@ final class PixaPredictivePrefetcher {
   final Set<String> _pendingKeys = <String>{};
   final LinkedHashSet<String> _recent = LinkedHashSet<String>();
   final ListQueue<_QueuedPrefetch> _pending = ListQueue<_QueuedPrefetch>();
-  _PrefetchBatch? _pendingBatch;
   int _active = 0;
   int _generation = 0;
   int _skippedPending = 0;
+  bool _reusePendingOnNextPlan = true;
 
   /// Captures current queue state for debug surfaces and benchmarks.
   PixaPredictivePrefetcherSnapshot snapshot() {
@@ -156,47 +156,68 @@ final class PixaPredictivePrefetcher {
     final int first = firstVisibleIndex.clamp(0, itemCount - 1).toInt();
     final int last = lastVisibleIndex.clamp(0, itemCount - 1).toInt();
     final PixaPrefetchTarget effectiveTarget = target ?? this.target;
+    final List<int> plannedIndexes = _plannedIndexes(
+      first,
+      last,
+      itemCount,
+    ).toList(growable: false);
     if (_pending.isEmpty) {
-      final List<PixaRequest> requests = _plannedRequests(
-        first,
-        last,
-        itemCount,
+      final List<_PlannedPrefetch> requests = _plannedRequests(
+        plannedIndexes,
         effectiveTarget,
       );
       if (requests.isEmpty) {
         return;
       }
+      _reusePendingOnNextPlan = true;
       final int generation = ++_generation;
       return _enqueueBatch(requests, effectiveTarget, context, generation);
     }
     final int generation = ++_generation;
-    _discardPendingFromPreviousGeneration();
-    final List<PixaRequest> requests = _plannedRequests(
-      first,
-      last,
-      itemCount,
+    final List<_QueuedPrefetch> retained = _takeOverlappingPending(
+      plannedIndexes,
       effectiveTarget,
+      context,
     );
-    if (requests.isEmpty) {
+    final List<_PlannedPrefetch> requests = _plannedRequests(
+      plannedIndexes,
+      effectiveTarget,
+      retained: retained,
+    );
+    if (requests.isEmpty && retained.isEmpty) {
       return;
     }
-    return _enqueueBatch(requests, effectiveTarget, context, generation);
+    return _enqueueBatch(
+      requests,
+      effectiveTarget,
+      context,
+      generation,
+      retained: retained,
+    );
   }
 
   /// Clears in-memory dedupe history. Does not cancel active operations.
   void clearHistory() {
     _recent.clear();
+    _reusePendingOnNextPlan = false;
   }
 
-  List<PixaRequest> _plannedRequests(
-    int first,
-    int last,
-    int itemCount,
-    PixaPrefetchTarget target,
-  ) {
-    final Set<String> scheduled = <String>{};
-    final List<PixaRequest> requests = <PixaRequest>[];
-    for (final int index in _plannedIndexes(first, last, itemCount)) {
+  List<_PlannedPrefetch> _plannedRequests(
+    List<int> indexes,
+    PixaPrefetchTarget target, {
+    List<_QueuedPrefetch> retained = const <_QueuedPrefetch>[],
+  }) {
+    final Set<int> retainedIndexes = <int>{
+      for (final _QueuedPrefetch work in retained) work.index,
+    };
+    final Set<String> scheduled = <String>{
+      for (final _QueuedPrefetch work in retained) work.key,
+    };
+    final List<_PlannedPrefetch> requests = <_PlannedPrefetch>[];
+    for (final int index in indexes) {
+      if (retainedIndexes.contains(index)) {
+        continue;
+      }
       final PixaRequest? request = requestBuilder(index);
       if (request == null) {
         continue;
@@ -208,7 +229,7 @@ final class PixaPredictivePrefetcher {
           !scheduled.add(key)) {
         continue;
       }
-      requests.add(request);
+      requests.add(_PlannedPrefetch(index: index, request: request, key: key));
     }
     return requests;
   }
@@ -229,20 +250,29 @@ final class PixaPredictivePrefetcher {
   }
 
   Future<void> _enqueueBatch(
-    List<PixaRequest> requests,
+    List<_PlannedPrefetch> requests,
     PixaPrefetchTarget target,
     BuildContext? context,
-    int generation,
-  ) {
-    final _PrefetchBatch batch = _PrefetchBatch(requests.length);
-    _pendingBatch = batch;
-    for (final PixaRequest request in requests) {
-      final String key = _dedupeKeyFor(request, target);
-      _pendingKeys.add(key);
+    int generation, {
+    List<_QueuedPrefetch> retained = const <_QueuedPrefetch>[],
+  }) {
+    final _PrefetchBatch batch = _PrefetchBatch(
+      requests.length + retained.length,
+    );
+    for (final _QueuedPrefetch work in retained) {
+      work
+        ..generation = generation
+        ..batch = batch;
+      _pendingKeys.add(work.key);
+      _pending.add(work);
+    }
+    for (final _PlannedPrefetch planned in requests) {
+      _pendingKeys.add(planned.key);
       _pending.add(
         _QueuedPrefetch(
-          request: request,
-          key: key,
+          index: planned.index,
+          request: planned.request,
+          key: planned.key,
           target: target,
           context: context,
           generation: generation,
@@ -254,13 +284,44 @@ final class PixaPredictivePrefetcher {
     return batch.future;
   }
 
+  List<_QueuedPrefetch> _takeOverlappingPending(
+    List<int> plannedIndexes,
+    PixaPrefetchTarget target,
+    BuildContext? context,
+  ) {
+    final Set<int> desired = plannedIndexes.toSet();
+    final List<_QueuedPrefetch> retained = <_QueuedPrefetch>[];
+    final Map<_PrefetchBatch, int> releasedByBatch = <_PrefetchBatch, int>{};
+    while (_pending.isNotEmpty) {
+      final _QueuedPrefetch work = _pending.removeFirst();
+      _pendingKeys.remove(work.key);
+      releasedByBatch.update(
+        work.batch,
+        (int count) => count + 1,
+        ifAbsent: () => 1,
+      );
+      final bool overlaps =
+          _reusePendingOnNextPlan &&
+          work.target == target &&
+          identical(work.context, context) &&
+          desired.remove(work.index);
+      if (overlaps) {
+        retained.add(work);
+      } else {
+        _skippedPending++;
+      }
+    }
+    for (final MapEntry<_PrefetchBatch, int> entry in releasedByBatch.entries) {
+      entry.key.completeSkipped(entry.value);
+    }
+    _reusePendingOnNextPlan = true;
+    return retained;
+  }
+
   void _pumpQueue() {
     while (_active < maxConcurrent && _pending.isNotEmpty) {
       final _QueuedPrefetch work = _pending.removeFirst();
       _pendingKeys.remove(work.key);
-      if (_pending.isEmpty) {
-        _pendingBatch = null;
-      }
       _active++;
       _inFlight.add(work.key);
       unawaited(_runWork(work));
@@ -292,18 +353,6 @@ final class PixaPredictivePrefetcher {
       }
       _pumpQueue();
     }
-  }
-
-  void _discardPendingFromPreviousGeneration() {
-    if (_pending.isEmpty) {
-      return;
-    }
-    final int skipped = _pending.length;
-    _pendingBatch?.completeSkipped(skipped);
-    _skippedPending += skipped;
-    _pending.clear();
-    _pendingKeys.clear();
-    _pendingBatch = null;
   }
 
   Future<void> _run(
@@ -341,7 +390,8 @@ final class PixaPredictivePrefetcher {
 }
 
 final class _QueuedPrefetch {
-  const _QueuedPrefetch({
+  _QueuedPrefetch({
+    required this.index,
     required this.request,
     required this.key,
     required this.target,
@@ -350,12 +400,25 @@ final class _QueuedPrefetch {
     required this.batch,
   });
 
+  final int index;
   final PixaRequest request;
   final String key;
   final PixaPrefetchTarget target;
   final BuildContext? context;
-  final int generation;
-  final _PrefetchBatch batch;
+  int generation;
+  _PrefetchBatch batch;
+}
+
+final class _PlannedPrefetch {
+  const _PlannedPrefetch({
+    required this.index,
+    required this.request,
+    required this.key,
+  });
+
+  final int index;
+  final PixaRequest request;
+  final String key;
 }
 
 final class _PrefetchBatch {

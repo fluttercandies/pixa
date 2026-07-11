@@ -93,7 +93,6 @@ void main() {
               });
             },
       );
-
       final Future<void> first = prefetcher.prefetchAround(
         firstVisibleIndex: 0,
         lastVisibleIndex: 0,
@@ -145,7 +144,6 @@ void main() {
               return completer.future;
             },
       );
-
       final Future<void> first = prefetcher.prefetchAround(
         firstVisibleIndex: 0,
         lastVisibleIndex: 0,
@@ -171,6 +169,61 @@ void main() {
         completion.complete();
       }
       await second;
+    },
+  );
+
+  test(
+    'predictive prefetcher retains overlapping pending work for adjacent viewports',
+    () async {
+      final List<int> built = <int>[];
+      final List<int> started = <int>[];
+      final Map<int, Completer<void>> completions = <int, Completer<void>>{};
+      final PixaPredictivePrefetcher prefetcher = PixaPredictivePrefetcher(
+        requestBuilder: (int index) {
+          built.add(index);
+          return _requestForIndex(index);
+        },
+        forwardItemCount: 4,
+        backwardItemCount: 0,
+        maxConcurrent: 1,
+        runPrefetch:
+            (PixaRequest request, {required PixaPrefetchTarget target}) {
+              final int index = _indexFromRequest(request);
+              started.add(index);
+              final Completer<void> completer = Completer<void>();
+              completions[index] = completer;
+              return completer.future;
+            },
+      );
+      prefetcher.clearHistory();
+
+      final Future<void> first = prefetcher.prefetchAround(
+        firstVisibleIndex: 0,
+        lastVisibleIndex: 0,
+        itemCount: 20,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(started, <int>[1]);
+
+      final Future<void> second = prefetcher.prefetchAround(
+        firstVisibleIndex: 1,
+        lastVisibleIndex: 1,
+        itemCount: 20,
+      );
+
+      expect(built, <int>[1, 2, 3, 4, 5]);
+      expect(prefetcher.snapshot().skippedPending, 0);
+
+      while (completions.isNotEmpty) {
+        final List<int> active = List<int>.of(completions.keys);
+        for (final int index in active) {
+          completions.remove(index)!.complete();
+        }
+        await Future<void>.delayed(Duration.zero);
+      }
+      await Future.wait<void>(<Future<void>>[first, second]);
+
+      expect(started, <int>[1, 2, 3, 4, 5]);
     },
   );
 
