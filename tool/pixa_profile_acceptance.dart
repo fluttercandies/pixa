@@ -7,6 +7,8 @@ import 'package:crypto/crypto.dart';
 import 'pixa_native_assets_log_check.dart' show nativeAssetsEvidencePrefix;
 
 const String _profileRustToolchainVersion = '1.89.0';
+const String _macOSProfileHostProbePath =
+    'tool/pixa_macos_profile_host_state.swift';
 
 /// Exact Rust compiler probe used for release profile metadata.
 List<String> profileRustVersionCommand() => const <String>[
@@ -16,6 +18,67 @@ List<String> profileRustVersionCommand() => const <String>[
   'rustc',
   '--version',
 ];
+
+/// Builds the checked-in macOS session/window probe command.
+List<String> profileMacOSHostProbeArguments({
+  required String? targetBundleIdentifier,
+  required bool activateTarget,
+}) {
+  if (activateTarget &&
+      (targetBundleIdentifier == null || targetBundleIdentifier.isEmpty)) {
+    throw ArgumentError(
+      'A target bundle identifier is required when activation is requested.',
+    );
+  }
+  return <String>[
+    'swift',
+    _macOSProfileHostProbePath,
+    if (targetBundleIdentifier != null)
+      '--target-bundle-id=$targetBundleIdentifier',
+    if (activateTarget) '--activate-target',
+  ];
+}
+
+/// Runs one asynchronous action after a marker appears in streamed output.
+final class ProfileOutputTrigger {
+  ProfileOutputTrigger({required this.marker, required this.action}) {
+    if (marker.isEmpty) {
+      throw ArgumentError.value(marker, 'marker', 'must not be empty');
+    }
+  }
+
+  final String marker;
+  final Future<void> Function() action;
+  String _tail = '';
+  Future<void>? _actionFuture;
+
+  Future<void> observe(String output) {
+    final Future<void>? started = _actionFuture;
+    if (started != null) {
+      return started;
+    }
+    final String combined = '$_tail$output';
+    if (combined.contains(marker)) {
+      final Future<void> future = Future<void>.sync(action);
+      _actionFuture = future;
+      _tail = '';
+      return future;
+    }
+    final int retainedLength = marker.length - 1;
+    _tail = combined.length <= retainedLength
+        ? combined
+        : combined.substring(combined.length - retainedLength);
+    return Future<void>.value();
+  }
+
+  Future<void> finish() async {
+    final Future<void>? started = _actionFuture;
+    if (started == null) {
+      throw StateError('Profile process never emitted marker: $marker');
+    }
+    await started;
+  }
+}
 
 /// Maps Flutter target-platform identifiers to Pixa release platform ids.
 String profilePlatformFromTarget(String targetPlatform) {
@@ -36,6 +99,106 @@ String profilePlatformFromTarget(String targetPlatform) {
     return 'windows';
   }
   throw StateError('Unsupported Flutter target platform: $targetPlatform');
+}
+
+/// macOS session and target-window state captured by the host probe.
+final class MacOSProfileHostState {
+  const MacOSProfileHostState({
+    required this.screenLocked,
+    required this.frontmostBundleIdentifier,
+    required this.target,
+  });
+
+  factory MacOSProfileHostState.fromJson(Map<String, Object?> json) {
+    final Object? target = json['target'];
+    return MacOSProfileHostState(
+      screenLocked: _requiredBool(json, 'screenLocked'),
+      frontmostBundleIdentifier: json['frontmostBundleIdentifier']?.toString(),
+      target: target == null
+          ? null
+          : MacOSProfileTargetState.fromJson(
+              _jsonObject(target, 'macOS profile target state'),
+            ),
+    );
+  }
+
+  final bool screenLocked;
+  final String? frontmostBundleIdentifier;
+  final MacOSProfileTargetState? target;
+}
+
+/// Visibility facts for the profile application reported by AppKit.
+final class MacOSProfileTargetState {
+  const MacOSProfileTargetState({
+    required this.bundleIdentifier,
+    required this.running,
+    required this.active,
+    required this.hidden,
+    required this.onScreenWindowCount,
+  });
+
+  factory MacOSProfileTargetState.fromJson(Map<String, Object?> json) {
+    final Object? windowCount = json['onScreenWindowCount'];
+    if (windowCount is! int || windowCount < 0) {
+      throw FormatException(
+        'macOS profile target state has invalid onScreenWindowCount.',
+      );
+    }
+    return MacOSProfileTargetState(
+      bundleIdentifier: json['bundleIdentifier']?.toString() ?? '',
+      running: _requiredBool(json, 'running'),
+      active: _requiredBool(json, 'active'),
+      hidden: _requiredBool(json, 'hidden'),
+      onScreenWindowCount: windowCount,
+    );
+  }
+
+  final String bundleIdentifier;
+  final bool running;
+  final bool active;
+  final bool hidden;
+  final int onScreenWindowCount;
+}
+
+/// Rejects host states that would produce non-visible macOS frame evidence.
+void validateMacOSProfileHostState(
+  MacOSProfileHostState state, {
+  required bool requireTargetVisible,
+  required String targetBundleIdentifier,
+}) {
+  if (state.screenLocked) {
+    throw StateError(
+      'macOS profile evidence requires an unlocked GUI session.',
+    );
+  }
+  if (!requireTargetVisible) {
+    return;
+  }
+  final MacOSProfileTargetState? target = state.target;
+  if (target == null ||
+      !target.running ||
+      target.bundleIdentifier != targetBundleIdentifier) {
+    throw StateError(
+      'macOS profile target $targetBundleIdentifier is not running.',
+    );
+  }
+  if (!target.active ||
+      target.hidden ||
+      target.onScreenWindowCount == 0 ||
+      state.frontmostBundleIdentifier != targetBundleIdentifier) {
+    throw StateError(
+      'macOS profile target $targetBundleIdentifier is not frontmost with an '
+      'on-screen window.',
+    );
+  }
+}
+
+bool _requiredBool(Map<String, Object?> json, String key) {
+  final Object? value = json[key];
+  if (value is bool) {
+    return value;
+  }
+  throw FormatException('macOS profile host state has invalid $key.');
 }
 
 /// Locates the Native Assets runtime copied into a Flutter project output.
@@ -191,6 +354,13 @@ Future<void> main(List<String> arguments) async {
   final String evidencePlatform = profilePlatformFromTarget(
     device.targetPlatform,
   );
+  if (evidencePlatform == 'macos') {
+    validateMacOSProfileHostState(
+      await _readMacOSProfileHostState(root),
+      requireTargetVisible: false,
+      targetBundleIdentifier: 'dev.pixa.pixaGallery',
+    );
+  }
   final String deviceLabel = options.deviceName ?? 'flutter-profile-device';
   final String deviceIdHash = sha256.convert(utf8.encode(deviceId)).toString();
   final Map<String, Object?> flutter = _jsonObject(
@@ -220,6 +390,29 @@ Future<void> main(List<String> arguments) async {
   stdout.writeln(
     'Running Pixa profile scroll acceptance on $deviceName ($deviceId).',
   );
+  final ProfileOutputTrigger? macOSVisibilityTrigger =
+      evidencePlatform == 'macos'
+      ? ProfileOutputTrigger(
+          marker: 'VMServiceFlutterDriver: Connecting',
+          action: () async {
+            final MacOSProfileHostState state =
+                await _readMacOSProfileHostState(
+                  root,
+                  targetBundleIdentifier: 'dev.pixa.pixaGallery',
+                  activateTarget: true,
+                );
+            validateMacOSProfileHostState(
+              state,
+              requireTargetVisible: true,
+              targetBundleIdentifier: 'dev.pixa.pixaGallery',
+            );
+            stdout.writeln(
+              'Verified frontmost macOS profile window for '
+              'dev.pixa.pixaGallery.',
+            );
+          },
+        )
+      : null;
   await rawNativeAssetsLog.parent.create(recursive: true);
   final int driveExitCode = await _runForeground(
     gallery,
@@ -236,6 +429,7 @@ Future<void> main(List<String> arguments) async {
       includeLiveNetwork: options.includeLiveNetwork,
     ),
     captureLog: rawNativeAssetsLog,
+    outputTrigger: macOSVisibilityTrigger,
   );
   File? runtimeArtifact;
   Object? artifactError;
@@ -411,10 +605,28 @@ Future<String> _runForOutput(
   return result.stdout.toString().trim();
 }
 
+Future<MacOSProfileHostState> _readMacOSProfileHostState(
+  Directory root, {
+  String? targetBundleIdentifier,
+  bool activateTarget = false,
+}) async {
+  final String output = await _runForOutput(
+    root,
+    profileMacOSHostProbeArguments(
+      targetBundleIdentifier: targetBundleIdentifier,
+      activateTarget: activateTarget,
+    ),
+  );
+  return MacOSProfileHostState.fromJson(
+    _jsonObject(jsonDecode(output), 'macOS profile host probe'),
+  );
+}
+
 Future<int> _runForeground(
   Directory workingDirectory,
   List<String> arguments, {
   File? captureLog,
+  ProfileOutputTrigger? outputTrigger,
 }) async {
   final Process process = await Process.start(
     'rtk',
@@ -428,6 +640,12 @@ Future<int> _runForeground(
     await for (final List<int> chunk in stream) {
       terminal.add(chunk);
       logSink?.add(chunk);
+      try {
+        await outputTrigger?.observe(utf8.decode(chunk, allowMalformed: true));
+      } on Object {
+        process.kill();
+        rethrow;
+      }
     }
   }
 
@@ -436,7 +654,11 @@ Future<int> _runForeground(
       forward(process.stdout, stdout),
       forward(process.stderr, stderr),
     ]);
-    return await processExit;
+    final int result = await processExit;
+    if (result == 0) {
+      await outputTrigger?.finish();
+    }
+    return result;
   } finally {
     await processExit;
     if (logSink != null) {

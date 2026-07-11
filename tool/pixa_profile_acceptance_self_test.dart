@@ -4,6 +4,89 @@ import 'pixa_profile_acceptance.dart' as acceptance;
 import 'pixa_native_assets_log_check.dart' as native_assets;
 
 Future<void> main() async {
+  final acceptance.MacOSProfileHostState unlockedHost =
+      acceptance.MacOSProfileHostState.fromJson(<String, Object?>{
+        'screenLocked': false,
+        'frontmostBundleIdentifier': 'dev.pixa.pixaGallery',
+        'target': <String, Object?>{
+          'bundleIdentifier': 'dev.pixa.pixaGallery',
+          'running': true,
+          'active': true,
+          'hidden': false,
+          'onScreenWindowCount': 1,
+        },
+      });
+  acceptance.validateMacOSProfileHostState(
+    unlockedHost,
+    requireTargetVisible: true,
+    targetBundleIdentifier: 'dev.pixa.pixaGallery',
+  );
+  _expectThrowsStateError(
+    () => acceptance.validateMacOSProfileHostState(
+      acceptance.MacOSProfileHostState.fromJson(<String, Object?>{
+        'screenLocked': true,
+        'frontmostBundleIdentifier': 'com.apple.loginwindow',
+      }),
+      requireTargetVisible: false,
+      targetBundleIdentifier: 'dev.pixa.pixaGallery',
+    ),
+    'locked macOS sessions must be rejected before profile capture',
+  );
+  _expectThrowsStateError(
+    () => acceptance.validateMacOSProfileHostState(
+      acceptance.MacOSProfileHostState.fromJson(<String, Object?>{
+        'screenLocked': false,
+        'frontmostBundleIdentifier': 'com.apple.Terminal',
+        'target': <String, Object?>{
+          'bundleIdentifier': 'dev.pixa.pixaGallery',
+          'running': true,
+          'active': false,
+          'hidden': false,
+          'onScreenWindowCount': 1,
+        },
+      }),
+      requireTargetVisible: true,
+      targetBundleIdentifier: 'dev.pixa.pixaGallery',
+    ),
+    'non-focal profile windows must be rejected as performance evidence',
+  );
+  _expect(
+    acceptance
+            .profileMacOSHostProbeArguments(
+              targetBundleIdentifier: null,
+              activateTarget: false,
+            )
+            .join(' ') ==
+        'swift tool/pixa_macos_profile_host_state.swift',
+    'macOS preflight must use the checked-in host-state probe',
+  );
+  _expect(
+    acceptance
+            .profileMacOSHostProbeArguments(
+              targetBundleIdentifier: 'dev.pixa.pixaGallery',
+              activateTarget: true,
+            )
+            .join(' ') ==
+        'swift tool/pixa_macos_profile_host_state.swift '
+            '--target-bundle-id=dev.pixa.pixaGallery --activate-target',
+    'macOS target verification must activate the exact gallery bundle',
+  );
+  var triggerCount = 0;
+  final acceptance.ProfileOutputTrigger outputTrigger =
+      acceptance.ProfileOutputTrigger(
+        marker: 'VMServiceFlutterDriver: Connecting',
+        action: () async {
+          triggerCount += 1;
+        },
+      );
+  await outputTrigger.observe('VMServiceFlutterDri');
+  await outputTrigger.observe('ver: Connecting to the app');
+  await outputTrigger.observe('VMServiceFlutterDriver: Connecting again');
+  await outputTrigger.finish();
+  _expect(
+    triggerCount == 1,
+    'profile output trigger must survive chunk boundaries and run once',
+  );
   _expect(
     acceptance.profileRustVersionCommand().join(' ') ==
         'rustup run 1.89.0 rustc --version',
@@ -160,4 +243,13 @@ void _expect(bool condition, String message) {
   if (!condition) {
     throw StateError(message);
   }
+}
+
+void _expectThrowsStateError(void Function() body, String message) {
+  try {
+    body();
+  } on StateError {
+    return;
+  }
+  throw StateError(message);
 }
