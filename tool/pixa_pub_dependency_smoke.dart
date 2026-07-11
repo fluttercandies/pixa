@@ -96,6 +96,22 @@ final class PubSmokeCommand {
 /// Injectable command boundary for dependency smoke orchestration.
 typedef PubSmokeRunner = Future<int> Function(PubSmokeCommand command);
 
+/// Tracks accepted hosted-repository requests until shutdown can drain them.
+final class HostedRequestTracker {
+  final Set<Future<void>> _active = <Future<void>>{};
+
+  void track(Future<void> request) {
+    _active.add(request);
+    unawaited(request.whenComplete(() => _active.remove(request)));
+  }
+
+  Future<void> drain() async {
+    while (_active.isNotEmpty) {
+      await Future.wait(_active.toList(growable: false));
+    }
+  }
+}
+
 /// Builds versioned hosted-layout copies and verifies real consumer apps.
 final class PubDependencySmoke {
   const PubDependencySmoke({
@@ -525,9 +541,11 @@ final class _LocalHostedRepository {
   _LocalHostedRepository._({
     required HttpServer server,
     required HttpClient proxyClient,
+    required HostedRequestTracker requests,
     required Map<String, _PublicationArchive> archives,
   }) : _server = server,
        _proxyClient = proxyClient,
+       _requests = requests,
        _archives = Map<String, _PublicationArchive>.unmodifiable(archives);
 
   static Future<_LocalHostedRepository> start(
@@ -540,26 +558,30 @@ final class _LocalHostedRepository {
     final HttpClient proxyClient = HttpClient()
       ..autoUncompress = false
       ..connectionTimeout = const Duration(seconds: 30);
+    final HostedRequestTracker requests = HostedRequestTracker();
     final _LocalHostedRepository repository = _LocalHostedRepository._(
       server: server,
       proxyClient: proxyClient,
+      requests: requests,
       archives: archives,
     );
     server.listen((HttpRequest request) {
-      unawaited(repository._handle(request));
+      requests.track(repository._handle(request));
     });
     return repository;
   }
 
   final HttpServer _server;
   final HttpClient _proxyClient;
+  final HostedRequestTracker _requests;
   final Map<String, _PublicationArchive> _archives;
 
   Uri get url => Uri.parse('http://127.0.0.1:${_server.port}/');
 
   Future<void> close() async {
+    await _server.close(force: false);
+    await _requests.drain();
     _proxyClient.close(force: true);
-    await _server.close(force: true);
   }
 
   Future<void> _handle(HttpRequest request) async {

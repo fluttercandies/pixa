@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'pixa_pub_dependency_smoke.dart';
@@ -36,12 +37,28 @@ Future<void> main() async {
     _expectRuntimeScenario(temp, 's3_and_mjpeg', hasS3: true, hasMjpeg: true);
     _expectRuntimeScenario(temp, 'all_explicit', hasS3: true, hasMjpeg: true);
     _expectCommands(commands);
+    await _expectHostedRequestTrackerDrains();
     stdout.writeln('Pixa pub dependency smoke self-test passed.');
   } finally {
     if (temp.existsSync()) {
       temp.deleteSync(recursive: true);
     }
   }
+}
+
+Future<void> _expectHostedRequestTrackerDrains() async {
+  final HostedRequestTracker tracker = HostedRequestTracker();
+  final Completer<void> request = Completer<void>();
+  var drained = false;
+
+  tracker.track(request.future);
+  final Future<void> draining = tracker.drain().then((_) => drained = true);
+  await Future<void>.delayed(Duration.zero);
+  _expect(!drained, 'hosted repository must wait for active requests');
+
+  request.complete();
+  await draining;
+  _expect(drained, 'hosted repository should finish after requests drain');
 }
 
 void _expectHostedPackageLayout(Directory root, Directory temp) {
