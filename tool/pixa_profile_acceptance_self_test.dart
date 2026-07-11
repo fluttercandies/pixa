@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'pixa_profile_acceptance.dart' as acceptance;
@@ -65,11 +66,44 @@ Future<void> main() async {
             .profileMacOSHostProbeArguments(
               targetBundleIdentifier: 'dev.pixa.pixaGallery',
               activateTarget: true,
+              monitorTargetVisible: true,
             )
             .join(' ') ==
         'swift tool/pixa_macos_profile_host_state.swift '
-            '--target-bundle-id=dev.pixa.pixaGallery --activate-target',
-    'macOS target verification must activate the exact gallery bundle',
+            '--target-bundle-id=dev.pixa.pixaGallery --activate-target '
+            '--monitor-target-visible',
+    'macOS target verification must use one continuous foreground monitor',
+  );
+  final Completer<int> blockedProfileExit = Completer<int>();
+  final Completer<int> failedWatchdogExit = Completer<int>();
+  var profileTerminated = false;
+  await _expectThrowsStateErrorAsync(
+    () => acceptance.awaitProfileProcessWithWatchdog(
+      profileExit: blockedProfileExit.future,
+      terminateProfile: () => profileTerminated = true,
+      watchdogExit: failedWatchdogExit.future,
+      terminateWatchdog: () {},
+    ),
+    trigger: () => failedWatchdogExit.complete(3),
+    message: 'foreground watchdog failure must reject profile evidence',
+  );
+  _expect(
+    profileTerminated,
+    'foreground watchdog failure must terminate the profile process',
+  );
+  final Completer<int> successfulProfileExit = Completer<int>();
+  final Completer<int> blockedWatchdogExit = Completer<int>();
+  var watchdogTerminated = false;
+  final Future<int> successfulRun = acceptance.awaitProfileProcessWithWatchdog(
+    profileExit: successfulProfileExit.future,
+    terminateProfile: () {},
+    watchdogExit: blockedWatchdogExit.future,
+    terminateWatchdog: () => watchdogTerminated = true,
+  );
+  successfulProfileExit.complete(0);
+  _expect(
+    await successfulRun == 0 && watchdogTerminated,
+    'a completed profile run must stop its foreground watchdog',
   );
   var triggerCount = 0;
   final acceptance.ProfileOutputTrigger outputTrigger =
@@ -248,6 +282,21 @@ void _expect(bool condition, String message) {
 void _expectThrowsStateError(void Function() body, String message) {
   try {
     body();
+  } on StateError {
+    return;
+  }
+  throw StateError(message);
+}
+
+Future<void> _expectThrowsStateErrorAsync(
+  Future<void> Function() body, {
+  required void Function() trigger,
+  required String message,
+}) async {
+  final Future<void> result = body();
+  trigger();
+  try {
+    await result;
   } on StateError {
     return;
   }

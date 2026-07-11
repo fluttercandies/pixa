@@ -7,6 +7,13 @@ import 'package:crypto/crypto.dart';
 import 'pixa_native_assets_log_check.dart' show nativeAssetsEvidencePrefix;
 import 'src/pixa_profile_git_state.dart';
 
+typedef _ProfileProcessOutcome = ({
+  bool profile,
+  int? code,
+  Object? error,
+  StackTrace? stack,
+});
+
 const String _profileRustToolchainVersion = '1.89.0';
 const String _macOSProfileHostProbePath =
     'tool/pixa_macos_profile_host_state.swift';
@@ -24,11 +31,12 @@ List<String> profileRustVersionCommand() => const <String>[
 List<String> profileMacOSHostProbeArguments({
   required String? targetBundleIdentifier,
   required bool activateTarget,
+  bool monitorTargetVisible = false,
 }) {
-  if (activateTarget &&
+  if ((activateTarget || monitorTargetVisible) &&
       (targetBundleIdentifier == null || targetBundleIdentifier.isEmpty)) {
     throw ArgumentError(
-      'A target bundle identifier is required when activation is requested.',
+      'A target bundle identifier is required for activation or monitoring.',
     );
   }
   return <String>[
@@ -37,7 +45,47 @@ List<String> profileMacOSHostProbeArguments({
     if (targetBundleIdentifier != null)
       '--target-bundle-id=$targetBundleIdentifier',
     if (activateTarget) '--activate-target',
+    if (monitorTargetVisible) '--monitor-target-visible',
   ];
+}
+
+/// Races a profile process against its foreground watchdog.
+Future<int> awaitProfileProcessWithWatchdog({
+  required Future<int> profileExit,
+  required void Function() terminateProfile,
+  required Future<int>? watchdogExit,
+  required void Function()? terminateWatchdog,
+}) async {
+  if (watchdogExit == null) {
+    return profileExit;
+  }
+  final Future<_ProfileProcessOutcome> profileOutcome = profileExit.then(
+    (int code) => (profile: true, code: code, error: null, stack: null),
+  );
+  final Future<_ProfileProcessOutcome> watchdogOutcome = watchdogExit.then(
+    (int code) => (profile: false, code: code, error: null, stack: null),
+    onError: (Object error, StackTrace stack) =>
+        (profile: false, code: null, error: error, stack: stack),
+  );
+  final _ProfileProcessOutcome outcome = await Future.any(
+    <Future<_ProfileProcessOutcome>>[profileOutcome, watchdogOutcome],
+  );
+  if (outcome.profile) {
+    terminateWatchdog?.call();
+    return outcome.code!;
+  }
+  terminateProfile();
+  final Object? error = outcome.error;
+  if (error != null) {
+    Error.throwWithStackTrace(
+      StateError('Profile foreground watchdog failed: $error'),
+      outcome.stack!,
+    );
+  }
+  throw StateError(
+    'Profile foreground watchdog exited before the profile process '
+    '(exit code ${outcome.code}).',
+  );
 }
 
 /// Runs one asynchronous action after a marker appears in streamed output.
@@ -391,26 +439,28 @@ Future<void> main(List<String> arguments) async {
   stdout.writeln(
     'Running Pixa profile scroll acceptance on $deviceName ($deviceId).',
   );
+  final Completer<_ProfileProcessWatchdog>? macOSWatchdogCompleter =
+      evidencePlatform == 'macos' ? Completer<_ProfileProcessWatchdog>() : null;
   final ProfileOutputTrigger? macOSVisibilityTrigger =
       evidencePlatform == 'macos'
       ? ProfileOutputTrigger(
           marker: 'VMServiceFlutterDriver: Connecting',
           action: () async {
-            final MacOSProfileHostState state =
-                await _readMacOSProfileHostState(
-                  root,
-                  targetBundleIdentifier: 'dev.pixa.pixaGallery',
-                  activateTarget: true,
-                );
-            validateMacOSProfileHostState(
-              state,
-              requireTargetVisible: true,
-              targetBundleIdentifier: 'dev.pixa.pixaGallery',
-            );
-            stdout.writeln(
-              'Verified frontmost macOS profile window for '
-              'dev.pixa.pixaGallery.',
-            );
+            try {
+              final _ProfileProcessWatchdog watchdog =
+                  await _startMacOSProfileForegroundWatchdog(
+                    root,
+                    targetBundleIdentifier: 'dev.pixa.pixaGallery',
+                  );
+              macOSWatchdogCompleter!.complete(watchdog);
+              stdout.writeln(
+                'Monitoring frontmost macOS profile window for '
+                'dev.pixa.pixaGallery.',
+              );
+            } on Object catch (error, stack) {
+              macOSWatchdogCompleter!.completeError(error, stack);
+              rethrow;
+            }
           },
         )
       : null;
@@ -431,6 +481,7 @@ Future<void> main(List<String> arguments) async {
     ),
     captureLog: rawNativeAssetsLog,
     outputTrigger: macOSVisibilityTrigger,
+    watchdog: macOSWatchdogCompleter?.future,
   );
   File? runtimeArtifact;
   Object? artifactError;
@@ -603,11 +654,65 @@ Future<MacOSProfileHostState> _readMacOSProfileHostState(
   );
 }
 
+Future<_ProfileProcessWatchdog> _startMacOSProfileForegroundWatchdog(
+  Directory root, {
+  required String targetBundleIdentifier,
+}) async {
+  final Process process = await Process.start(
+    'rtk',
+    profileMacOSHostProbeArguments(
+      targetBundleIdentifier: targetBundleIdentifier,
+      activateTarget: true,
+      monitorTargetVisible: true,
+    ),
+    workingDirectory: root.path,
+    mode: ProcessStartMode.normal,
+  );
+  final Completer<String> initialLine = Completer<String>();
+  final StringBuffer errorOutput = StringBuffer();
+  process.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(
+    (String line) {
+      if (!initialLine.isCompleted) {
+        initialLine.complete(line);
+      }
+    },
+  );
+  process.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen(
+    (String line) {
+      errorOutput.writeln(line);
+      stderr.writeln(line);
+    },
+  );
+  try {
+    final String line = await Future.any<String>(<Future<String>>[
+      initialLine.future,
+      process.exitCode.then<String>((int code) {
+        throw StateError(
+          'macOS foreground watchdog exited before initialization '
+          '(exit code $code): $errorOutput',
+        );
+      }),
+    ]).timeout(const Duration(seconds: 15));
+    validateMacOSProfileHostState(
+      MacOSProfileHostState.fromJson(
+        _jsonObject(jsonDecode(line), 'macOS profile foreground watchdog'),
+      ),
+      requireTargetVisible: true,
+      targetBundleIdentifier: targetBundleIdentifier,
+    );
+    return _ProfileProcessWatchdog(process);
+  } on Object {
+    process.kill();
+    rethrow;
+  }
+}
+
 Future<int> _runForeground(
   Directory workingDirectory,
   List<String> arguments, {
   File? captureLog,
   ProfileOutputTrigger? outputTrigger,
+  Future<_ProfileProcessWatchdog>? watchdog,
 }) async {
   final Process process = await Process.start(
     'rtk',
@@ -630,22 +735,60 @@ Future<int> _runForeground(
     }
   }
 
+  final Future<void> forwarding = Future.wait<void>(<Future<void>>[
+    forward(process.stdout, stdout),
+    forward(process.stderr, stderr),
+  ]);
+  _ProfileProcessWatchdog? activeWatchdog;
+  var terminateWatchdogWhenReady = false;
+  final Future<int>? watchdogExit = watchdog?.then((value) {
+    activeWatchdog = value;
+    if (terminateWatchdogWhenReady) {
+      value.terminate();
+    }
+    return value.exitCode;
+  });
   try {
-    await Future.wait<void>(<Future<void>>[
-      forward(process.stdout, stdout),
-      forward(process.stderr, stderr),
-    ]);
-    final int result = await processExit;
+    final int result = await awaitProfileProcessWithWatchdog(
+      profileExit: processExit,
+      terminateProfile: process.kill,
+      watchdogExit: watchdogExit,
+      terminateWatchdog: () {
+        terminateWatchdogWhenReady = true;
+        activeWatchdog?.terminate();
+      },
+    );
+    await forwarding;
     if (result == 0) {
       await outputTrigger?.finish();
     }
     return result;
   } finally {
+    terminateWatchdogWhenReady = true;
+    activeWatchdog?.terminate();
+    process.kill();
     await processExit;
+    try {
+      await forwarding;
+    } on Object {
+      // The foreground execution path propagates the original failure.
+    }
     if (logSink != null) {
       await logSink.flush();
       await logSink.close();
     }
+  }
+}
+
+final class _ProfileProcessWatchdog {
+  const _ProfileProcessWatchdog(this._process);
+
+  final Process _process;
+
+  Future<int> get exitCode => _process.exitCode;
+
+  void terminate() {
+    _process.kill();
   }
 }
 
