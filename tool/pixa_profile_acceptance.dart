@@ -333,7 +333,32 @@ Future<({String commit, String treeState})> _gitIdentity(Directory root) async {
     'status',
     '--porcelain',
   ]);
-  return (commit: commit, treeState: changes.isEmpty ? 'clean' : 'dirty');
+  return (commit: commit, treeState: profileGitTreeStateFromPorcelain(changes));
+}
+
+/// Classifies Git porcelain output while honoring repository-local planning files.
+String profileGitTreeStateFromPorcelain(String porcelain) {
+  final Iterable<String> relevant = const LineSplitter()
+      .convert(porcelain)
+      .where((String line) => line.isNotEmpty)
+      .where((String line) => !_isPolicyLocalUntrackedPath(line));
+  return relevant.isEmpty ? 'clean' : 'dirty';
+}
+
+bool _isPolicyLocalUntrackedPath(String line) {
+  if (!line.startsWith('?? ')) {
+    return false;
+  }
+  final String path = line.substring(3);
+  return path == 'AGENTS.md' ||
+      path == 'GOALS.md' ||
+      path == 'REF.md' ||
+      path == '.third/' ||
+      path.startsWith('.third/') ||
+      path == '.thirdd/' ||
+      path.startsWith('.thirdd/') ||
+      path == 'docs/' ||
+      path.startsWith('docs/');
 }
 
 /// Removes stale raw and report artifacts before a new acceptance run.

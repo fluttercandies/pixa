@@ -9,6 +9,29 @@ Future<void> main() async {
         'rustup run 1.89.0 rustc --version',
     'profile metadata must probe the pinned release toolchain',
   );
+  _expect(
+    acceptance.profileGitTreeStateFromPorcelain('''
+?? .third/
+?? AGENTS.md
+?? GOALS.md
+?? docs/
+?? REF.md
+''') ==
+        'clean',
+    'local planning files excluded from Git by policy must not block evidence',
+  );
+  _expect(
+    acceptance.profileGitTreeStateFromPorcelain('''
+?? GOALS.md
+?? packages/pixa/lib/untracked.dart
+''') ==
+        'dirty',
+    'untracked source files must keep profile evidence dirty',
+  );
+  _expect(
+    acceptance.profileGitTreeStateFromPorcelain(' M GOALS.md') == 'dirty',
+    'tracked changes must never be hidden by the local planning filter',
+  );
   final String deviceIdHash = 'a'.padLeft(64, 'a');
   final List<String> arguments = acceptance.buildProfileDriveArguments(
     deviceId: 'fixture-device',
