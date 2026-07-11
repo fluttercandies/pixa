@@ -5,6 +5,83 @@ import 'package:flutter_test/flutter_test.dart';
 import '../hook/plugin_plan.dart';
 
 void main() {
+  test(
+    'resolved package manifests are discovered without app configuration',
+    () {
+      final Directory temp = Directory.systemTemp.createTempSync(
+        'pixa-plugin-discovery-',
+      );
+      try {
+        final Directory plugin = Directory('${temp.path}/plugin')..createSync();
+        File('${plugin.path}/pixa_plugin.json').writeAsStringSync('''
+{"schema":1,"modules":[{
+  "moduleId":"pixa.video_frame.fixture",
+  "packageName":"fixture_plugin",
+  "deployment":"hostLinkedPluginModule",
+  "entrypointSymbol":"pixa_fixture_plugin_init",
+  "capabilities":["fetcher"],
+  "fetcherSourceKinds":["video-frame:fixture"],
+  "videoFrameOutputMimeTypes":["image/jpeg"],
+  "videoFrameNearest":true
+}]}
+''');
+        final File packageConfig = File('${temp.path}/package_config.json')
+          ..writeAsStringSync('''
+{"configVersion":2,"packages":[
+  {"name":"fixture_plugin","rootUri":"plugin/","packageUri":"lib/"},
+  {"name":"no_manifest","rootUri":"missing/","packageUri":"lib/"}
+]}
+''');
+
+        final List<Uri> manifests = pixaDiscoverResolvedPluginManifests(
+          packageConfig.uri,
+        );
+
+        expect(manifests, <Uri>[File('${plugin.path}/pixa_plugin.json').uri]);
+      } finally {
+        temp.deleteSync(recursive: true);
+      }
+    },
+  );
+
+  test('resolved package manifest cannot impersonate another package', () {
+    final Directory temp = Directory.systemTemp.createTempSync(
+      'pixa-plugin-identity-',
+    );
+    try {
+      final Directory plugin = Directory('${temp.path}/plugin')..createSync();
+      File('${plugin.path}/pixa_plugin.json').writeAsStringSync('''
+{"schema":1,"modules":[{
+  "moduleId":"pixa.fixture",
+  "packageName":"different_package",
+  "deployment":"hostLinkedPluginModule",
+  "entrypointSymbol":"pixa_fixture_init",
+  "capabilities":["fetcher"],
+  "fetcherSourceKinds":["fixture"]
+}]}
+''');
+      final File packageConfig = File('${temp.path}/package_config.json')
+        ..writeAsStringSync('''
+{"configVersion":2,"packages":[
+  {"name":"fixture_plugin","rootUri":"plugin/","packageUri":"lib/"}
+]}
+''');
+
+      expect(
+        () => pixaDiscoverResolvedPluginManifests(packageConfig.uri),
+        throwsA(
+          isA<StateError>().having(
+            (StateError error) => error.message,
+            'message',
+            contains('fixture_plugin'),
+          ),
+        ),
+      );
+    } finally {
+      temp.deleteSync(recursive: true);
+    }
+  });
+
   test('runtime plugin plan loads built-in host modules', () {
     final PixaRuntimePluginBuildPlan plan = PixaRuntimePluginBuildPlan.load(
       coreManifest: Directory.current.uri.resolve('plugins/pixa_plugins.json'),

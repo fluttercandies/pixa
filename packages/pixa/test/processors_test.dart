@@ -48,10 +48,9 @@ void main() {
         height: 80,
         decodedWidth: 50,
         decodedHeight: 40,
-        sampleSize: 2,
         filter: PixaResizeFilter.catmullRom,
       ),
-      'tile(x=1,y=2,width=100,height=80,decodedWidth=50,decodedHeight=40,sampleSize=2,filter=catmullrom)',
+      'tile(x=1,y=2,width=100,height=80,decodedWidth=50,decodedHeight=40,filter=catmullrom)',
     );
     expect(PixaProcessors.flipHorizontal(), 'flipHorizontal()');
     expect(PixaProcessors.flipVertical(), 'flipVertical()');
@@ -116,9 +115,8 @@ void main() {
         y: 0,
         width: 1,
         height: 1,
-        decodedWidth: 1,
+        decodedWidth: 0,
         decodedHeight: 1,
-        sampleSize: 0,
       ),
       throwsRangeError,
     );

@@ -6,6 +6,7 @@ Future<void> main(List<String> args) async {
   final _Options options = _Options.parse(args);
   final String platform = options.platform;
   final Directory root = Directory.current;
+  final String gitCommit = _gitCommit(root);
   final Directory probe = Directory(
     '${root.path}/.dart_tool/pixa_platform_probe/$platform',
   );
@@ -25,7 +26,7 @@ Future<void> main(List<String> args) async {
     probe.path,
   ]);
   _configureProbePlatformPermissions(platform, probe);
-  _writeProbeApp(root, probe, options);
+  _writeProbeApp(root, probe, options, gitCommit);
   await _run(probe, flutter, <String>['pub', 'get']);
   await _run(probe, flutter, _buildCommand(platform), diagnosticRoot: probe);
   if (options.runSelfCheck) {
@@ -198,7 +199,12 @@ void _ensureEntitlement(File file, String key) {
   );
 }
 
-void _writeProbeApp(Directory root, Directory probe, _Options options) {
+void _writeProbeApp(
+  Directory root,
+  Directory probe,
+  _Options options,
+  String gitCommit,
+) {
   final String hookUserDefines = _hookUserDefines(options);
   File('${probe.path}/pubspec.yaml').writeAsStringSync('''
 name: pixa_platform_probe
@@ -310,7 +316,7 @@ void main() {
       reason: selfCheck.toJson().toString(),
     );
     final List<Map<String, Object?>> nativeModules =
-        _nativeRoiEvidence(
+        await _nativeRoiEvidence(
       snapshot,
       selfCheck.platform,
       ${_dartStringListLiteral(options.nativeRoiModules)},
@@ -330,6 +336,7 @@ void main() {
           'platform': ${_dartStringLiteral(options.platform)},
           'runnerOs': Platform.operatingSystem,
           'runMode': 'integration-test',
+          'gitCommit': ${_dartStringLiteral(gitCommit)},
           'deviceId': ${_dartStringLiteral(options.deviceId)},
           'deviceKind': ${_dartStringLiteral(options.deviceKind ?? _defaultDeviceKind(options.platform))},
           'connection': ${_dartStringLiteral(options.connection ?? _defaultConnection(options.platform))},
@@ -569,11 +576,11 @@ void _writeReportFile(String reportText) {
   }
 }
 
-List<Map<String, Object?>> _nativeRoiEvidence(
+Future<List<Map<String, Object?>>> _nativeRoiEvidence(
   PixaDebugSnapshot snapshot,
   String platform,
   List<String> requestedModules,
-) {
+) async {
   final Set<String> modules = requestedModules
       .map((String value) => value.trim().toLowerCase())
       .where((String value) => value.isNotEmpty)
@@ -581,47 +588,90 @@ List<Map<String, Object?>> _nativeRoiEvidence(
   if (modules.isEmpty) {
     return const <Map<String, Object?>>[];
   }
-  final stats = snapshot.capabilities.runtimePluginRegistryStats;
-  final int expectedHostLinked = 1 + modules.length;
-  final int expectedProcessors = modules.length;
+  final PixaRuntimePluginRegistryStats stats =
+      snapshot.capabilities.runtimePluginRegistryStats;
   return <Map<String, Object?>>[
     if (modules.contains('jpeg-turbo-roi'))
-      _nativeRoiModuleEvidence(
+      await _nativeRoiModuleEvidence(
         platform: platform,
+        stats: stats,
         moduleId: 'pixa.processor.jpeg_turbo',
         entrypointSymbol: 'pixa_jpeg_turbo_processor_plugin_init',
         processorOperation: 'tile:jpeg',
-        runtimeCapability: stats.hostLinkedModules >= expectedHostLinked &&
-            stats.processors >= expectedProcessors &&
-            stats.canUseSingleHostBinary,
+        fixture: _jpegRoiFixture(),
+        expectedFormat: PixaImageMetadataFormat.jpeg,
+        tileX: 16,
+        tileY: 16,
       ),
     if (modules.contains('webp-roi'))
-      _nativeRoiModuleEvidence(
+      await _nativeRoiModuleEvidence(
         platform: platform,
+        stats: stats,
         moduleId: 'pixa.processor.webp',
         entrypointSymbol: 'pixa_webp_processor_plugin_init',
         processorOperation: 'tile:webp',
-        runtimeCapability: stats.hostLinkedModules >= expectedHostLinked &&
-            stats.processors >= expectedProcessors &&
-            stats.canUseSingleHostBinary,
+        fixture: _webpRoiFixture(),
+        expectedFormat: PixaImageMetadataFormat.webp,
+        tileX: 15,
+        tileY: 17,
       ),
   ];
 }
 
-Map<String, Object?> _nativeRoiModuleEvidence({
+Future<Map<String, Object?>> _nativeRoiModuleEvidence({
   required String platform,
+  required PixaRuntimePluginRegistryStats stats,
   required String moduleId,
   required String entrypointSymbol,
   required String processorOperation,
-  required bool runtimeCapability,
-}) {
+  required Uint8List fixture,
+  required PixaImageMetadataFormat expectedFormat,
+  required int tileX,
+  required int tileY,
+}) async {
+  final PixaRuntimePluginModuleSnapshot? module = stats.moduleById(moduleId);
+  final _NativeRoiProcessorCheck processorCheck =
+      await _runNativeRoiProcessorCheck(
+    moduleId: moduleId,
+    fixture: fixture,
+    expectedFormat: expectedFormat,
+    tileX: tileX,
+    tileY: tileY,
+  );
+  final bool manifestEntrypoint =
+      module?.entrypointSymbol == entrypointSymbol;
+  final bool nativeLink =
+      module?.deployment ==
+          PixaRuntimePluginDeployment.hostLinkedPluginModule &&
+      processorCheck.passed;
+  final bool processorRoute =
+      module?.processorOperations.contains(processorOperation) == true;
+  final bool runtimeCapability =
+      module != null && stats.canUseSingleHostBinary && processorCheck.passed;
   final List<Map<String, Object?>> checks = <Map<String, Object?>>[
-    <String, Object?>{'name': 'manifestEntrypoint', 'passed': true},
-    <String, Object?>{'name': 'nativeLink', 'passed': true},
-    <String, Object?>{'name': 'processorRoute', 'passed': true},
+    <String, Object?>{
+      'name': 'manifestEntrypoint',
+      'passed': manifestEntrypoint,
+      'detail': module == null
+          ? 'runtime registry did not contain the expected module'
+          : 'observed entrypoint: ' +
+              (module.entrypointSymbol ?? '<none>'),
+    },
+    <String, Object?>{
+      'name': 'nativeLink',
+      'passed': nativeLink,
+      'detail': processorCheck.detail,
+    },
+    <String, Object?>{
+      'name': 'processorRoute',
+      'passed': processorRoute,
+      'detail': 'observed routes: ' +
+          (module?.processorOperations.join(',') ?? '<none>'),
+    },
     <String, Object?>{
       'name': 'runtimeCapability',
       'passed': runtimeCapability,
+      'detail': processorCheck.detail,
     },
   ];
   return <String, Object?>{
@@ -633,6 +683,108 @@ Map<String, Object?> _nativeRoiModuleEvidence({
         check['passed'] == true),
     'checks': checks,
   };
+}
+
+final class _NativeRoiProcessorCheck {
+  const _NativeRoiProcessorCheck({required this.passed, required this.detail});
+
+  final bool passed;
+  final String detail;
+}
+
+Future<_NativeRoiProcessorCheck> _runNativeRoiProcessorCheck({
+  required String moduleId,
+  required Uint8List fixture,
+  required PixaImageMetadataFormat expectedFormat,
+  required int tileX,
+  required int tileY,
+}) async {
+  try {
+    final PixaImageMetadata input = PixaImageMetadata.parseEncoded(fixture);
+    if (input.format != expectedFormat ||
+        input.width != 64 ||
+        input.height != 64) {
+      return _NativeRoiProcessorCheck(
+        passed: false,
+        detail: 'fixture metadata was not the expected 64x64 format',
+      );
+    }
+    final PixaPipelineLoad load = await Pixa.pipeline.load(
+      PixaRequest(
+        source: PixaSource.bytes(fixture, id: 'platform-roi-' + moduleId),
+        processors: <String>[
+          PixaProcessors.tileCropResize(
+            x: tileX,
+            y: tileY,
+            width: 16,
+            height: 16,
+            decodedWidth: 8,
+            decodedHeight: 8,
+            filter: PixaResizeFilter.nearest,
+          ),
+        ],
+        cachePolicy: const PixaCachePolicy.noStore(),
+        limits: const PixaRequestLimits(
+          maxEncodedBytes: 4096,
+          maxDecodedPixels: 512,
+          maxProcessorOutputBytes: 8192,
+        ),
+      ),
+    );
+    try {
+      final Uint8List output = load.bytes;
+      final bool pngMagic = output.length >= 8 &&
+          output[0] == 0x89 &&
+          output[1] == 0x50 &&
+          output[2] == 0x4e &&
+          output[3] == 0x47 &&
+          output[4] == 0x0d &&
+          output[5] == 0x0a &&
+          output[6] == 0x1a &&
+          output[7] == 0x0a;
+      final PixaImageMetadata metadata =
+          PixaImageMetadata.parseEncoded(output);
+      final bool valid = pngMagic &&
+          metadata.format == PixaImageMetadataFormat.png &&
+          metadata.width == 8 &&
+          metadata.height == 8;
+      return _NativeRoiProcessorCheck(
+        passed: valid,
+        detail: valid
+            ? 'runtime processed a 64x64 fixture under a 512-pixel full-frame '
+                'budget into a valid 8x8 PNG'
+            : 'runtime ROI output was not a valid 8x8 PNG',
+      );
+    } finally {
+      load.dispose();
+    }
+  } on Object catch (error) {
+    return _NativeRoiProcessorCheck(
+      passed: false,
+      detail: 'runtime ROI execution failed: ' + error.toString(),
+    );
+  }
+}
+
+Uint8List _jpegRoiFixture() {
+  return base64Decode(
+    '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQE'
+    'BAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/'
+    'wAALCABAAEABAREA/8QAFgABAQEAAAAAAAAAAAAAAAAAAAcJ/8QAGRAAAwEB'
+    'AQAAAAAAAAAAAAAAABahYwFT/9oACAEBAAA/ANLWTShk0oZNKGTShk0oZNKG'
+    'TShk0pKGbvpQzd9KGbvpQzd9KGbvpQzd9KGbvpQzd9KSlk0oZNKGTShk0oZN'
+    'KGTShk0oZNKSpk0oZNKGTShk0oZNKGTShk0oZNKSdk0oZNKGTShk0oZNKGTS'
+    'hk0oZNKSlk0oZNKGTShk0oZNKGTShk0oZNKSlm56UM3PShm56UM3PShm56UM'
+    '3PShm56UM3PSkoZNKGTShk0oZNKGTShk0oZNKGTSn//Z',
+  );
+}
+
+Uint8List _webpRoiFixture() {
+  return base64Decode(
+    'UklGRnoAAABXRUJQVlA4IG4AAACQBgCdASpAAEAAPhkKhEEhBQKBvwQAYS0g'
+    'Anmj7HZ/+qCr/QRvMpezFCn4J4SmZVNDTk02VVOQd+LjR1kgAP7/2xNtFuX1'
+    '5AYOrLqvT8DtBLNr0MeqmoYSI8YTDqoSmCFBMIVPosvKajNyefoAAA==',
+  );
 }
 
 Uint8List _minimalGif() {
@@ -675,6 +827,22 @@ Uint8List _minimalGif() {
   ]);
 }
 ''');
+}
+
+String _gitCommit(Directory root) {
+  final ProcessResult result = Process.runSync('git', const <String>[
+    'rev-parse',
+    'HEAD',
+  ], workingDirectory: root.path);
+  final String value = result.stdout.toString().trim().toLowerCase();
+  if (result.exitCode != 0 ||
+      !RegExp(r'^[0-9a-f]{40}(?:[0-9a-f]{24})?$').hasMatch(value)) {
+    throw StateError(
+      'Unable to resolve the Git commit for platform evidence: '
+      '${result.stderr}',
+    );
+  }
+  return value;
 }
 
 String _hookUserDefines(_Options options) {

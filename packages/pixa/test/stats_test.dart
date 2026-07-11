@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -13,6 +14,8 @@ import 'package:pixa/pixa_debug.dart'
         PixaDisplayDecoderSnapshot,
         PixaRuntimeCapabilities,
         PixaRuntimeImageFormatCapability,
+        PixaRuntimePluginDeployment,
+        PixaRuntimePluginModuleSnapshot,
         PixaRuntimePlatformSelfCheck,
         PixaRuntimePluginRegistryStats,
         PixaRuntimePlatformContract,
@@ -28,7 +31,7 @@ void main() {
 
   test('PixaCacheStats computes live runtime handles and sessions', () {
     const PixaCacheStats stats = PixaCacheStats(
-      memoryEntries: 1,
+      memoryEntries: 3,
       memoryBytes: 128,
       memoryHits: 2,
       memoryMisses: 1,
@@ -37,6 +40,8 @@ void main() {
       diskWrites: 5,
       diskCorruptionRecoveries: 6,
       evictions: 7,
+      processedMemoryEntries: 1,
+      processedMemoryBytes: 32,
       ownedBufferHandlesCreated: 10,
       ownedBufferHandlesFreed: 7,
       progressSessionsCreated: 8,
@@ -46,6 +51,8 @@ void main() {
     expect(stats.liveOwnedBufferHandles, 3);
     expect(stats.liveProgressSessions, 2);
     expect(stats.hitRate, 0.5);
+    expect(stats.encodedMemoryEntries, 2);
+    expect(stats.encodedMemoryBytes, 96);
   });
 
   test('PixaSchedulerStats exposes debug json', () {
@@ -243,6 +250,8 @@ void main() {
         diskWrites: 5,
         diskCorruptionRecoveries: 6,
         evictions: 7,
+        processedMemoryEntries: 1,
+        processedMemoryBytes: 32,
         ownedBufferHandlesCreated: 10,
         ownedBufferHandlesFreed: 8,
         progressSessionsCreated: 12,
@@ -311,6 +320,10 @@ void main() {
 
     expect(cacheStats['hitRate'], 0.5);
     expect(cacheStats['diskCorruptionRecoveries'], 6);
+    expect(cacheStats['processedMemoryEntries'], 1);
+    expect(cacheStats['processedMemoryBytes'], 32);
+    expect(cacheStats['encodedMemoryEntries'], 0);
+    expect(cacheStats['encodedMemoryBytes'], 96);
     expect(cacheStats['liveOwnedBufferHandles'], 2);
     expect(cacheStats['liveProgressSessions'], 3);
     expect(displayDecoder['selector'], 'pixa-display-decoder-v1');
@@ -1166,23 +1179,25 @@ void main() {
     expect(stats.diskWrites, 7);
     expect(stats.diskCorruptionRecoveries, 8);
     expect(stats.staleRevalidatesInFlight, 14);
-    expect(stats.processedMemoryHits, 15);
-    expect(stats.processedMemoryMisses, 16);
-    expect(stats.processedMemoryEvictions, 17);
-    expect(stats.processedDiskHits, 18);
-    expect(stats.processedDiskMisses, 19);
-    expect(stats.processedDiskStaleHits, 20);
-    expect(stats.processedDiskWrites, 21);
-    expect(stats.processedDiskCorruptionRecoveries, 22);
-    expect(stats.ownedBufferHandlesCreated, 23);
-    expect(stats.progressEventsDrained, 30);
+    expect(stats.processedMemoryEntries, 15);
+    expect(stats.processedMemoryBytes, 16);
+    expect(stats.processedMemoryHits, 17);
+    expect(stats.processedMemoryMisses, 18);
+    expect(stats.processedMemoryEvictions, 19);
+    expect(stats.processedDiskHits, 20);
+    expect(stats.processedDiskMisses, 21);
+    expect(stats.processedDiskStaleHits, 22);
+    expect(stats.processedDiskWrites, 23);
+    expect(stats.processedDiskCorruptionRecoveries, 24);
+    expect(stats.ownedBufferHandlesCreated, 25);
+    expect(stats.progressEventsDrained, 32);
   });
 
   test('runtime plugin registry stats decode binary payload', () {
     final PixaRuntimePluginRegistryStats stats =
         PixaRuntimePluginRegistryStats.decode(_binaryPluginStatsPayload());
 
-    expect(stats.modules, 1);
+    expect(stats.modules, 2);
     expect(stats.builtInModules, 2);
     expect(stats.hostLinkedModules, 3);
     expect(stats.assetModules, 4);
@@ -1202,6 +1217,172 @@ void main() {
     expect(stats.processors, 10);
     expect(stats.cacheStores, 11);
     expect(stats.canUseSingleHostBinary, isFalse);
+    expect(stats.moduleSnapshots, hasLength(2));
+    expect(stats.moduleSnapshots, isA<List<PixaRuntimePluginModuleSnapshot>>());
+    expect(stats.moduleSnapshots.first.moduleId, 'alpha.processor');
+    expect(
+      stats.moduleSnapshots.first.deployment,
+      PixaRuntimePluginDeployment.builtInHostModule,
+    );
+    expect(stats.moduleSnapshots.first.entrypointSymbol, isNull);
+    expect(stats.moduleSnapshots.first.processorOperations, <String>[
+      'resize',
+      'tile:jpeg',
+    ]);
+    expect(stats.moduleSnapshots.last.moduleId, 'zeta.decoder');
+    expect(
+      stats.moduleSnapshots.last.deployment,
+      PixaRuntimePluginDeployment.hostLinkedPluginModule,
+    );
+    expect(stats.moduleSnapshots.last.entrypointSymbol, 'pixa_zeta_init');
+    expect(stats.moduleSnapshots.last.processorOperations, isEmpty);
+    expect(stats.moduleById('zeta.decoder'), same(stats.moduleSnapshots.last));
+    expect(stats.moduleById('missing.module'), isNull);
+    expect(
+      () => stats.moduleSnapshots.first.processorOperations.add('blur'),
+      throwsUnsupportedError,
+    );
+    expect(
+      () => stats.moduleSnapshots.add(stats.moduleSnapshots.first),
+      throwsUnsupportedError,
+    );
+  });
+
+  test('runtime plugin registry stats reject obsolete PXM1 payload', () {
+    final Uint8List payload = _binaryPluginStatsPayload()..[3] = 0x31;
+
+    expect(
+      () => PixaRuntimePluginRegistryStats.decode(payload),
+      throwsFormatException,
+    );
+  });
+
+  test('runtime plugin registry stats reject inconsistent module count', () {
+    final Uint8List payload = _binaryPluginStatsPayload(reportedModules: 1);
+
+    expect(
+      () => PixaRuntimePluginRegistryStats.decode(payload),
+      throwsFormatException,
+    );
+  });
+
+  test('runtime plugin module ids follow Rust UTF-8 byte order', () {
+    final List<String> moduleIds = <String>[
+      'module.\uE000',
+      'module.\u{10000}',
+    ];
+
+    final PixaRuntimePluginRegistryStats stats =
+        PixaRuntimePluginRegistryStats.decode(
+          _binaryPluginStatsPayload(moduleIds: moduleIds),
+        );
+
+    expect(
+      stats.moduleSnapshots.map(
+        (PixaRuntimePluginModuleSnapshot module) => module.moduleId,
+      ),
+      moduleIds,
+    );
+  });
+
+  test('runtime plugin module ids reject UTF-8 byte order reversal', () {
+    expect(
+      () => PixaRuntimePluginRegistryStats.decode(
+        _binaryPluginStatsPayload(
+          moduleIds: <String>['module.\u{10000}', 'module.\uE000'],
+        ),
+      ),
+      throwsFormatException,
+    );
+  });
+
+  test('runtime plugin processor operations reject out-of-order routes', () {
+    expect(
+      () => PixaRuntimePluginRegistryStats.decode(
+        _binaryPluginStatsPayload(
+          firstProcessorOperations: <String>['tile:jpeg', 'resize'],
+        ),
+      ),
+      throwsFormatException,
+    );
+  });
+
+  test('runtime plugin processor operations reject duplicate routes', () {
+    expect(
+      () => PixaRuntimePluginRegistryStats.decode(
+        _binaryPluginStatsPayload(
+          firstProcessorOperations: <String>['resize', 'resize'],
+        ),
+      ),
+      throwsFormatException,
+    );
+  });
+
+  test('runtime plugin module rejects invalid deployment tag', () {
+    expect(
+      () => PixaRuntimePluginRegistryStats.decode(
+        _binaryPluginStatsPayload(firstDeploymentTag: 4),
+      ),
+      throwsFormatException,
+    );
+  });
+
+  test('runtime plugin module rejects invalid optional string tag', () {
+    expect(
+      () => PixaRuntimePluginRegistryStats.decode(
+        _binaryPluginStatsPayload(firstEntrypointTag: 2),
+      ),
+      throwsFormatException,
+    );
+  });
+
+  test('runtime plugin diagnostics reject payload over one MiB', () {
+    final Uint8List validPayload = _binaryPluginStatsPayload();
+    final Uint8List oversizedPayload = Uint8List(1024 * 1024 + 1)
+      ..setRange(0, validPayload.length, validPayload);
+
+    expect(
+      () => PixaRuntimePluginRegistryStats.decode(oversizedPayload),
+      _throwsFormatExceptionContaining('PXM2 payload exceeds byte limit'),
+    );
+  });
+
+  test('runtime plugin diagnostics reject oversized reported module count', () {
+    expect(
+      () => PixaRuntimePluginRegistryStats.decode(
+        _binaryPluginStatsPayload(reportedModules: 1025),
+      ),
+      _throwsFormatExceptionContaining('PXM2 module count exceeds item limit'),
+    );
+  });
+
+  test('runtime plugin diagnostics reject oversized module list count', () {
+    expect(
+      () => PixaRuntimePluginRegistryStats.decode(
+        _binaryPluginStatsPayload(encodedModuleCount: 1025),
+      ),
+      _throwsFormatExceptionContaining('PXM2 module count exceeds item limit'),
+    );
+  });
+
+  test('runtime plugin diagnostics reject oversized UTF-8 string', () {
+    expect(
+      () => PixaRuntimePluginRegistryStats.decode(
+        _binaryPluginStatsPayload(
+          moduleIds: <String>[_asciiString(16 * 1024 + 1), 'zeta.decoder'],
+        ),
+      ),
+      _throwsFormatExceptionContaining('string exceeds byte limit'),
+    );
+  });
+
+  test('runtime plugin diagnostics reject oversized processor route list', () {
+    expect(
+      () => PixaRuntimePluginRegistryStats.decode(
+        _binaryPluginStatsPayload(encodedFirstProcessorOperationCount: 1025),
+      ),
+      _throwsFormatExceptionContaining('PXM2 string list exceeds item limit'),
+    );
   });
 
   test('runtime failure decodes binary payload', () {
@@ -1247,16 +1428,39 @@ Uint8List _binaryProgressPayload({int stageCode = 2, int flags = 0x07}) {
 Uint8List _binaryCacheStatsPayload() {
   final BytesBuilder builder = BytesBuilder(copy: false);
   builder.add(<int>[0x50, 0x58, 0x53, 0x31]);
-  for (int value = 1; value <= 30; value++) {
+  for (int value = 1; value <= 32; value++) {
     _addUint64(builder, value);
   }
   return builder.takeBytes();
 }
 
-Uint8List _binaryPluginStatsPayload() {
+Uint8List _binaryPluginStatsPayload({
+  int? reportedModules,
+  List<String> moduleIds = const <String>['alpha.processor', 'zeta.decoder'],
+  List<String> firstProcessorOperations = const <String>['resize', 'tile:jpeg'],
+  int firstDeploymentTag = 0,
+  int firstEntrypointTag = 0,
+  int? encodedModuleCount,
+  int? encodedFirstProcessorOperationCount,
+}) {
+  if (moduleIds.length != 2) {
+    throw ArgumentError.value(moduleIds, 'moduleIds', 'must contain two ids');
+  }
   final BytesBuilder builder = BytesBuilder(copy: false);
-  builder.add(<int>[0x50, 0x58, 0x4d, 0x31]);
-  for (int value = 1; value <= 11; value++) {
+  builder.add(<int>[0x50, 0x58, 0x4d, 0x32]);
+  for (final int value in <int>[
+    reportedModules ?? moduleIds.length,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+  ]) {
     _addUint64(builder, value);
   }
   _addUint32(builder, 2);
@@ -1265,6 +1469,25 @@ Uint8List _binaryPluginStatsPayload() {
   _addUint32(builder, 2);
   _addString(builder, 'image/jpeg');
   _addString(builder, 'image/png');
+  _addUint32(builder, encodedModuleCount ?? moduleIds.length);
+  _addString(builder, moduleIds.first);
+  builder.addByte(firstDeploymentTag);
+  builder.addByte(firstEntrypointTag);
+  if (firstEntrypointTag == 1) {
+    _addString(builder, 'pixa_alpha_init');
+  }
+  _addUint32(
+    builder,
+    encodedFirstProcessorOperationCount ?? firstProcessorOperations.length,
+  );
+  for (final String operation in firstProcessorOperations) {
+    _addString(builder, operation);
+  }
+  _addString(builder, moduleIds.last);
+  builder.addByte(1);
+  builder.addByte(1);
+  _addString(builder, 'pixa_zeta_init');
+  _addUint32(builder, 0);
   return builder.takeBytes();
 }
 
@@ -1292,7 +1515,21 @@ void _addInt64(BytesBuilder builder, int value) {
 }
 
 void _addString(BytesBuilder builder, String value) {
-  final Uint8List bytes = Uint8List.fromList(value.codeUnits);
+  final Uint8List bytes = Uint8List.fromList(utf8.encode(value));
   _addUint32(builder, bytes.length);
   builder.add(bytes);
+}
+
+String _asciiString(int length) {
+  return String.fromCharCodes(List<int>.filled(length, 0x61));
+}
+
+Matcher _throwsFormatExceptionContaining(String message) {
+  return throwsA(
+    isA<FormatException>().having(
+      (FormatException error) => error.message.toString(),
+      'message',
+      contains(message),
+    ),
+  );
 }

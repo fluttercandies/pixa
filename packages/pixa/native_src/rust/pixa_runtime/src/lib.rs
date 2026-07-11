@@ -7,7 +7,8 @@ use libwebp_sys as _;
 use pixa_core::cache::DiskCache;
 use pixa_core::cache::SharedBytes;
 use pixa_core::cancel::{
-    cancel_token, cancel_token_handle, create_cancel_token, free_cancel_token,
+    cancel_token, cancel_token_handle, cancelled_error, create_cancel_token, free_cancel_token,
+    RuntimeCancelToken,
 };
 use pixa_core::request::decode_binary_request;
 use pixa_core::{
@@ -15,7 +16,7 @@ use pixa_core::{
     disk_trim_to_configured_budget, image_analysis, image_metadata, load_image_with_cancel,
     load_image_with_cancel_and_progress, memory_clear, memory_clear_namespace, memory_contains,
     memory_get_processed, memory_pin, memory_put_processed, memory_remove, memory_trim_to_bytes,
-    memory_unpin, plugin_registry_stats, register_plugin_module,
+    memory_unpin, plugin_registry_diagnostics, register_plugin_module,
     register_plugin_module_with_executor, runtime_image_format_capabilities, ImageAnalysis,
     ImageMetadata, ImageMetadataFormat, RuntimeCacheStats, RuntimeError, RuntimePipelineConfig,
     RuntimePluginCacheClearNamespaceRequest as PluginCacheClearNamespaceRequest,
@@ -35,7 +36,7 @@ use pixa_core::{
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::c_void;
 use std::slice;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 #[cfg(feature = "jpeg-turbo-roi")]
 use turbojpeg_sys as _;
@@ -48,6 +49,13 @@ mod mjpeg_video_frame;
 mod webp_processor;
 
 const MAX_PROGRESS_EVENTS_PER_SESSION: usize = 1024;
+const PXM2_MAGIC: &[u8; 4] = b"PXM2";
+const PXM2_MAX_PAYLOAD_BYTES: usize = 1024 * 1024;
+const PXM2_MAX_MODULES: usize = 1024;
+const PXM2_MAX_STRING_BYTES: usize = 16 * 1024;
+const PXM2_MAX_STRING_LIST_ITEMS: usize = 1024;
+const PIXA_PLUGIN_MIME_CAPACITY: usize = 128;
+const MAX_PLUGIN_FETCH_PROGRESS_EVENTS: usize = 1024;
 
 static PROGRESS_SESSIONS: OnceLock<Mutex<BTreeMap<u64, ProgressSession>>> = OnceLock::new();
 static NEXT_PROGRESS_SESSION_ID: AtomicU64 = AtomicU64::new(1);
@@ -62,6 +70,11 @@ static PROGRESS_EVENTS_DRAINED: AtomicU64 = AtomicU64::new(0);
 static GENERATED_PLUGIN_REGISTRATION: OnceLock<RuntimeResult<()>> = OnceLock::new();
 static QOI_DECODER_HOST_API: OnceLock<PixaPluginHostApiV1> = OnceLock::new();
 static QOI_DECODER_OUTPUT_MIME: &[u8] = b"image/png";
+static PLUGIN_HOST_BUFFERS: OnceLock<Mutex<BTreeMap<usize, PluginHostBuffer>>> = OnceLock::new();
+static NEXT_PLUGIN_HOST_BUFFER_ID: AtomicUsize = AtomicUsize::new(1);
+static PLUGIN_FETCH_CONTEXTS: OnceLock<Mutex<BTreeMap<usize, Arc<HostLinkedFetchContext>>>> =
+    OnceLock::new();
+static NEXT_PLUGIN_FETCH_CONTEXT_ID: AtomicUsize = AtomicUsize::new(1);
 
 type GeneratedPluginEntrypoint = unsafe extern "C" fn(
     host: *const PixaPluginHostApiV1,
@@ -101,16 +114,27 @@ type PixaPluginCacheClearNamespaceFn =
 #[derive(Clone, Copy)]
 struct PixaPluginHostApiV1 {
     abi_version: u32,
+    struct_size: u32,
     buffer_alloc: Option<unsafe extern "C" fn(len: usize) -> *mut c_void>,
     buffer_data: Option<unsafe extern "C" fn(handle: *mut c_void) -> *mut u8>,
     buffer_len: Option<unsafe extern "C" fn(handle: *const c_void) -> usize>,
     buffer_free: Option<unsafe extern "C" fn(handle: *mut c_void)>,
+    cancel_is_requested: Option<unsafe extern "C" fn(context: *const c_void) -> i32>,
+    progress_emit_fetch: Option<
+        unsafe extern "C" fn(
+            context: *const c_void,
+            received_bytes: usize,
+            expected_bytes: usize,
+            has_expected_bytes: bool,
+        ) -> i32,
+    >,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct PixaPluginModuleApiV1 {
     abi_version: u32,
+    struct_size: u32,
     fetch: Option<PixaPluginFetchFn>,
     decode: Option<PixaPluginDecodeFn>,
     process: Option<PixaPluginProcessFn>,
@@ -122,6 +146,9 @@ struct PixaPluginModuleApiV1 {
 
 #[repr(C)]
 struct PixaPluginFetchRequestV1 {
+    abi_version: u32,
+    struct_size: u32,
+    context: *const c_void,
     source_kind_ptr: *const u8,
     source_kind_len: usize,
     locator_ptr: *const u8,
@@ -136,6 +163,8 @@ struct PixaPluginFetchRequestV1 {
 
 #[repr(C)]
 struct PixaPluginDecodeRequestV1 {
+    abi_version: u32,
+    struct_size: u32,
     mime_type_ptr: *const u8,
     mime_type_len: usize,
     format_id_ptr: *const u8,
@@ -150,6 +179,8 @@ struct PixaPluginDecodeRequestV1 {
 
 #[repr(C)]
 struct PixaPluginProcessRequestV1 {
+    abi_version: u32,
+    struct_size: u32,
     operation_ptr: *const u8,
     operation_len: usize,
     descriptor_ptr: *const u8,
@@ -166,13 +197,17 @@ struct PixaPluginProcessRequestV1 {
 
 #[repr(C)]
 struct PixaPluginOutputV1 {
+    abi_version: u32,
+    struct_size: u32,
     buffer: *mut c_void,
-    mime_type_ptr: *const u8,
     mime_type_len: usize,
+    mime_type: [u8; PIXA_PLUGIN_MIME_CAPACITY],
 }
 
 #[repr(C)]
 struct PixaPluginCacheReadRequestV1 {
+    abi_version: u32,
+    struct_size: u32,
     namespace_ptr: *const u8,
     namespace_len: usize,
     key_ptr: *const u8,
@@ -183,6 +218,8 @@ struct PixaPluginCacheReadRequestV1 {
 
 #[repr(C)]
 struct PixaPluginCacheWriteRequestV1 {
+    abi_version: u32,
+    struct_size: u32,
     namespace_ptr: *const u8,
     namespace_len: usize,
     key_ptr: *const u8,
@@ -196,6 +233,8 @@ struct PixaPluginCacheWriteRequestV1 {
 
 #[repr(C)]
 struct PixaPluginCacheRemoveRequestV1 {
+    abi_version: u32,
+    struct_size: u32,
     namespace_ptr: *const u8,
     namespace_len: usize,
     key_ptr: *const u8,
@@ -204,12 +243,16 @@ struct PixaPluginCacheRemoveRequestV1 {
 
 #[repr(C)]
 struct PixaPluginCacheClearNamespaceRequestV1 {
+    abi_version: u32,
+    struct_size: u32,
     namespace_ptr: *const u8,
     namespace_len: usize,
 }
 
 #[repr(C)]
 struct PixaPluginCacheReadOutputV1 {
+    abi_version: u32,
+    struct_size: u32,
     status: u8,
     is_stale: bool,
     payload: PixaPluginOutputV1,
@@ -279,9 +322,56 @@ enum OwnedBufferStorage {
     Shared(SharedBytes),
 }
 
-#[repr(C)]
 struct PluginHostBuffer {
     bytes: Vec<u8>,
+}
+
+struct HostLinkedFetchContext {
+    cancel_token: Option<RuntimeCancelToken>,
+    progress_events: Mutex<Vec<RuntimeProgressEvent>>,
+}
+
+impl HostLinkedFetchContext {
+    fn new(cancel_token: Option<&RuntimeCancelToken>) -> Self {
+        Self {
+            cancel_token: cancel_token.cloned(),
+            progress_events: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn push_progress(&self, event: RuntimeProgressEvent) -> Result<(), ()> {
+        let mut events = self.progress_events.lock().map_err(|_| ())?;
+        if events.len() >= MAX_PLUGIN_FETCH_PROGRESS_EVENTS {
+            return Err(());
+        }
+        events.push(event);
+        Ok(())
+    }
+
+    fn drain_progress(&self) -> Vec<RuntimeProgressEvent> {
+        self.progress_events
+            .lock()
+            .map(|mut events| std::mem::take(&mut *events))
+            .unwrap_or_default()
+    }
+}
+
+struct HostLinkedFetchContextHandle {
+    id: usize,
+}
+
+impl HostLinkedFetchContextHandle {
+    fn as_ptr(&self) -> *const c_void {
+        self.id as *const c_void
+    }
+}
+
+impl Drop for HostLinkedFetchContextHandle {
+    fn drop(&mut self) {
+        if let Ok(mut contexts) = plugin_fetch_contexts().lock() {
+            contexts.remove(&self.id);
+        }
+    }
 }
 
 impl OwnedBufferHandle {
@@ -414,10 +504,13 @@ fn generated_capabilities(capabilities: GeneratedPluginCapabilities) -> PluginCa
 
 static PLUGIN_HOST_API_V1: PixaPluginHostApiV1 = PixaPluginHostApiV1 {
     abi_version: pixa_core::PIXA_PLUGIN_ABI_VERSION,
+    struct_size: std::mem::size_of::<PixaPluginHostApiV1>() as u32,
     buffer_alloc: Some(plugin_host_buffer_alloc),
     buffer_data: Some(plugin_host_buffer_data),
     buffer_len: Some(plugin_host_buffer_len),
     buffer_free: Some(plugin_host_buffer_free),
+    cancel_is_requested: Some(plugin_host_cancel_is_requested),
+    progress_emit_fetch: Some(plugin_host_progress_emit_fetch),
 };
 
 #[derive(Clone)]
@@ -431,7 +524,20 @@ impl PluginExecutor for HostLinkedPluginExecutor {
         let Some(fetch) = self.callbacks.fetch else {
             return Ok(None);
         };
+        let host_context = request
+            .context
+            .map(|context| Arc::new(HostLinkedFetchContext::new(context.cancel_token)));
+        let host_context_handle = host_context
+            .as_ref()
+            .map(|context| register_host_linked_fetch_context(context.clone()))
+            .transpose()?;
         let abi_request = PixaPluginFetchRequestV1 {
+            abi_version: pixa_core::PIXA_PLUGIN_ABI_VERSION,
+            struct_size: abi_struct_size::<PixaPluginFetchRequestV1>(),
+            context: host_context_handle
+                .as_ref()
+                .map(HostLinkedFetchContextHandle::as_ptr)
+                .unwrap_or(std::ptr::null()),
             source_kind_ptr: request.source_kind.as_ptr(),
             source_kind_len: request.source_kind.len(),
             locator_ptr: request.locator.as_ptr(),
@@ -456,6 +562,22 @@ impl PluginExecutor for HostLinkedPluginExecutor {
         };
         let mut output = empty_plugin_output();
         let status = unsafe { fetch(&abi_request, &mut output) };
+        if let Some(context) = &host_context {
+            let progress_sink = request.context.and_then(|context| context.progress_sink);
+            for event in context.drain_progress() {
+                if let Some(sink) = progress_sink {
+                    sink.emit(event);
+                }
+            }
+        }
+        if host_context
+            .as_ref()
+            .and_then(|context| context.cancel_token.as_ref())
+            .is_some_and(RuntimeCancelToken::is_cancelled)
+        {
+            unsafe { plugin_host_buffer_free(output.buffer) };
+            return Err(cancelled_error());
+        }
         take_plugin_output(
             self.module_id,
             "fetch",
@@ -475,6 +597,8 @@ impl PluginExecutor for HostLinkedPluginExecutor {
             .map(|format_id| (format_id.as_ptr(), format_id.len()))
             .unwrap_or((std::ptr::null(), 0));
         let abi_request = PixaPluginDecodeRequestV1 {
+            abi_version: pixa_core::PIXA_PLUGIN_ABI_VERSION,
+            struct_size: abi_struct_size::<PixaPluginDecodeRequestV1>(),
             mime_type_ptr: request.mime_type.as_ptr(),
             mime_type_len: request.mime_type.len(),
             format_id_ptr,
@@ -511,6 +635,8 @@ impl PluginExecutor for HostLinkedPluginExecutor {
             .map(|mime_type| (mime_type.as_ptr(), mime_type.len()))
             .unwrap_or((std::ptr::null(), 0));
         let abi_request = PixaPluginProcessRequestV1 {
+            abi_version: pixa_core::PIXA_PLUGIN_ABI_VERSION,
+            struct_size: abi_struct_size::<PixaPluginProcessRequestV1>(),
             operation_ptr: request.operation.as_ptr(),
             operation_len: request.operation.len(),
             descriptor_ptr: request.descriptor.as_ptr(),
@@ -544,6 +670,8 @@ impl PluginExecutor for HostLinkedPluginExecutor {
             return Ok(None);
         };
         let abi_request = PixaPluginCacheReadRequestV1 {
+            abi_version: pixa_core::PIXA_PLUGIN_ABI_VERSION,
+            struct_size: abi_struct_size::<PixaPluginCacheReadRequestV1>(),
             namespace_ptr: request.namespace.as_ptr(),
             namespace_len: request.namespace.len(),
             key_ptr: request.key.as_ptr(),
@@ -552,6 +680,8 @@ impl PluginExecutor for HostLinkedPluginExecutor {
             max_output_bytes: request.max_output_bytes,
         };
         let mut output = PixaPluginCacheReadOutputV1 {
+            abi_version: pixa_core::PIXA_PLUGIN_ABI_VERSION,
+            struct_size: abi_struct_size::<PixaPluginCacheReadOutputV1>(),
             status: 0,
             is_stale: false,
             payload: empty_plugin_output(),
@@ -611,6 +741,8 @@ impl PluginExecutor for HostLinkedPluginExecutor {
             return Ok(None);
         };
         let abi_request = PixaPluginCacheWriteRequestV1 {
+            abi_version: pixa_core::PIXA_PLUGIN_ABI_VERSION,
+            struct_size: abi_struct_size::<PixaPluginCacheWriteRequestV1>(),
             namespace_ptr: request.namespace.as_ptr(),
             namespace_len: request.namespace.len(),
             key_ptr: request.key.as_ptr(),
@@ -632,6 +764,8 @@ impl PluginExecutor for HostLinkedPluginExecutor {
             return Ok(None);
         };
         let abi_request = PixaPluginCacheRemoveRequestV1 {
+            abi_version: pixa_core::PIXA_PLUGIN_ABI_VERSION,
+            struct_size: abi_struct_size::<PixaPluginCacheRemoveRequestV1>(),
             namespace_ptr: request.namespace.as_ptr(),
             namespace_len: request.namespace.len(),
             key_ptr: request.key.as_ptr(),
@@ -651,6 +785,8 @@ impl PluginExecutor for HostLinkedPluginExecutor {
             return Ok(None);
         };
         let abi_request = PixaPluginCacheClearNamespaceRequestV1 {
+            abi_version: pixa_core::PIXA_PLUGIN_ABI_VERSION,
+            struct_size: abi_struct_size::<PixaPluginCacheClearNamespaceRequestV1>(),
             namespace_ptr: request.namespace.as_ptr(),
             namespace_len: request.namespace.len(),
         };
@@ -665,16 +801,7 @@ fn instantiate_host_linked_executor(
     module: &GeneratedPluginModule,
     entrypoint: GeneratedPluginEntrypoint,
 ) -> RuntimeResult<HostLinkedPluginExecutor> {
-    let mut callbacks = PixaPluginModuleApiV1 {
-        abi_version: 0,
-        fetch: None,
-        decode: None,
-        process: None,
-        cache_read: None,
-        cache_write: None,
-        cache_remove: None,
-        cache_clear_namespace: None,
-    };
+    let mut callbacks = empty_plugin_module_api();
     let status = unsafe { entrypoint(&PLUGIN_HOST_API_V1, &mut callbacks) };
     if status != 0 {
         return Err(RuntimeError::new(
@@ -693,6 +820,16 @@ fn instantiate_host_linked_executor(
             format!(
                 "runtime plugin module {} returned unsupported ABI version {}",
                 module.module_id, callbacks.abi_version
+            ),
+        ));
+    }
+    if !abi_struct_size_is_compatible::<PixaPluginModuleApiV1>(callbacks.struct_size) {
+        return Err(RuntimeError::new(
+            "plugin",
+            false,
+            format!(
+                "runtime plugin module {} returned undersized ABI struct size {}",
+                module.module_id, callbacks.struct_size
             ),
         ));
     }
@@ -747,6 +884,33 @@ fn instantiate_host_linked_executor(
     })
 }
 
+fn empty_plugin_module_api() -> PixaPluginModuleApiV1 {
+    PixaPluginModuleApiV1 {
+        abi_version: pixa_core::PIXA_PLUGIN_ABI_VERSION,
+        struct_size: std::mem::size_of::<PixaPluginModuleApiV1>() as u32,
+        fetch: None,
+        decode: None,
+        process: None,
+        cache_read: None,
+        cache_write: None,
+        cache_remove: None,
+        cache_clear_namespace: None,
+    }
+}
+
+fn abi_struct_size_is_compatible<T>(struct_size: u32) -> bool {
+    usize::try_from(struct_size).is_ok_and(|size| size >= std::mem::size_of::<T>())
+}
+
+fn abi_struct_is_compatible<T>(abi_version: u32, struct_size: u32) -> bool {
+    abi_version == pixa_core::PIXA_PLUGIN_ABI_VERSION
+        && abi_struct_size_is_compatible::<T>(struct_size)
+}
+
+fn abi_struct_size<T>() -> u32 {
+    u32::try_from(std::mem::size_of::<T>()).expect("plugin ABI struct size must fit u32")
+}
+
 fn callback_status_to_result(
     stage: &'static str,
     module_id: &str,
@@ -765,10 +929,22 @@ fn callback_status_to_result(
 
 fn empty_plugin_output() -> PixaPluginOutputV1 {
     PixaPluginOutputV1 {
+        abi_version: pixa_core::PIXA_PLUGIN_ABI_VERSION,
+        struct_size: abi_struct_size::<PixaPluginOutputV1>(),
         buffer: std::ptr::null_mut(),
-        mime_type_ptr: std::ptr::null(),
         mime_type_len: 0,
+        mime_type: [0; PIXA_PLUGIN_MIME_CAPACITY],
     }
+}
+
+fn set_plugin_output_mime(output: &mut PixaPluginOutputV1, mime_type: &[u8]) -> Result<(), i32> {
+    if mime_type.len() > output.mime_type.len() {
+        return Err(-1);
+    }
+    output.mime_type.fill(0);
+    output.mime_type[..mime_type.len()].copy_from_slice(mime_type);
+    output.mime_type_len = mime_type.len();
+    Ok(())
 }
 
 fn take_plugin_output(
@@ -779,13 +955,21 @@ fn take_plugin_output(
     max_output_bytes: usize,
 ) -> RuntimeResult<PluginOutput> {
     if status != 0 {
-        unsafe {
-            plugin_host_buffer_free(output.buffer);
-        }
+        unsafe { plugin_host_buffer_free(output.buffer) };
         return Err(RuntimeError::new(
             stage,
             false,
             format!("runtime plugin module {module_id} returned status {status}"),
+        ));
+    }
+    if output.abi_version != pixa_core::PIXA_PLUGIN_ABI_VERSION
+        || !abi_struct_size_is_compatible::<PixaPluginOutputV1>(output.struct_size)
+    {
+        unsafe { plugin_host_buffer_free(output.buffer) };
+        return Err(RuntimeError::new(
+            "plugin",
+            false,
+            "runtime plugin returned incompatible output ABI header",
         ));
     }
     if output.buffer.is_null() {
@@ -795,31 +979,47 @@ fn take_plugin_output(
             format!("runtime plugin module {module_id} returned no output buffer"),
         ));
     }
-    let bytes = unsafe { take_plugin_host_buffer(output.buffer) };
-    if bytes.len() > max_output_bytes {
+    let Some(buffer_len) = plugin_host_buffer_len_checked(output.buffer) else {
+        return Err(RuntimeError::new(
+            stage,
+            false,
+            format!("runtime plugin module {module_id} returned a non host-owned output buffer"),
+        ));
+    };
+    if buffer_len > max_output_bytes {
+        unsafe { plugin_host_buffer_free(output.buffer) };
         return Err(RuntimeError::new(
             stage,
             false,
             format!("runtime plugin module {module_id} output exceeds byte limit"),
         ));
     }
-    let mime_type = plugin_output_mime_type(&output)?;
+    let mime_type = match plugin_output_mime_type(&output) {
+        Ok(mime_type) => mime_type,
+        Err(error) => {
+            unsafe { plugin_host_buffer_free(output.buffer) };
+            return Err(error);
+        }
+    };
+    let bytes = take_plugin_host_buffer(output.buffer).ok_or_else(|| {
+        RuntimeError::new(
+            stage,
+            false,
+            format!("runtime plugin module {module_id} output buffer ownership was lost"),
+        )
+    })?;
     Ok(PluginOutput::from_vec(bytes, mime_type.as_deref()))
 }
 
 fn plugin_output_mime_type(output: &PixaPluginOutputV1) -> RuntimeResult<Option<String>> {
-    if output.mime_type_ptr.is_null() {
-        if output.mime_type_len == 0 {
-            return Ok(None);
-        }
+    if output.mime_type_len > output.mime_type.len() {
         return Err(RuntimeError::new(
             "plugin",
             false,
-            "runtime plugin output MIME pointer is null",
+            "runtime plugin output MIME length exceeds inline capacity",
         ));
     }
-    let bytes = unsafe { bytes_from_ptr(output.mime_type_ptr, output.mime_type_len) }
-        .ok_or_else(|| RuntimeError::new("plugin", false, "invalid runtime plugin MIME bytes"))?;
+    let bytes = &output.mime_type[..output.mime_type_len];
     let mime_type = std::str::from_utf8(bytes)
         .map_err(|_| RuntimeError::new("plugin", false, "runtime plugin MIME is not UTF-8"))?
         .trim();
@@ -836,31 +1036,131 @@ unsafe extern "C" fn plugin_host_buffer_alloc(len: usize) -> *mut c_void {
         return std::ptr::null_mut();
     }
     bytes.resize(len, 0);
-    Box::into_raw(Box::new(PluginHostBuffer { bytes })).cast::<c_void>()
-}
-
-unsafe extern "C" fn plugin_host_buffer_data(handle: *mut c_void) -> *mut u8 {
-    let Some(buffer) = (handle as *mut PluginHostBuffer).as_mut() else {
+    let Ok(mut buffers) = plugin_host_buffers().lock() else {
         return std::ptr::null_mut();
     };
-    buffer.bytes.as_mut_ptr()
-}
-
-unsafe extern "C" fn plugin_host_buffer_len(handle: *const c_void) -> usize {
-    let Some(buffer) = (handle as *const PluginHostBuffer).as_ref() else {
-        return 0;
-    };
-    buffer.bytes.len()
-}
-
-unsafe extern "C" fn plugin_host_buffer_free(handle: *mut c_void) {
-    if !handle.is_null() {
-        drop(Box::from_raw(handle.cast::<PluginHostBuffer>()));
+    loop {
+        let id = NEXT_PLUGIN_HOST_BUFFER_ID.fetch_add(1, Ordering::Relaxed);
+        if id == 0 || buffers.contains_key(&id) {
+            continue;
+        }
+        buffers.insert(id, PluginHostBuffer { bytes });
+        return id as *mut c_void;
     }
 }
 
-unsafe fn take_plugin_host_buffer(handle: *mut c_void) -> Vec<u8> {
-    Box::from_raw(handle.cast::<PluginHostBuffer>()).bytes
+unsafe extern "C" fn plugin_host_buffer_data(handle: *mut c_void) -> *mut u8 {
+    let Some(key) = plugin_host_buffer_key(handle) else {
+        return std::ptr::null_mut();
+    };
+    plugin_host_buffers()
+        .lock()
+        .ok()
+        .and_then(|mut buffers| {
+            buffers
+                .get_mut(&key)
+                .map(|buffer| buffer.bytes.as_mut_ptr())
+        })
+        .unwrap_or(std::ptr::null_mut())
+}
+
+unsafe extern "C" fn plugin_host_buffer_len(handle: *const c_void) -> usize {
+    plugin_host_buffer_len_checked(handle).unwrap_or(0)
+}
+
+unsafe extern "C" fn plugin_host_buffer_free(handle: *mut c_void) {
+    if let Some(key) = plugin_host_buffer_key(handle) {
+        if let Ok(mut buffers) = plugin_host_buffers().lock() {
+            buffers.remove(&key);
+        }
+    }
+}
+
+fn take_plugin_host_buffer(handle: *mut c_void) -> Option<Vec<u8>> {
+    let key = plugin_host_buffer_key(handle)?;
+    plugin_host_buffers()
+        .lock()
+        .ok()?
+        .remove(&key)
+        .map(|buffer| buffer.bytes)
+}
+
+fn plugin_host_buffers() -> &'static Mutex<BTreeMap<usize, PluginHostBuffer>> {
+    PLUGIN_HOST_BUFFERS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn plugin_host_buffer_key(handle: *const c_void) -> Option<usize> {
+    (!handle.is_null()).then_some(handle as usize)
+}
+
+fn plugin_host_buffer_len_checked(handle: *const c_void) -> Option<usize> {
+    let key = plugin_host_buffer_key(handle)?;
+    plugin_host_buffers()
+        .lock()
+        .ok()?
+        .get(&key)
+        .map(|buffer| buffer.bytes.len())
+}
+
+fn register_host_linked_fetch_context(
+    context: Arc<HostLinkedFetchContext>,
+) -> RuntimeResult<HostLinkedFetchContextHandle> {
+    let mut contexts = plugin_fetch_contexts().lock().map_err(|_| {
+        RuntimeError::new("plugin", true, "runtime plugin fetch context lock poisoned")
+    })?;
+    loop {
+        let id = NEXT_PLUGIN_FETCH_CONTEXT_ID.fetch_add(1, Ordering::Relaxed);
+        if id == 0 || contexts.contains_key(&id) {
+            continue;
+        }
+        contexts.insert(id, context.clone());
+        return Ok(HostLinkedFetchContextHandle { id });
+    }
+}
+
+fn plugin_fetch_contexts() -> &'static Mutex<BTreeMap<usize, Arc<HostLinkedFetchContext>>> {
+    PLUGIN_FETCH_CONTEXTS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn plugin_fetch_context(context: *const c_void) -> Option<Arc<HostLinkedFetchContext>> {
+    let id = (!context.is_null()).then_some(context as usize)?;
+    plugin_fetch_contexts().lock().ok()?.get(&id).cloned()
+}
+
+#[cfg(test)]
+fn plugin_host_buffer_is_owned(handle: usize) -> bool {
+    plugin_host_buffers()
+        .lock()
+        .is_ok_and(|buffers| buffers.contains_key(&handle))
+}
+
+unsafe extern "C" fn plugin_host_cancel_is_requested(context: *const c_void) -> i32 {
+    let Some(context) = plugin_fetch_context(context) else {
+        return 1;
+    };
+    i32::from(
+        context
+            .cancel_token
+            .as_ref()
+            .is_some_and(RuntimeCancelToken::is_cancelled),
+    )
+}
+
+unsafe extern "C" fn plugin_host_progress_emit_fetch(
+    context: *const c_void,
+    received_bytes: usize,
+    expected_bytes: usize,
+    has_expected_bytes: bool,
+) -> i32 {
+    let Some(context) = plugin_fetch_context(context) else {
+        return -1;
+    };
+    context
+        .push_progress(
+            RuntimeProgressEvent::new(RuntimeProgressStage::Fetch, "plugin.fetch.progress")
+                .with_bytes(received_bytes, has_expected_bytes.then_some(expected_bytes)),
+        )
+        .map_or(-2, |()| 0)
 }
 
 /// Built-in QOI decoder module linked through the same plugin ABI as third-party decoders.
@@ -880,15 +1180,21 @@ pub unsafe extern "C" fn pixa_qoi_decoder_plugin_init(
     }
     let host_api = unsafe { *host };
     if host_api.abi_version != pixa_core::PIXA_PLUGIN_ABI_VERSION
+        || !abi_struct_size_is_compatible::<PixaPluginHostApiV1>(host_api.struct_size)
         || host_api.buffer_alloc.is_none()
         || host_api.buffer_data.is_none()
         || host_api.buffer_free.is_none()
     {
         return -2;
     }
+    let module_api = unsafe { &*module };
+    if module_api.abi_version != pixa_core::PIXA_PLUGIN_ABI_VERSION
+        || !abi_struct_size_is_compatible::<PixaPluginModuleApiV1>(module_api.struct_size)
+    {
+        return -2;
+    }
     let _ = QOI_DECODER_HOST_API.set(host_api);
     unsafe {
-        (*module).abi_version = pixa_core::PIXA_PLUGIN_ABI_VERSION;
         (*module).decode = Some(pixa_qoi_decoder_plugin_decode);
     }
     0
@@ -902,6 +1208,14 @@ unsafe extern "C" fn pixa_qoi_decoder_plugin_decode(
         return -1;
     }
     let request = unsafe { &*request };
+    let output = unsafe { &mut *output };
+    if !abi_struct_is_compatible::<PixaPluginDecodeRequestV1>(
+        request.abi_version,
+        request.struct_size,
+    ) || !abi_struct_is_compatible::<PixaPluginOutputV1>(output.abi_version, output.struct_size)
+    {
+        return -2;
+    }
     let Some(mime_type) = (unsafe { bytes_to_str(request.mime_type_ptr, request.mime_type_len) })
     else {
         return -2;
@@ -952,11 +1266,20 @@ unsafe extern "C" fn pixa_qoi_decoder_plugin_decode(
         }
         return -12;
     }
+    if QOI_DECODER_OUTPUT_MIME.len() > PIXA_PLUGIN_MIME_CAPACITY {
+        unsafe {
+            buffer_free(handle);
+        }
+        return -13;
+    }
     unsafe {
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), data, bytes.len());
-        (*output).buffer = handle;
-        (*output).mime_type_ptr = QOI_DECODER_OUTPUT_MIME.as_ptr();
-        (*output).mime_type_len = QOI_DECODER_OUTPUT_MIME.len();
+        output.buffer = handle;
+    }
+    if set_plugin_output_mime(output, QOI_DECODER_OUTPUT_MIME).is_err() {
+        unsafe { buffer_free(handle) };
+        output.buffer = std::ptr::null_mut();
+        return -13;
     }
     0
 }
@@ -986,9 +1309,10 @@ pub extern "C" fn pixa_plugin_registry_stats(out_len: *mut usize) -> *mut u8 {
         *out_len = 0;
     }
 
-    let result = ensure_generated_plugins_registered()
-        .and_then(|()| plugin_registry_stats())
-        .and_then(encode_plugin_registry_stats);
+    let result = ensure_generated_plugins_registered().and_then(|()| {
+        let (stats, modules) = plugin_registry_diagnostics()?;
+        encode_plugin_registry_stats(stats, &modules)
+    });
     match result {
         Ok(bytes) => write_success(bytes, out_len),
         Err(_) => std::ptr::null_mut(),
@@ -1800,7 +2124,7 @@ pub extern "C" fn pixa_cache_stats(out_len: *mut usize) -> *mut u8 {
 }
 
 fn encode_cache_stats(stats: RuntimeCacheStats) -> RuntimeResult<Vec<u8>> {
-    let mut bytes = Vec::with_capacity(4 + 30 * 8);
+    let mut bytes = Vec::with_capacity(4 + 32 * 8);
     bytes.extend_from_slice(b"PXS1");
     push_usize_as_u64(&mut bytes, stats.memory_entries, "memory_entries")?;
     push_usize_as_u64(&mut bytes, stats.memory_bytes, "memory_bytes")?;
@@ -1816,6 +2140,16 @@ fn encode_cache_stats(stats: RuntimeCacheStats) -> RuntimeResult<Vec<u8>> {
     push_u64(&mut bytes, stats.stale_revalidates_failed);
     push_u64(&mut bytes, stats.stale_revalidates_skipped);
     push_u64(&mut bytes, stats.stale_revalidates_in_flight);
+    push_usize_as_u64(
+        &mut bytes,
+        stats.processed_memory_entries,
+        "processed_memory_entries",
+    )?;
+    push_usize_as_u64(
+        &mut bytes,
+        stats.processed_memory_bytes,
+        "processed_memory_bytes",
+    )?;
     push_u64(&mut bytes, stats.processed_memory_hits);
     push_u64(&mut bytes, stats.processed_memory_misses);
     push_u64(&mut bytes, stats.processed_memory_evictions);
@@ -1847,9 +2181,13 @@ fn encode_cache_stats(stats: RuntimeCacheStats) -> RuntimeResult<Vec<u8>> {
     Ok(bytes)
 }
 
-fn encode_plugin_registry_stats(stats: PluginRegistryStats) -> RuntimeResult<Vec<u8>> {
-    let mut bytes = Vec::with_capacity(4 + 11 * 8);
-    bytes.extend_from_slice(b"PXM1");
+fn encode_plugin_registry_stats(
+    stats: PluginRegistryStats,
+    modules: &[PluginModule],
+) -> RuntimeResult<Vec<u8>> {
+    let encoded_len = validate_pxm2_and_encoded_len(&stats, modules)?;
+    let mut bytes = Vec::with_capacity(encoded_len);
+    bytes.extend_from_slice(PXM2_MAGIC);
     push_usize_as_u64(&mut bytes, stats.modules, "modules")?;
     push_usize_as_u64(&mut bytes, stats.built_in_modules, "built_in_modules")?;
     push_usize_as_u64(&mut bytes, stats.host_linked_modules, "host_linked_modules")?;
@@ -1879,7 +2217,135 @@ fn encode_plugin_registry_stats(stats: PluginRegistryStats) -> RuntimeResult<Vec
         &stats.video_frame_output_mime_types,
         "video_frame_output_mime_types",
     )?;
+    push_plugin_module_list(&mut bytes, modules)?;
+    debug_assert_eq!(bytes.len(), encoded_len);
     Ok(bytes)
+}
+
+fn validate_pxm2_and_encoded_len(
+    stats: &PluginRegistryStats,
+    modules: &[PluginModule],
+) -> RuntimeResult<usize> {
+    if stats.modules != modules.len() {
+        return Err(RuntimeError::new(
+            "runtime",
+            false,
+            "PXM2 module count does not match module records",
+        ));
+    }
+    if modules.len() > PXM2_MAX_MODULES {
+        return Err(RuntimeError::new(
+            "runtime",
+            false,
+            "PXM2 module count exceeds item limit",
+        ));
+    }
+
+    let mut encoded_len = PXM2_MAGIC.len() + 11 * std::mem::size_of::<u64>();
+    encoded_len = pxm2_add_string_list_len(
+        encoded_len,
+        &stats.video_frame_source_kinds,
+        "video frame source kinds",
+    )?;
+    encoded_len = pxm2_add_string_list_len(
+        encoded_len,
+        &stats.video_frame_output_mime_types,
+        "video frame output MIME types",
+    )?;
+    encoded_len = pxm2_checked_add(encoded_len, std::mem::size_of::<u32>())?;
+    for module in modules {
+        encoded_len = pxm2_add_string_len(encoded_len, &module.module_id, "module id")?;
+        encoded_len = pxm2_checked_add(encoded_len, 2)?;
+        if let Some(entrypoint_symbol) = &module.entrypoint_symbol {
+            encoded_len = pxm2_add_string_len(encoded_len, entrypoint_symbol, "entrypoint symbol")?;
+        }
+        encoded_len = pxm2_add_string_list_len(
+            encoded_len,
+            &module.routes.processor_operations,
+            "processor operations",
+        )?;
+    }
+    Ok(encoded_len)
+}
+
+fn pxm2_add_string_list_len(
+    encoded_len: usize,
+    values: &[String],
+    label: &str,
+) -> RuntimeResult<usize> {
+    if values.len() > PXM2_MAX_STRING_LIST_ITEMS {
+        return Err(RuntimeError::new(
+            "runtime",
+            false,
+            format!("PXM2 {label} string list exceeds item limit"),
+        ));
+    }
+    let mut encoded_len = pxm2_checked_add(encoded_len, std::mem::size_of::<u32>())?;
+    for value in values {
+        encoded_len = pxm2_add_string_len(encoded_len, value, label)?;
+    }
+    Ok(encoded_len)
+}
+
+fn pxm2_add_string_len(encoded_len: usize, value: &str, label: &str) -> RuntimeResult<usize> {
+    if value.len() > PXM2_MAX_STRING_BYTES {
+        return Err(RuntimeError::new(
+            "runtime",
+            false,
+            format!("PXM2 {label} string exceeds byte limit"),
+        ));
+    }
+    let encoded_len = pxm2_checked_add(encoded_len, std::mem::size_of::<u32>())?;
+    pxm2_checked_add(encoded_len, value.len())
+}
+
+fn pxm2_checked_add(encoded_len: usize, additional: usize) -> RuntimeResult<usize> {
+    let next = encoded_len
+        .checked_add(additional)
+        .ok_or_else(|| RuntimeError::new("runtime", false, "PXM2 payload exceeds byte limit"))?;
+    if next > PXM2_MAX_PAYLOAD_BYTES {
+        return Err(RuntimeError::new(
+            "runtime",
+            false,
+            "PXM2 payload exceeds byte limit",
+        ));
+    }
+    Ok(next)
+}
+
+fn push_plugin_module_list(bytes: &mut Vec<u8>, modules: &[PluginModule]) -> RuntimeResult<()> {
+    let count = u32::try_from(modules.len()).map_err(|_| {
+        RuntimeError::new(
+            "runtime",
+            false,
+            "runtime plugin module count exceeds ABI limit",
+        )
+    })?;
+    bytes.extend_from_slice(&count.to_le_bytes());
+    for module in modules {
+        push_string(bytes, &module.module_id)?;
+        bytes.push(match module.deployment {
+            PluginDeployment::BuiltInHostModule => 0,
+            PluginDeployment::HostLinkedPluginModule => 1,
+            PluginDeployment::AssetModule => 2,
+            PluginDeployment::External => 3,
+        });
+        match &module.entrypoint_symbol {
+            Some(entrypoint_symbol) => {
+                bytes.push(1);
+                push_string(bytes, entrypoint_symbol)?;
+            }
+            None => bytes.push(0),
+        }
+        let mut processor_operations = module.routes.processor_operations.clone();
+        processor_operations.sort();
+        push_string_list(
+            bytes,
+            &processor_operations,
+            "runtime plugin processor operation",
+        )?;
+    }
+    Ok(())
 }
 
 fn push_string_list(bytes: &mut Vec<u8>, values: &[String], label: &str) -> RuntimeResult<()> {
@@ -2547,7 +3013,7 @@ mod tests {
         assert!(!ptr.is_null());
         let bytes = unsafe { slice::from_raw_parts(ptr, out_len) };
         assert_eq!(&bytes[0..4], b"PXS1");
-        assert_eq!(out_len, 4 + 30 * 8);
+        assert_eq!(out_len, 4 + 32 * 8);
         pixa_buffer_free(ptr, out_len);
     }
 
@@ -2559,8 +3025,7 @@ mod tests {
 
         assert!(!ptr.is_null());
         let bytes = unsafe { slice::from_raw_parts(ptr, out_len) };
-        assert_eq!(&bytes[0..4], b"PXM1");
-        assert_eq!(out_len, 4 + 11 * 8 + 4 + 4);
+        assert_eq!(&bytes[0..4], PXM2_MAGIC);
         assert_eq!(read_le_u64(bytes, 4), 3);
         assert_eq!(read_le_u64(bytes, 12), 2);
         assert_eq!(read_le_u64(bytes, 20), 1);
@@ -2572,9 +3037,157 @@ mod tests {
         assert_eq!(read_le_u64(bytes, 68), 1);
         assert_eq!(read_le_u64(bytes, 76), 0);
         assert_eq!(read_le_u64(bytes, 84), 1);
-        assert_eq!(read_le_u32(bytes, 92), 0);
-        assert_eq!(read_le_u32(bytes, 96), 0);
+        let mut offset = 92;
+        assert!(read_test_string_list(bytes, &mut offset).is_empty());
+        assert!(read_test_string_list(bytes, &mut offset).is_empty());
+        assert_eq!(read_le_u32(bytes, offset), 3);
+        offset += 4;
+        assert_eq!(
+            read_test_plugin_module(bytes, &mut offset),
+            (
+                "pixa.cache_store".to_string(),
+                0,
+                None,
+                Vec::<String>::new(),
+            )
+        );
+        assert_eq!(
+            read_test_plugin_module(bytes, &mut offset),
+            (
+                "pixa.decoder.qoi".to_string(),
+                1,
+                Some("pixa_qoi_decoder_plugin_init".to_string()),
+                Vec::<String>::new(),
+            )
+        );
+        assert_eq!(
+            read_test_plugin_module(bytes, &mut offset),
+            ("pixa.fetcher.s3".to_string(), 0, None, Vec::<String>::new(),)
+        );
+        assert_eq!(offset, out_len);
         pixa_buffer_free(ptr, out_len);
+    }
+
+    #[test]
+    fn plugin_registry_stats_encode_processor_operations() {
+        let mut capabilities = PluginCapabilities::hot_path();
+        capabilities.processor = true;
+        let module = PluginModule::host_linked(
+            "pixa.processor.test",
+            "pixa_processor_test_init",
+            "rust",
+            capabilities,
+        )
+        .with_routes(PluginRoutes {
+            processor_operations: vec!["tile:webp".to_string(), "resize".to_string()],
+            ..PluginRoutes::default()
+        });
+
+        let bytes = encode_plugin_registry_stats(
+            PluginRegistryStats {
+                modules: 1,
+                host_linked_modules: 1,
+                linkable_modules: 1,
+                processors: 1,
+                ..PluginRegistryStats::default()
+            },
+            &[module],
+        )
+        .expect("plugin registry diagnostics should encode");
+
+        let mut offset = 92;
+        assert!(read_test_string_list(&bytes, &mut offset).is_empty());
+        assert!(read_test_string_list(&bytes, &mut offset).is_empty());
+        assert_eq!(read_le_u32(&bytes, offset), 1);
+        offset += 4;
+        assert_eq!(
+            read_test_plugin_module(&bytes, &mut offset),
+            (
+                "pixa.processor.test".to_string(),
+                1,
+                Some("pixa_processor_test_init".to_string()),
+                vec!["resize".to_string(), "tile:webp".to_string()],
+            )
+        );
+        assert_eq!(offset, bytes.len());
+    }
+
+    #[test]
+    fn plugin_registry_stats_reject_module_count_over_limit() {
+        let mut capabilities = PluginCapabilities::hot_path();
+        capabilities.processor = true;
+        let module = PluginModule::built_in("pixa.processor.test", capabilities);
+        let modules = vec![module; 1025];
+
+        let error = encode_plugin_registry_stats(
+            PluginRegistryStats {
+                modules: modules.len(),
+                ..PluginRegistryStats::default()
+            },
+            &modules,
+        )
+        .expect_err("PXM2 must reject too many modules");
+
+        assert!(error.message.contains("module count exceeds item limit"));
+    }
+
+    #[test]
+    fn plugin_registry_stats_reject_string_over_limit() {
+        let mut capabilities = PluginCapabilities::hot_path();
+        capabilities.processor = true;
+        let module = PluginModule::built_in("m".repeat(16 * 1024 + 1), capabilities);
+
+        let error = encode_plugin_registry_stats(
+            PluginRegistryStats {
+                modules: 1,
+                ..PluginRegistryStats::default()
+            },
+            &[module],
+        )
+        .expect_err("PXM2 must reject oversized strings");
+
+        assert!(error.message.contains("string exceeds byte limit"));
+    }
+
+    #[test]
+    fn plugin_registry_stats_reject_string_list_over_limit() {
+        let mut capabilities = PluginCapabilities::hot_path();
+        capabilities.processor = true;
+        let module =
+            PluginModule::built_in("pixa.processor.test", capabilities).with_routes(PluginRoutes {
+                processor_operations: (0..1025)
+                    .map(|index| format!("operation-{index:04}"))
+                    .collect(),
+                ..PluginRoutes::default()
+            });
+
+        let error = encode_plugin_registry_stats(
+            PluginRegistryStats {
+                modules: 1,
+                ..PluginRegistryStats::default()
+            },
+            &[module],
+        )
+        .expect_err("PXM2 must reject oversized string lists");
+
+        assert!(error.message.contains("string list exceeds item limit"));
+    }
+
+    #[test]
+    fn plugin_registry_stats_reject_payload_over_limit() {
+        let suffix = "x".repeat(16 * 1024 - 4);
+        let source_kinds = (0..65).map(|index| format!("{index:04}{suffix}")).collect();
+
+        let error = encode_plugin_registry_stats(
+            PluginRegistryStats {
+                video_frame_source_kinds: source_kinds,
+                ..PluginRegistryStats::default()
+            },
+            &[],
+        )
+        .expect_err("PXM2 must reject payloads over one MiB");
+
+        assert!(error.message.contains("payload exceeds byte limit"));
     }
 
     #[test]
@@ -2942,6 +3555,504 @@ mod tests {
             .is_some());
     }
 
+    #[test]
+    fn host_linked_executor_rejects_undersized_module_struct() {
+        let module = host_linked_validation_module(
+            "pixa.validation.undersized",
+            test_undersized_module_entrypoint,
+        );
+
+        let error =
+            match instantiate_host_linked_executor(&module, test_undersized_module_entrypoint) {
+                Ok(_) => panic!("undersized plugin module ABI must be rejected"),
+                Err(error) => error,
+            };
+
+        assert_eq!(error.stage, "plugin");
+        assert!(error.message.contains("struct size"));
+    }
+
+    #[test]
+    fn host_linked_executor_rejects_wrong_module_abi_version() {
+        let module = host_linked_validation_module(
+            "pixa.validation.version",
+            test_wrong_version_module_entrypoint,
+        );
+
+        let error =
+            match instantiate_host_linked_executor(&module, test_wrong_version_module_entrypoint) {
+                Ok(_) => panic!("wrong plugin module ABI version must be rejected"),
+                Err(error) => error,
+            };
+
+        assert_eq!(error.stage, "plugin");
+        assert!(error.message.contains("ABI version"));
+    }
+
+    #[test]
+    fn host_linked_executor_accepts_same_version_tail_extension() {
+        let module = host_linked_validation_module(
+            "pixa.validation.extended",
+            test_extended_module_entrypoint,
+        );
+
+        instantiate_host_linked_executor(&module, test_extended_module_entrypoint)
+            .expect("same-version module tail extensions must be accepted");
+    }
+
+    #[test]
+    fn host_linked_plugin_rejects_undersized_host_struct() {
+        let mut host = PLUGIN_HOST_API_V1;
+        host.struct_size = (std::mem::size_of::<PixaPluginHostApiV1>() - 1) as u32;
+        let mut module = PixaPluginModuleApiV1 {
+            abi_version: PIXA_PLUGIN_ABI_VERSION,
+            struct_size: std::mem::size_of::<PixaPluginModuleApiV1>() as u32,
+            fetch: None,
+            decode: None,
+            process: None,
+            cache_read: None,
+            cache_write: None,
+            cache_remove: None,
+            cache_clear_namespace: None,
+        };
+
+        let status = unsafe { pixa_qoi_decoder_plugin_init(&host, &mut module) };
+
+        assert_eq!(status, -2);
+    }
+
+    #[test]
+    fn host_linked_fetch_receives_progress_context() {
+        let module =
+            host_linked_fetch_module("pixa.fetch.progress", test_progress_fetch_entrypoint);
+        let executor = instantiate_host_linked_executor(&module, test_progress_fetch_entrypoint)
+            .expect("fetch executor should instantiate");
+        let request = decode_binary_request(&binary_request_fixture()).unwrap();
+        let progress = TestPluginProgressSink::default();
+
+        let output = executor
+            .fetch(PluginFetchRequest {
+                source_kind: "test-fetch",
+                locator: "memory://progress",
+                video_frame: None,
+                max_output_bytes: 4096,
+                context: Some(pixa_core::RuntimePluginFetchContext {
+                    request: &request,
+                    network_concurrency: 3,
+                    cancel_token: None,
+                    progress_sink: Some(&progress),
+                }),
+            })
+            .expect("fetch callback should succeed")
+            .expect("fetch callback should return bytes");
+
+        assert_eq!(output.bytes.as_ref(), minimal_gif().as_slice());
+        let events = progress.events.lock().unwrap();
+        assert!(events.iter().any(|event| {
+            event.stage == RuntimeProgressStage::Fetch
+                && event.name == "plugin.fetch.progress"
+                && event.received_bytes == Some(4)
+                && event.expected_bytes == Some(10)
+        }));
+    }
+
+    #[test]
+    fn host_linked_fetch_observes_cancellation_and_frees_output() {
+        let module = host_linked_fetch_module("pixa.fetch.cancel", test_cancel_fetch_entrypoint);
+        let executor = instantiate_host_linked_executor(&module, test_cancel_fetch_entrypoint)
+            .expect("fetch executor should instantiate");
+        let request = decode_binary_request(&binary_request_fixture()).unwrap();
+        let cancel_id = create_cancel_token().unwrap();
+        let cancel = cancel_token_handle(cancel_id).unwrap().unwrap();
+        TEST_FETCH_CANCEL_TOKEN_ID.store(cancel_id, Ordering::Release);
+        TEST_FETCH_SAW_CANCELLATION.store(false, Ordering::Release);
+        TEST_CANCEL_FETCH_HANDLE.store(0, Ordering::Release);
+
+        let error = match executor.fetch(PluginFetchRequest {
+            source_kind: "test-fetch",
+            locator: "memory://cancel",
+            video_frame: None,
+            max_output_bytes: 4096,
+            context: Some(pixa_core::RuntimePluginFetchContext {
+                request: &request,
+                network_concurrency: 1,
+                cancel_token: Some(&cancel),
+                progress_sink: None,
+            }),
+        }) {
+            Ok(_) => panic!("cancelled host-linked fetch must fail"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.stage, "cancel");
+        assert!(TEST_FETCH_SAW_CANCELLATION.load(Ordering::Acquire));
+        let handle = TEST_CANCEL_FETCH_HANDLE.load(Ordering::Acquire);
+        assert_ne!(handle, 0);
+        assert!(!plugin_host_buffer_is_owned(handle));
+        free_cancel_token(cancel_id).unwrap();
+    }
+
+    #[test]
+    fn host_linked_fetch_context_rejects_stale_and_foreign_tokens() {
+        let context = Arc::new(HostLinkedFetchContext::new(None));
+        let handle =
+            register_host_linked_fetch_context(context).expect("fetch context should register");
+        let token = handle.as_ptr();
+
+        assert_eq!(unsafe { plugin_host_cancel_is_requested(token) }, 0);
+        drop(handle);
+        assert_eq!(unsafe { plugin_host_cancel_is_requested(token) }, 1);
+        assert_eq!(
+            unsafe { plugin_host_progress_emit_fetch(token, 1, 2, true) },
+            -1
+        );
+
+        let foreign = usize::MAX as *const c_void;
+        assert_eq!(unsafe { plugin_host_cancel_is_requested(foreign) }, 1);
+        assert_eq!(
+            unsafe { plugin_host_progress_emit_fetch(foreign, 1, 2, true) },
+            -1
+        );
+    }
+
+    #[test]
+    fn host_linked_fetch_rejects_foreign_output_handle_without_freeing_it() {
+        let module = host_linked_fetch_module("pixa.fetch.foreign", test_foreign_fetch_entrypoint);
+        let executor = instantiate_host_linked_executor(&module, test_foreign_fetch_entrypoint)
+            .expect("fetch executor should instantiate");
+
+        let error = match executor.fetch(test_plugin_fetch_request()) {
+            Ok(_) => panic!("foreign output handle must be rejected"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.stage, "fetch");
+        assert!(error.message.contains("host-owned"));
+    }
+
+    #[test]
+    fn host_linked_fetch_rejects_null_output_handle() {
+        let module = host_linked_fetch_module("pixa.fetch.null", test_null_fetch_entrypoint);
+        let executor = instantiate_host_linked_executor(&module, test_null_fetch_entrypoint)
+            .expect("fetch executor should instantiate");
+
+        let error = match executor.fetch(test_plugin_fetch_request()) {
+            Ok(_) => panic!("null output handle must be rejected"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.stage, "fetch");
+        assert!(error.message.contains("no output buffer"));
+    }
+
+    #[test]
+    fn host_linked_fetch_frees_host_buffer_when_callback_returns_error() {
+        let module = host_linked_fetch_module("pixa.fetch.error", test_error_fetch_entrypoint);
+        let executor = instantiate_host_linked_executor(&module, test_error_fetch_entrypoint)
+            .expect("fetch executor should instantiate");
+        TEST_ERROR_FETCH_HANDLE.store(0, Ordering::Release);
+
+        assert!(executor.fetch(test_plugin_fetch_request()).is_err());
+
+        let handle = TEST_ERROR_FETCH_HANDLE.load(Ordering::Acquire);
+        assert_ne!(handle, 0);
+        assert!(!plugin_host_buffer_is_owned(handle));
+    }
+
+    #[test]
+    fn host_linked_fetch_rejects_oversized_mime_and_frees_output() {
+        let module = host_linked_fetch_module(
+            "pixa.fetch.mime-length",
+            test_oversized_mime_fetch_entrypoint,
+        );
+        let executor =
+            instantiate_host_linked_executor(&module, test_oversized_mime_fetch_entrypoint)
+                .expect("fetch executor should instantiate");
+        TEST_OVERSIZED_MIME_FETCH_HANDLE.store(0, Ordering::Release);
+
+        let error = match executor.fetch(test_plugin_fetch_request()) {
+            Ok(_) => panic!("oversized MIME length must be rejected"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.stage, "plugin");
+        assert!(error.message.contains("MIME length"));
+        let handle = TEST_OVERSIZED_MIME_FETCH_HANDLE.load(Ordering::Acquire);
+        assert_ne!(handle, 0);
+        assert!(!plugin_host_buffer_is_owned(handle));
+    }
+
+    #[test]
+    fn host_linked_fetch_rejects_invalid_mime_utf8_and_frees_output() {
+        let module =
+            host_linked_fetch_module("pixa.fetch.mime-utf8", test_invalid_mime_fetch_entrypoint);
+        let executor =
+            instantiate_host_linked_executor(&module, test_invalid_mime_fetch_entrypoint)
+                .expect("fetch executor should instantiate");
+        TEST_INVALID_MIME_FETCH_HANDLE.store(0, Ordering::Release);
+
+        let error = match executor.fetch(test_plugin_fetch_request()) {
+            Ok(_) => panic!("invalid MIME UTF-8 must be rejected"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.stage, "plugin");
+        assert!(error.message.contains("not UTF-8"));
+        let handle = TEST_INVALID_MIME_FETCH_HANDLE.load(Ordering::Acquire);
+        assert_ne!(handle, 0);
+        assert!(!plugin_host_buffer_is_owned(handle));
+    }
+
+    #[derive(Default)]
+    struct TestPluginProgressSink {
+        events: Mutex<Vec<RuntimeProgressEvent>>,
+    }
+
+    impl RuntimeProgressSink for TestPluginProgressSink {
+        fn emit(&self, event: RuntimeProgressEvent) {
+            self.events.lock().unwrap().push(event);
+        }
+    }
+
+    static TEST_FETCH_CANCEL_TOKEN_ID: AtomicU64 = AtomicU64::new(0);
+    static TEST_FETCH_SAW_CANCELLATION: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    static TEST_CANCEL_FETCH_HANDLE: AtomicUsize = AtomicUsize::new(0);
+    static TEST_ERROR_FETCH_HANDLE: AtomicUsize = AtomicUsize::new(0);
+    static TEST_OVERSIZED_MIME_FETCH_HANDLE: AtomicUsize = AtomicUsize::new(0);
+    static TEST_INVALID_MIME_FETCH_HANDLE: AtomicUsize = AtomicUsize::new(0);
+
+    fn test_plugin_fetch_request() -> PluginFetchRequest<'static> {
+        PluginFetchRequest {
+            source_kind: "test-fetch",
+            locator: "memory://test",
+            video_frame: None,
+            max_output_bytes: 4096,
+            context: None,
+        }
+    }
+
+    fn host_linked_fetch_module(
+        module_id: &'static str,
+        entrypoint: GeneratedPluginEntrypoint,
+    ) -> GeneratedPluginModule {
+        let mut module = host_linked_validation_module(module_id, entrypoint);
+        module.capabilities.fetcher = true;
+        module.routes.fetcher_source_kinds = &["test-fetch"];
+        module
+    }
+
+    macro_rules! fetch_entrypoint {
+        ($name:ident, $callback:ident) => {
+            unsafe extern "C" fn $name(
+                host: *const PixaPluginHostApiV1,
+                module: *mut PixaPluginModuleApiV1,
+            ) -> i32 {
+                if host.is_null() || module.is_null() {
+                    return -1;
+                }
+                let host = unsafe { &*host };
+                if host.abi_version != PIXA_PLUGIN_ABI_VERSION
+                    || host.struct_size < std::mem::size_of::<PixaPluginHostApiV1>() as u32
+                {
+                    return -2;
+                }
+                unsafe {
+                    (*module).fetch = Some($callback);
+                }
+                0
+            }
+        };
+    }
+
+    fetch_entrypoint!(test_progress_fetch_entrypoint, test_progress_fetch);
+    fetch_entrypoint!(test_cancel_fetch_entrypoint, test_cancel_fetch);
+    fetch_entrypoint!(test_foreign_fetch_entrypoint, test_foreign_fetch);
+    fetch_entrypoint!(test_null_fetch_entrypoint, test_null_fetch);
+    fetch_entrypoint!(test_error_fetch_entrypoint, test_error_fetch);
+    fetch_entrypoint!(
+        test_oversized_mime_fetch_entrypoint,
+        test_oversized_mime_fetch
+    );
+    fetch_entrypoint!(test_invalid_mime_fetch_entrypoint, test_invalid_mime_fetch);
+
+    unsafe extern "C" fn test_progress_fetch(
+        request: *const PixaPluginFetchRequestV1,
+        output: *mut PixaPluginOutputV1,
+    ) -> i32 {
+        let request = unsafe { &*request };
+        assert_eq!(request.abi_version, PIXA_PLUGIN_ABI_VERSION);
+        assert!(request.struct_size >= std::mem::size_of::<PixaPluginFetchRequestV1>() as u32);
+        let emit = PLUGIN_HOST_API_V1
+            .progress_emit_fetch
+            .expect("progress callback must be available");
+        assert_eq!(unsafe { emit(request.context, 4, 10, true) }, 0);
+        unsafe { write_test_plugin_output(output, &minimal_gif(), b"image/gif") }
+    }
+
+    unsafe extern "C" fn test_cancel_fetch(
+        request: *const PixaPluginFetchRequestV1,
+        output: *mut PixaPluginOutputV1,
+    ) -> i32 {
+        let request = unsafe { &*request };
+        cancel_token(TEST_FETCH_CANCEL_TOKEN_ID.load(Ordering::Acquire)).unwrap();
+        let is_cancelled = PLUGIN_HOST_API_V1
+            .cancel_is_requested
+            .expect("cancel callback must be available");
+        TEST_FETCH_SAW_CANCELLATION.store(
+            unsafe { is_cancelled(request.context) } == 1,
+            Ordering::Release,
+        );
+        let status = unsafe { write_test_plugin_output(output, &minimal_gif(), b"image/gif") };
+        TEST_CANCEL_FETCH_HANDLE.store(unsafe { (*output).buffer } as usize, Ordering::Release);
+        status
+    }
+
+    unsafe extern "C" fn test_foreign_fetch(
+        _request: *const PixaPluginFetchRequestV1,
+        output: *mut PixaPluginOutputV1,
+    ) -> i32 {
+        unsafe {
+            (*output).buffer = usize::MAX as *mut c_void;
+            write_test_mime(output, b"image/gif");
+        }
+        0
+    }
+
+    unsafe extern "C" fn test_null_fetch(
+        _request: *const PixaPluginFetchRequestV1,
+        _output: *mut PixaPluginOutputV1,
+    ) -> i32 {
+        0
+    }
+
+    unsafe extern "C" fn test_error_fetch(
+        _request: *const PixaPluginFetchRequestV1,
+        output: *mut PixaPluginOutputV1,
+    ) -> i32 {
+        let _ = unsafe { write_test_plugin_output(output, &minimal_gif(), b"image/gif") };
+        TEST_ERROR_FETCH_HANDLE.store(unsafe { (*output).buffer } as usize, Ordering::Release);
+        -77
+    }
+
+    unsafe extern "C" fn test_oversized_mime_fetch(
+        _request: *const PixaPluginFetchRequestV1,
+        output: *mut PixaPluginOutputV1,
+    ) -> i32 {
+        let status = unsafe { write_test_plugin_output(output, &minimal_gif(), b"image/gif") };
+        unsafe {
+            (*output).mime_type_len = PIXA_PLUGIN_MIME_CAPACITY + 1;
+        }
+        TEST_OVERSIZED_MIME_FETCH_HANDLE
+            .store(unsafe { (*output).buffer } as usize, Ordering::Release);
+        status
+    }
+
+    unsafe extern "C" fn test_invalid_mime_fetch(
+        _request: *const PixaPluginFetchRequestV1,
+        output: *mut PixaPluginOutputV1,
+    ) -> i32 {
+        let status = unsafe { write_test_plugin_output(output, &minimal_gif(), &[0xff]) };
+        TEST_INVALID_MIME_FETCH_HANDLE
+            .store(unsafe { (*output).buffer } as usize, Ordering::Release);
+        status
+    }
+
+    unsafe fn write_test_plugin_output(
+        output: *mut PixaPluginOutputV1,
+        bytes: &[u8],
+        mime_type: &[u8],
+    ) -> i32 {
+        let handle = unsafe { plugin_host_buffer_alloc(bytes.len()) };
+        if handle.is_null() {
+            return -1;
+        }
+        let data = unsafe { plugin_host_buffer_data(handle) };
+        if data.is_null() {
+            unsafe { plugin_host_buffer_free(handle) };
+            return -2;
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), data, bytes.len());
+            (*output).buffer = handle;
+            write_test_mime(output, mime_type);
+        }
+        0
+    }
+
+    unsafe fn write_test_mime(output: *mut PixaPluginOutputV1, mime_type: &[u8]) {
+        let copy_len = mime_type.len().min(PIXA_PLUGIN_MIME_CAPACITY);
+        unsafe {
+            (*output).mime_type.fill(0);
+            (&mut (*output).mime_type)[..copy_len].copy_from_slice(&mime_type[..copy_len]);
+            (*output).mime_type_len = mime_type.len();
+        }
+    }
+
+    fn host_linked_validation_module(
+        module_id: &'static str,
+        entrypoint: GeneratedPluginEntrypoint,
+    ) -> GeneratedPluginModule {
+        GeneratedPluginModule {
+            module_id,
+            abi_version: i64::from(PIXA_PLUGIN_ABI_VERSION),
+            deployment: GeneratedPluginDeployment::HostLinkedPlugin,
+            package_name: Some("pixa_validation_test"),
+            implementation_language: Some("rust"),
+            entrypoint_symbol: Some("pixa_validation_test_init"),
+            entrypoint: Some(entrypoint),
+            capabilities: GeneratedPluginCapabilities {
+                fetcher: false,
+                decoder: false,
+                processor: false,
+                cache_store: false,
+                host_managed_runtime: true,
+                binary_messages: true,
+                owned_buffers: true,
+                stream_handles: true,
+            },
+            routes: GeneratedPluginRoutes {
+                fetcher_source_kinds: &[],
+                video_frame_output_mime_types: &[],
+                decoder_format_ids: &[],
+                decoder_mime_types: &[],
+                decoder_signatures: &[],
+                processor_operations: &[],
+                cache_store_namespaces: &[],
+            },
+        }
+    }
+
+    unsafe extern "C" fn test_undersized_module_entrypoint(
+        _host: *const PixaPluginHostApiV1,
+        module: *mut PixaPluginModuleApiV1,
+    ) -> i32 {
+        unsafe {
+            (*module).struct_size = (std::mem::size_of::<PixaPluginModuleApiV1>() - 1) as u32;
+        }
+        0
+    }
+
+    unsafe extern "C" fn test_wrong_version_module_entrypoint(
+        _host: *const PixaPluginHostApiV1,
+        module: *mut PixaPluginModuleApiV1,
+    ) -> i32 {
+        unsafe {
+            (*module).abi_version = PIXA_PLUGIN_ABI_VERSION + 1;
+        }
+        0
+    }
+
+    unsafe extern "C" fn test_extended_module_entrypoint(
+        _host: *const PixaPluginHostApiV1,
+        module: *mut PixaPluginModuleApiV1,
+    ) -> i32 {
+        unsafe {
+            (*module).struct_size = std::mem::size_of::<PixaPluginModuleApiV1>() as u32 + 64;
+        }
+        0
+    }
+
     static TEST_PLUGIN_MIME: &[u8] = b"image/gif";
     static TEST_CACHE_STORE_MIME: &[u8] = b"application/octet-stream";
 
@@ -3032,8 +4143,7 @@ mod tests {
             (*output).status = 1;
             (*output).is_stale = false;
             (*output).payload.buffer = handle;
-            (*output).payload.mime_type_ptr = TEST_CACHE_STORE_MIME.as_ptr();
-            (*output).payload.mime_type_len = TEST_CACHE_STORE_MIME.len();
+            set_plugin_output_mime(&mut (*output).payload, TEST_CACHE_STORE_MIME).unwrap();
         }
         0
     }
@@ -3114,8 +4224,7 @@ mod tests {
         unsafe {
             std::ptr::copy_nonoverlapping(bytes.as_ptr(), data, bytes.len());
             (*output).buffer = handle;
-            (*output).mime_type_ptr = TEST_PLUGIN_MIME.as_ptr();
-            (*output).mime_type_len = TEST_PLUGIN_MIME.len();
+            set_plugin_output_mime(&mut *output, TEST_PLUGIN_MIME).unwrap();
         }
         0
     }
@@ -3161,8 +4270,7 @@ mod tests {
         unsafe {
             std::ptr::copy_nonoverlapping(output_bytes.as_ptr(), data, output_bytes.len());
             (*output).buffer = handle;
-            (*output).mime_type_ptr = TEST_PLUGIN_MIME.as_ptr();
-            (*output).mime_type_len = TEST_PLUGIN_MIME.len();
+            set_plugin_output_mime(&mut *output, TEST_PLUGIN_MIME).unwrap();
         }
         0
     }
@@ -3291,6 +4399,51 @@ mod tests {
 
     fn read_le_u64(bytes: &[u8], offset: usize) -> u64 {
         u64::from_le_bytes(bytes[offset..offset + 8].try_into().expect("u64 range"))
+    }
+
+    fn read_test_string(bytes: &[u8], offset: &mut usize) -> String {
+        let length = read_le_u32(bytes, *offset) as usize;
+        *offset += 4;
+        let value = std::str::from_utf8(&bytes[*offset..*offset + length])
+            .expect("test string should be UTF-8")
+            .to_string();
+        *offset += length;
+        value
+    }
+
+    fn read_test_string_list(bytes: &[u8], offset: &mut usize) -> Vec<String> {
+        let count = read_le_u32(bytes, *offset) as usize;
+        *offset += 4;
+        (0..count)
+            .map(|_| read_test_string(bytes, offset))
+            .collect()
+    }
+
+    fn read_test_plugin_module(
+        bytes: &[u8],
+        offset: &mut usize,
+    ) -> (String, u8, Option<String>, Vec<String>) {
+        let module_id = read_test_string(bytes, offset);
+        let deployment = bytes[*offset];
+        *offset += 1;
+        let entrypoint_symbol = match bytes[*offset] {
+            0 => {
+                *offset += 1;
+                None
+            }
+            1 => {
+                *offset += 1;
+                Some(read_test_string(bytes, offset))
+            }
+            value => panic!("invalid test optional string tag {value}"),
+        };
+        let processor_operations = read_test_string_list(bytes, offset);
+        (
+            module_id,
+            deployment,
+            entrypoint_symbol,
+            processor_operations,
+        )
     }
 
     fn push_u8(bytes: &mut Vec<u8>, value: u8) {

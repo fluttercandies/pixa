@@ -110,6 +110,8 @@ final class PixaDebugSnapshot {
           : <String, Object?>{
               'memoryEntries': cacheStats!.memoryEntries,
               'memoryBytes': cacheStats!.memoryBytes,
+              'encodedMemoryEntries': cacheStats!.encodedMemoryEntries,
+              'encodedMemoryBytes': cacheStats!.encodedMemoryBytes,
               'memoryHits': cacheStats!.memoryHits,
               'memoryMisses': cacheStats!.memoryMisses,
               'diskHits': cacheStats!.diskHits,
@@ -124,6 +126,8 @@ final class PixaDebugSnapshot {
               'staleRevalidatesFailed': cacheStats!.staleRevalidatesFailed,
               'staleRevalidatesSkipped': cacheStats!.staleRevalidatesSkipped,
               'staleRevalidatesInFlight': cacheStats!.staleRevalidatesInFlight,
+              'processedMemoryEntries': cacheStats!.processedMemoryEntries,
+              'processedMemoryBytes': cacheStats!.processedMemoryBytes,
               'processedMemoryHits': cacheStats!.processedMemoryHits,
               'processedMemoryMisses': cacheStats!.processedMemoryMisses,
               'processedMemoryEvictions': cacheStats!.processedMemoryEvictions,

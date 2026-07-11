@@ -317,9 +317,14 @@ impl AdaptiveConcurrencyGate {
         }
     }
 
-    async fn acquire(self: &Arc<Self>, limit: usize) -> RuntimeResult<AdaptiveConcurrencyPermit> {
+    async fn acquire(
+        self: &Arc<Self>,
+        limit: usize,
+        cancel_token: Option<&RuntimeCancelToken>,
+    ) -> RuntimeResult<AdaptiveConcurrencyPermit> {
         let limit = limit.max(1);
         loop {
+            ensure_not_cancelled(cancel_token)?;
             let notified = self.notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
@@ -333,7 +338,7 @@ impl AdaptiveConcurrencyGate {
                     return Ok(AdaptiveConcurrencyPermit { gate: self.clone() });
                 }
             }
-            notified.await;
+            cancelable(cancel_token, notified).await?;
         }
     }
 
@@ -426,7 +431,7 @@ impl HttpTransport {
         progress_sink: Option<&dyn RuntimeProgressSink>,
     ) -> RuntimeResult<HttpFetchResult> {
         ensure_not_cancelled(cancel_token)?;
-        let _permit = self.gate.acquire(network_concurrency).await?;
+        let _permit = self.gate.acquire(network_concurrency, cancel_token).await?;
 
         let mut headers = header_map(&request.headers)?;
         apply_conditional_headers(&mut headers, conditional)?;
@@ -1311,10 +1316,10 @@ mod tests {
             .unwrap();
         runtime.block_on(async {
             let gate = Arc::new(AdaptiveConcurrencyGate::new(2));
-            let first = gate.acquire(2).await.unwrap();
-            let second = gate.acquire(2).await.unwrap();
+            let first = gate.acquire(2, None).await.unwrap();
+            let second = gate.acquire(2, None).await.unwrap();
             let queued_gate = gate.clone();
-            let queued = tokio::spawn(async move { queued_gate.acquire(1).await.unwrap() });
+            let queued = tokio::spawn(async move { queued_gate.acquire(1, None).await.unwrap() });
 
             tokio::time::sleep(Duration::from_millis(20)).await;
             assert!(!queued.is_finished());
@@ -1392,13 +1397,44 @@ mod tests {
             .unwrap();
         runtime.block_on(async {
             let gate = Arc::new(AdaptiveConcurrencyGate::new(1));
-            let permit = gate.acquire(1).await.unwrap();
+            let permit = gate.acquire(1, None).await.unwrap();
 
             drop(permit);
 
             tokio::time::timeout(Duration::from_millis(50), gate.notify.notified())
                 .await
                 .expect("a release in the acquire registration window must be retained");
+        });
+    }
+
+    #[test]
+    fn adaptive_concurrency_gate_cancels_queued_acquire_without_waiting_for_permit() {
+        let runtime = RuntimeBuilder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let gate = Arc::new(AdaptiveConcurrencyGate::new(1));
+            let held = gate.acquire(1, None).await.unwrap();
+            let cancel = RuntimeCancelToken::new();
+            let queued_gate = gate.clone();
+            let queued_cancel = cancel.clone();
+            let queued =
+                tokio::spawn(async move { queued_gate.acquire(1, Some(&queued_cancel)).await });
+
+            tokio::task::yield_now().await;
+            cancel.cancel();
+            let result = tokio::time::timeout(Duration::from_millis(50), queued)
+                .await
+                .expect("queued cancellation must not wait for a permit")
+                .expect("queued task should join");
+            let error = match result {
+                Ok(_) => panic!("queued acquire should be cancelled"),
+                Err(error) => error,
+            };
+            assert_eq!(error.stage, "cancel");
+
+            drop(held);
         });
     }
 

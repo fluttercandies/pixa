@@ -84,7 +84,7 @@ void main() {
     expect(tileRequest.cacheKey, isNot(base.cacheKey));
     expect(tileRequest.processors, <String>[
       'tile(x=0,y=0,width=512,height=512,'
-          'decodedWidth=512,decodedHeight=512,sampleSize=1,filter=triangle)',
+          'decodedWidth=512,decodedHeight=512,filter=triangle)',
     ]);
     expect(
       tileRequest.targetSize,

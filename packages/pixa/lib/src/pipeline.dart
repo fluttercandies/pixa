@@ -1183,7 +1183,7 @@ final class PixaPipeline {
     if (buffer == null) {
       return null;
     }
-    return PixaProgressivePreview(
+    return PixaProgressivePreview.borrowed(
       bytes: buffer.bytes,
       mimeType: event.message ?? 'image/jpeg',
       sequence: event.receivedBytes ?? event.timestampMs,
@@ -1952,7 +1952,7 @@ final class PixaPipelineHandle {
 
 /// Encoded load result.
 final class PixaPipelineLoad {
-  const PixaPipelineLoad._(
+  PixaPipelineLoad._(
     this._buffer, {
     required this.requestId,
     required this.mimeType,
@@ -1961,9 +1961,20 @@ final class PixaPipelineLoad {
 
   final _ByteBufferLease _buffer;
   final _EncodedMemoryPin? _memoryPin;
+  Uint8List? _publicBytesSnapshot;
 
-  /// Encoded image bytes.
-  Uint8List get bytes => _buffer.bytes;
+  /// Immutable encoded bytes safe to retain after [dispose].
+  Uint8List get bytes {
+    return _publicBytesSnapshot ??= Uint8List.fromList(
+      _buffer.bytes,
+    ).asUnmodifiableView();
+  }
+
+  /// Retains a package-internal zero-copy view with explicit ownership.
+  @internal
+  PixaPipelineBytesLease retainBorrowedBytes() {
+    return PixaPipelineBytesLease._(_buffer.retain());
+  }
 
   /// Request id.
   final int requestId;
@@ -1988,6 +1999,20 @@ final class PixaPipelineLoad {
     _memoryPin?.dispose();
     _buffer.dispose();
   }
+}
+
+/// Package-internal owner for a borrowed pipeline byte view.
+@internal
+final class PixaPipelineBytesLease {
+  PixaPipelineBytesLease._(this._buffer);
+
+  final _ByteBufferLease _buffer;
+
+  /// Borrowed immutable bytes valid until [dispose].
+  Uint8List get bytes => _buffer.bytes;
+
+  /// Releases this retained owner exactly once.
+  void dispose() => _buffer.dispose();
 }
 
 final class _PipelineOutput {
@@ -2125,6 +2150,13 @@ final class _SharedByteBuffer {
     _leases++;
   }
 
+  void retainFromLease() {
+    if (_leases <= 0) {
+      throw StateError('Pixa byte buffer has already been released.');
+    }
+    _leases++;
+  }
+
   void release() {
     if (_leases <= 0) {
       return;
@@ -2151,6 +2183,10 @@ final class _ByteBufferLease {
     _shared.retain();
   }
 
+  _ByteBufferLease._retained(this._shared) {
+    _shared.retainFromLease();
+  }
+
   final _SharedByteBuffer _shared;
   bool _isDisposed = false;
 
@@ -2159,6 +2195,13 @@ final class _ByteBufferLease {
       throw StateError('runtime buffer lease has already been released.');
     }
     return _shared.bytes;
+  }
+
+  _ByteBufferLease retain() {
+    if (_isDisposed) {
+      throw StateError('runtime buffer lease has already been released.');
+    }
+    return _ByteBufferLease._retained(_shared);
   }
 
   PixaRuntimeRgbaImage decodeRuntimeRgba({

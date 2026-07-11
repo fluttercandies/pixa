@@ -19,6 +19,7 @@ void main(List<String> args) {
       candidates,
       platform,
       requiredRunMode: options.requiredRunMode,
+      requiredGitCommit: options.requiredGitCommit,
     );
     if (accepted != null) {
       for (final _RequiredNativeModule module
@@ -28,6 +29,7 @@ void main(List<String> args) {
           platform,
           module,
           requiredRunMode: options.requiredRunMode,
+          requiredGitCommit: options.requiredGitCommit,
         );
         if (nativeModuleReport != null) {
           continue;
@@ -38,6 +40,7 @@ void main(List<String> args) {
             platform,
             module,
             requiredRunMode: options.requiredRunMode,
+            requiredGitCommit: options.requiredGitCommit,
           ),
         );
       }
@@ -48,6 +51,7 @@ void main(List<String> args) {
         candidates.first,
         platform,
         requiredRunMode: options.requiredRunMode,
+        requiredGitCommit: options.requiredGitCommit,
       ),
     );
   }
@@ -120,12 +124,14 @@ final class _Options {
     required this.reportsPath,
     required this.requiredPlatforms,
     required this.requiredRunMode,
+    required this.requiredGitCommit,
     required this.requiredNativeModules,
   });
 
   final String reportsPath;
   final List<String> requiredPlatforms;
   final String? requiredRunMode;
+  final String? requiredGitCommit;
   final List<_RequiredNativeModule> requiredNativeModules;
 
   factory _Options.parse(List<String> args) {
@@ -138,6 +144,7 @@ final class _Options {
       'windows',
     ];
     String? requiredRunMode;
+    String? requiredGitCommit;
     var requiredNativeModules = const <_RequiredNativeModule>[];
     for (final String arg in args) {
       if (arg.startsWith('--reports=')) {
@@ -160,6 +167,11 @@ final class _Options {
             .map((String value) => _requiredNativeModule(value.trim()))
             .whereType<_RequiredNativeModule>()
             .toList(growable: false);
+      } else if (arg.startsWith('--require-git-commit=')) {
+        requiredGitCommit = arg
+            .substring('--require-git-commit='.length)
+            .trim()
+            .toLowerCase();
       } else {
         throw ArgumentError('Unknown platform evidence argument: $arg');
       }
@@ -172,6 +184,12 @@ final class _Options {
     if (requiredRunMode != null && requiredRunMode.isEmpty) {
       throw ArgumentError('required run mode must be non-empty');
     }
+    if (requiredGitCommit != null &&
+        !RegExp(
+          r'^[0-9a-f]{40}(?:[0-9a-f]{24})?$',
+        ).hasMatch(requiredGitCommit)) {
+      throw ArgumentError('required Git commit must be a full object id');
+    }
     for (final String platform in requiredPlatforms) {
       if (!_supportedPlatforms.contains(platform)) {
         throw ArgumentError('Unsupported required platform: $platform');
@@ -181,6 +199,7 @@ final class _Options {
       reportsPath: reportsPath,
       requiredPlatforms: List<String>.unmodifiable(requiredPlatforms),
       requiredRunMode: requiredRunMode,
+      requiredGitCommit: requiredGitCommit,
       requiredNativeModules: List<_RequiredNativeModule>.unmodifiable(
         requiredNativeModules,
       ),
@@ -413,12 +432,14 @@ _Report? _firstAcceptableReport(
   List<_Report> reports,
   String platform, {
   required String? requiredRunMode,
+  required String? requiredGitCommit,
 }) {
   for (final _Report report in reports) {
     if (_reportFailures(
       report,
       platform,
       requiredRunMode: requiredRunMode,
+      requiredGitCommit: requiredGitCommit,
     ).isEmpty) {
       return report;
     }
@@ -431,12 +452,14 @@ _Report? _firstAcceptableNativeModuleReport(
   String platform,
   _RequiredNativeModule requiredModule, {
   required String? requiredRunMode,
+  required String? requiredGitCommit,
 }) {
   for (final _Report report in reports) {
     if (_reportFailures(
       report,
       platform,
       requiredRunMode: requiredRunMode,
+      requiredGitCommit: requiredGitCommit,
     ).isNotEmpty) {
       continue;
     }
@@ -458,6 +481,7 @@ List<String> _reportFailures(
   _Report report,
   String platform, {
   required String? requiredRunMode,
+  required String? requiredGitCommit,
 }) {
   final List<String> failures = <String>[];
   final List<String> missingChecks = _requiredChecks
@@ -477,6 +501,16 @@ List<String> _reportFailures(
       );
     }
   }
+  if (requiredGitCommit != null) {
+    final String gitCommit =
+        _string(report.evidence['gitCommit'])?.toLowerCase() ?? 'unknown';
+    if (gitCommit != requiredGitCommit) {
+      failures.add(
+        '$platform evidence ${report.path} has git commit $gitCommit, '
+        'expected $requiredGitCommit',
+      );
+    }
+  }
   return failures;
 }
 
@@ -485,12 +519,14 @@ List<String> _nativeModuleReportFailures(
   String platform,
   _RequiredNativeModule requiredModule, {
   required String? requiredRunMode,
+  required String? requiredGitCommit,
 }) {
   for (final _Report report in reports) {
     if (_reportFailures(
       report,
       platform,
       requiredRunMode: requiredRunMode,
+      requiredGitCommit: requiredGitCommit,
     ).isNotEmpty) {
       continue;
     }
@@ -640,6 +676,7 @@ Options:
   --reports=<path>               Report directory. Defaults to build/reports.
   --require-platforms=<list>     Comma-separated platforms. Defaults to all five.
   --require-run-mode=<mode>      Require evidence runMode, e.g. integration-test.
+  --require-git-commit=<sha>     Require evidence from one exact Git commit.
   --require-native-modules=<list>
                                 Comma-separated optional native module evidence.
                                 Supported: jpeg-turbo-roi, webp-roi.

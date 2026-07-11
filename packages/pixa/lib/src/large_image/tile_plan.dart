@@ -75,7 +75,7 @@ final class PixaLargeImageTile {
       ...base.processors,
       'tile(x=$x,y=$y,width=$width,height=$height,'
           'decodedWidth=$decodedWidth,decodedHeight=$decodedHeight,'
-          'sampleSize=$sampleSize,filter=triangle)',
+          'filter=triangle)',
     ];
     return base.copyWith(
       targetSize: PixaTargetSize(width: decodedWidth, height: decodedHeight),

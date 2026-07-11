@@ -579,6 +579,11 @@ impl RuntimePluginRegistry {
         self.modules.values().cloned().collect()
     }
 
+    /// Returns counters and modules from the same immutable registry view.
+    pub fn diagnostics(&self) -> (RuntimePluginRegistryStats, Vec<RuntimePluginModule>) {
+        (self.stats(), self.modules())
+    }
+
     /// Returns registry counters for diagnostics and runtime snapshots.
     pub fn stats(&self) -> RuntimePluginRegistryStats {
         let mut stats = RuntimePluginRegistryStats {
@@ -663,6 +668,15 @@ pub fn plugin_modules() -> RuntimeResult<Vec<RuntimePluginModule>> {
         .lock()
         .map_err(|_| RuntimeError::new("plugin", true, "runtime plugin registry lock poisoned"))?
         .modules())
+}
+
+/// Returns registry counters and ordered modules under one lock.
+pub fn plugin_registry_diagnostics(
+) -> RuntimeResult<(RuntimePluginRegistryStats, Vec<RuntimePluginModule>)> {
+    Ok(plugin_registry()
+        .lock()
+        .map_err(|_| RuntimeError::new("plugin", true, "runtime plugin registry lock poisoned"))?
+        .diagnostics())
 }
 
 /// Returns the runtime fetcher module registered for a source kind.
@@ -1077,16 +1091,7 @@ fn validate_video_frame_output_routes(
             "runtime plugin video-frame fetcher route must declare output MIME contract",
         ));
     }
-    for mime_type in output_mime_types {
-        if normalize_route_claim(mime_type).is_empty() {
-            return Err(RuntimeError::new(
-                "plugin",
-                false,
-                "runtime plugin video-frame output MIME must not be empty",
-            ));
-        }
-    }
-    Ok(())
+    validate_route_values(output_mime_types, "video-frame output MIME")
 }
 
 fn is_video_frame_source_kind(source_kind: &str) -> bool {
@@ -1106,16 +1111,7 @@ fn validate_route_group(
             format!("runtime plugin {label} route requires matching capability"),
         ));
     }
-    for claim in claims {
-        if normalize_route_claim(claim).is_empty() {
-            return Err(RuntimeError::new(
-                "plugin",
-                false,
-                format!("runtime plugin {label} route must not be empty"),
-            ));
-        }
-    }
-    Ok(())
+    validate_route_values(claims, label)
 }
 
 fn validate_unique_routes<'a>(
@@ -1196,12 +1192,21 @@ fn validate_decoder_routes(
 }
 
 fn validate_route_values(claims: &[String], label: &'static str) -> RuntimeResult<()> {
+    let mut normalized_claims = BTreeSet::<String>::new();
     for claim in claims {
-        if normalize_route_claim(claim).is_empty() {
+        let normalized = normalize_route_claim(claim);
+        if normalized.is_empty() {
             return Err(RuntimeError::new(
                 "plugin",
                 false,
                 format!("runtime plugin {label} route must not be empty"),
+            ));
+        }
+        if !normalized_claims.insert(normalized) {
+            return Err(RuntimeError::new(
+                "plugin",
+                false,
+                format!("duplicate runtime plugin {label} route {claim:?}"),
             ));
         }
     }
@@ -1416,6 +1421,36 @@ mod tests {
     }
 
     #[test]
+    fn registry_diagnostics_keep_count_and_btree_order_together() {
+        let mut registry = RuntimePluginRegistry::default();
+        let mut capabilities = RuntimePluginCapabilities::hot_path();
+        capabilities.processor = true;
+        registry
+            .register(RuntimePluginModule::built_in(
+                "zeta.processor",
+                capabilities,
+            ))
+            .expect("zeta module should register");
+        registry
+            .register(RuntimePluginModule::built_in(
+                "alpha.processor",
+                capabilities,
+            ))
+            .expect("alpha module should register");
+
+        let (stats, modules) = registry.diagnostics();
+
+        assert_eq!(stats.modules, modules.len());
+        assert_eq!(
+            modules
+                .iter()
+                .map(|module| module.module_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha.processor", "zeta.processor"]
+        );
+    }
+
+    #[test]
     fn registry_resolves_route_claims_without_dart_registry() {
         let mut registry = RuntimePluginRegistry::default();
         let mut decoder = RuntimePluginCapabilities::hot_path();
@@ -1498,6 +1533,98 @@ mod tests {
             .register(second)
             .expect_err("duplicate runtime route must fail fast");
         assert_eq!(error.stage, "plugin");
+    }
+
+    #[test]
+    fn module_rejects_normalized_duplicates_within_every_route_group() {
+        let mut fetcher = RuntimePluginCapabilities::hot_path();
+        fetcher.fetcher = true;
+        let mut decoder = RuntimePluginCapabilities::hot_path();
+        decoder.decoder = true;
+        let mut processor = RuntimePluginCapabilities::hot_path();
+        processor.processor = true;
+        let mut cache_store = RuntimePluginCapabilities::hot_path();
+        cache_store.cache_store = true;
+        let modules = vec![
+            (
+                "fetcher source kind",
+                RuntimePluginModule::built_in("duplicate.fetcher", fetcher).with_routes(
+                    RuntimePluginRoutes {
+                        fetcher_source_kinds: vec!["s3".to_string(), "s3".to_string()],
+                        ..RuntimePluginRoutes::default()
+                    },
+                ),
+            ),
+            (
+                "video-frame output MIME",
+                RuntimePluginModule::built_in("duplicate.video-frame", fetcher).with_routes(
+                    RuntimePluginRoutes {
+                        fetcher_source_kinds: vec!["video-frame:test".to_string()],
+                        video_frame_output_mime_types: vec![
+                            "image/png".to_string(),
+                            "IMAGE/PNG".to_string(),
+                        ],
+                        ..RuntimePluginRoutes::default()
+                    },
+                ),
+            ),
+            (
+                "decoder MIME type",
+                RuntimePluginModule::built_in("duplicate.decoder-mime", decoder).with_routes(
+                    RuntimePluginRoutes {
+                        decoder_mime_types: vec![
+                            "image/test".to_string(),
+                            " image/test ".to_string(),
+                        ],
+                        ..RuntimePluginRoutes::default()
+                    },
+                ),
+            ),
+            (
+                "decoder format id",
+                RuntimePluginModule::built_in("duplicate.decoder-format", decoder).with_routes(
+                    RuntimePluginRoutes {
+                        decoder_format_ids: vec!["custom".to_string(), "CUSTOM".to_string()],
+                        ..RuntimePluginRoutes::default()
+                    },
+                ),
+            ),
+            (
+                "processor operation",
+                RuntimePluginModule::built_in("duplicate.processor", processor).with_routes(
+                    RuntimePluginRoutes {
+                        processor_operations: vec!["resize".to_string(), " resize ".to_string()],
+                        ..RuntimePluginRoutes::default()
+                    },
+                ),
+            ),
+            (
+                "cache store namespace",
+                RuntimePluginModule::built_in("duplicate.cache", cache_store).with_routes(
+                    RuntimePluginRoutes {
+                        cache_store_namespaces: vec!["default".to_string(), "DEFAULT".to_string()],
+                        ..RuntimePluginRoutes::default()
+                    },
+                ),
+            ),
+        ];
+        let mut accepted_groups = Vec::<&str>::new();
+
+        for (label, module) in modules {
+            match validate_plugin_module(&module) {
+                Ok(()) => accepted_groups.push(label),
+                Err(error) => {
+                    assert_eq!(error.stage, "plugin");
+                    assert!(error.message.contains("duplicate"));
+                    assert!(error.message.contains(label));
+                }
+            }
+        }
+
+        assert!(
+            accepted_groups.is_empty(),
+            "accepted normalized duplicates for {accepted_groups:?}"
+        );
     }
 
     #[test]

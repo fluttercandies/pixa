@@ -310,7 +310,13 @@ void main() {
         (PixaEvent event) => event.name == 'decode.failure',
       );
       expect(event.stage, PixaStage.decode);
-      expect(event.failure, same(failure));
+      expect(event.failure, isNot(same(failure)));
+      expect(event.failure?.requestId, failure.requestId);
+      expect(event.failure?.stage, failure.stage);
+      expect(event.failure?.safeMessage, failure.safeMessage);
+      expect(event.failure?.retryability, failure.retryability);
+      expect(event.failure?.originalError, isNull);
+      expect(event.failure?.stackTrace, isNull);
       expect(event.attributes['backend'], 'engine');
       expect(event.attributes['execution'], 'flutter');
     },
@@ -705,6 +711,96 @@ void main() {
     },
   );
 
+  test(
+    'equal providers resolved through Flutter ImageCache fan out progress to every consumer',
+    () async {
+      final Directory cacheRoot = await Directory.systemTemp.createTemp(
+        'pixa-provider-progress-fanout-',
+      );
+      addTearDown(() => cacheRoot.delete(recursive: true));
+      final ImageCache imageCache = PaintingBinding.instance.imageCache;
+      imageCache.clear();
+      imageCache.clearLiveImages();
+      addTearDown(() {
+        imageCache.clear();
+        imageCache.clearLiveImages();
+      });
+      await Pixa.configure(PixaConfig(cacheRootPath: cacheRoot.path));
+
+      final Completer<void> fetchStarted = Completer<void>();
+      final Completer<Uint8List> pendingBytes = Completer<Uint8List>();
+      var loaderCalls = 0;
+      final PixaRequest request = PixaRequest(
+        source: PixaSource.custom('shared-progress-image', () async {
+          loaderCalls += 1;
+          if (!fetchStarted.isCompleted) {
+            fetchStarted.complete();
+          }
+          return pendingBytes.future;
+        }),
+        cachePolicy: const PixaCachePolicy.noStore(),
+      );
+      final List<PixaProgress> firstProgress = <PixaProgress>[];
+      final List<PixaProgress> secondProgress = <PixaProgress>[];
+      final PixaProvider first = PixaProvider(
+        request: request,
+        onProgress: firstProgress.add,
+      );
+      final PixaProvider second = PixaProvider(
+        request: request,
+        onProgress: secondProgress.add,
+      );
+      final ImageStream firstStream = first.resolve(ImageConfiguration.empty);
+      final Completer<ImageInfo> firstImage = Completer<ImageInfo>();
+      final ImageStreamListener firstListener = ImageStreamListener((
+        ImageInfo image,
+        bool synchronousCall,
+      ) {
+        if (!firstImage.isCompleted) {
+          firstImage.complete(image);
+        } else {
+          image.dispose();
+        }
+      });
+      firstStream.addListener(firstListener);
+      await fetchStarted.future.timeout(const Duration(seconds: 5));
+
+      final ImageStream secondStream = second.resolve(ImageConfiguration.empty);
+      final Completer<ImageInfo> secondImage = Completer<ImageInfo>();
+      final ImageStreamListener secondListener = ImageStreamListener((
+        ImageInfo image,
+        bool synchronousCall,
+      ) {
+        if (!secondImage.isCompleted) {
+          secondImage.complete(image);
+        } else {
+          image.dispose();
+        }
+      });
+      secondStream.addListener(secondListener);
+
+      pendingBytes.complete(_minimalGif());
+      final List<ImageInfo> images = await Future.wait<ImageInfo>(
+        <Future<ImageInfo>>[firstImage.future, secondImage.future],
+      ).timeout(const Duration(seconds: 5));
+      firstStream.removeListener(firstListener);
+      secondStream.removeListener(secondListener);
+      for (final ImageInfo image in images) {
+        image.dispose();
+      }
+
+      expect(loaderCalls, 1);
+      expect(firstProgress, isNotEmpty);
+      expect(secondProgress, isNotEmpty);
+      expect(
+        secondProgress.any(
+          (PixaProgress progress) => progress.stage == PixaStage.complete,
+        ),
+        isTrue,
+      );
+    },
+  );
+
   test('PixaProvider limits concurrent Flutter decode callbacks', () async {
     final Directory cacheRoot = await Directory.systemTemp.createTemp(
       'pixa-provider-decode-limit-',
@@ -815,6 +911,7 @@ void main() {
           maxImageCompletionsPerFrame: 1,
         ),
       );
+      await _waitForCompletionGateIdle();
 
       final FlutterExceptionHandler? previousOnError = FlutterError.onError;
       final List<FlutterErrorDetails> cancelErrors = <FlutterErrorDetails>[];
@@ -834,6 +931,7 @@ void main() {
 
       final Completer<void> firstDecoded = Completer<void>();
       final Completer<void> secondDecoded = Completer<void>();
+      final _TrackingCodec secondCodec = _TrackingCodec();
 
       Future<ui.Codec> firstDecode(
         ui.ImmutableBuffer buffer, {
@@ -849,9 +947,8 @@ void main() {
         ui.TargetImageSizeCallback? getTargetSize,
       }) async {
         await firstDecoded.future;
-        final ui.Codec codec = await ui.instantiateImageCodec(_minimalGif());
         secondDecoded.complete();
-        return codec;
+        return secondCodec;
       }
 
       final PixaProvider first = PixaProvider(
@@ -896,8 +993,22 @@ void main() {
       firstCompleter.addListener(firstListener);
       secondCompleter.addListener(secondListener);
       await secondDecoded.future.timeout(const Duration(seconds: 5));
+      await Future<void>.delayed(Duration.zero);
+      final Map<String, Object?> queuedSnapshot = PixaDebugInspector.snapshot()
+          .toJson();
+      final Map<String, Object?> queuedDecoder =
+          queuedSnapshot['displayDecoder']! as Map<String, Object?>;
+      expect(queuedDecoder['completionQueueDepth'], 1);
+
       secondCompleter.removeListener(secondListener);
-      await Future<void>.delayed(const Duration(milliseconds: 80));
+      await Future<void>.delayed(Duration.zero);
+      final Map<String, Object?> cancelledSnapshot =
+          PixaDebugInspector.snapshot().toJson();
+      final Map<String, Object?> cancelledDecoder =
+          cancelledSnapshot['displayDecoder']! as Map<String, Object?>;
+      expect(cancelledDecoder['completionQueueDepth'], 0);
+      expect(secondCodec.isDisposed, isTrue);
+
       firstCompleter.removeListener(firstListener);
 
       expect(cancelErrors, isEmpty);
@@ -1942,6 +2053,71 @@ void main() {
     expect(imageCache.containsKey(first), isTrue);
   });
 
+  testWidgets(
+    'refresh and network-only providers bypass old Flutter decoded cache entries',
+    (WidgetTester tester) async {
+      final ImageCache imageCache = PaintingBinding.instance.imageCache;
+      imageCache.clear();
+      imageCache.clearLiveImages();
+      addTearDown(() {
+        imageCache.clear();
+        imageCache.clearLiveImages();
+      });
+
+      final ui.Image image =
+          await tester.runAsync(() => createTestImage(width: 1, height: 1)) ??
+          (throw StateError('Failed to create test image.'));
+      addTearDown(image.dispose);
+      final PixaSource source = PixaSource.custom(
+        'decoded-cache-bypass',
+        () async => _minimalGif(),
+      );
+      var loaderCalls = 0;
+
+      ImageStreamCompleter load() {
+        loaderCalls += 1;
+        return OneFrameImageStreamCompleter(
+          Future<ImageInfo>.value(ImageInfo(image: image.clone())),
+        );
+      }
+
+      final PixaProvider cached = PixaProvider(
+        request: PixaRequest(source: source),
+      );
+      final ImageStreamCompleter cachedCompleter = imageCache.putIfAbsent(
+        cached,
+        load,
+      )!;
+      expect(
+        imageCache.putIfAbsent(PixaProvider(request: cached.request), load),
+        same(cachedCompleter),
+      );
+
+      for (final PixaCacheMode mode in <PixaCacheMode>[
+        PixaCacheMode.refresh,
+        PixaCacheMode.networkOnly,
+      ]) {
+        final PixaRequest request = PixaRequest(
+          source: source,
+          cachePolicy: PixaCachePolicy(mode: mode),
+        );
+        final ImageStreamCompleter first = imageCache.putIfAbsent(
+          PixaProvider(request: request),
+          load,
+        )!;
+        final ImageStreamCompleter second = imageCache.putIfAbsent(
+          PixaProvider(request: request),
+          load,
+        )!;
+
+        expect(first, isNot(same(cachedCompleter)), reason: mode.name);
+        expect(second, isNot(same(first)), reason: mode.name);
+      }
+
+      expect(loaderCalls, 5);
+    },
+  );
+
   test('PixaProvider.network preserves request defaults', () {
     final PixaProvider provider = PixaProvider.network(
       'https://images.example.test/a.jpg',
@@ -2543,5 +2719,27 @@ final class _InvalidGifTranscodeDecoder implements PixaDecoder {
       bytes: Uint8List.fromList('not a gif'.codeUnits),
       mimeType: 'image/gif',
     );
+  }
+}
+
+final class _TrackingCodec implements ui.Codec {
+  bool isDisposed = false;
+
+  @override
+  int get frameCount => 1;
+
+  @override
+  int get repetitionCount => 0;
+
+  @override
+  Future<ui.FrameInfo> getNextFrame() {
+    return Future<ui.FrameInfo>.error(
+      StateError('Cancelled completion must not request a frame.'),
+    );
+  }
+
+  @override
+  void dispose() {
+    isDisposed = true;
   }
 }

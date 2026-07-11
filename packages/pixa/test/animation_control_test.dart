@@ -87,6 +87,55 @@ void main() {
     completer.removeListener(listener);
   });
 
+  testWidgets('initially paused animation displays only its first frame', (
+    WidgetTester tester,
+  ) async {
+    final PixaAnimationController controller = PixaAnimationController()
+      ..pause();
+    addTearDown(controller.dispose);
+    final List<ui.Image> sourceFrames =
+        await tester.runAsync(
+              () async => <ui.Image>[
+                await _onePixelImage(1),
+                await _onePixelImage(2),
+              ],
+            )
+            as List<ui.Image>;
+    addTearDown(() {
+      for (final ui.Image image in sourceFrames) {
+        image.dispose();
+      }
+    });
+    final _FakeCodec codec = _FakeCodec(sourceFrames);
+    final ImageStreamCompleter completer =
+        PixaControlledAnimatedImageStreamCompleter(
+          codec: SynchronousFuture<ui.Codec>(codec),
+          scale: 1,
+          debugLabel: 'initially-paused-animation-test',
+          informationCollector: () => <DiagnosticsNode>[
+            ErrorDescription('initially paused animation test'),
+          ],
+          controller: controller,
+          options: const PixaAnimationOptions(),
+        );
+    final List<int> frames = <int>[];
+    final ImageStreamListener listener = ImageStreamListener((
+      ImageInfo image,
+      bool synchronousCall,
+    ) {
+      frames.add(codec.framesServed);
+      image.dispose();
+    });
+
+    completer.addListener(listener);
+    await _pumpUntil(tester, () => frames.isNotEmpty);
+    expect(frames, <int>[1]);
+
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(frames, <int>[1]);
+    completer.removeListener(listener);
+  });
+
   test('PixaProvider animation controllers isolate decoded stream keys', () {
     final PixaRequest request = PixaRequest(
       source: PixaSource.custom('animated-key', () async => _minimalGif()),

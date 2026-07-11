@@ -1,0 +1,8 @@
+.dart_tool/
+.idea/
+*.iml
+build/
+coverage/
+doc/api/
+pubspec_overrides.yaml
+**/target/

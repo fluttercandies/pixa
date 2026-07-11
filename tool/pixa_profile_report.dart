@@ -31,6 +31,8 @@ const int _profileDecodedCacheWarmupMinimumEntries = 231;
 const int _profileLiveNetworkSamples = 240;
 const int _profileLiveNetworkIdentityProbes = 8;
 const int _profileLiveNetworkSeed = 20260710;
+const int _profileLiveNetworkMinimumDimension = 96;
+const int _profileLiveNetworkMaximumDimension = 1024;
 
 /// Independently evaluated result for one profile-mode scroll run.
 final class PixaProfileEvaluation {
@@ -54,6 +56,7 @@ PixaProfileEvaluation evaluateProfileRun(
   Map<String, Object?> run, {
   Map<String, Object?>? baseline,
   String? currentGitCommit,
+  bool requireLiveNetwork = false,
 }) {
   final List<String> failures = <String>[];
   final _MemoryEvaluation memory = _evaluateCoreProfileRun(
@@ -61,7 +64,11 @@ PixaProfileEvaluation evaluateProfileRun(
     failures,
     currentGitCommit: currentGitCommit,
   );
-  final List<String> supplementalFailures = _evaluateLiveNetwork(run);
+  final List<String> supplementalFailures = <String>[
+    ..._evaluateLiveNetwork(run),
+    if (requireLiveNetwork && run['liveNetworkRequested'] != true)
+      'Live network evidence is required for release acceptance.',
+  ];
   if (baseline == null) {
     failures.add('A comparable baseline profile run is required.');
   } else {
@@ -75,9 +82,10 @@ PixaProfileEvaluation evaluateProfileRun(
 
   final List<String> immutableFailures = List<String>.unmodifiable(failures);
   final bool corePassed = immutableFailures.isEmpty;
+  final bool liveNetworkGateEnabled =
+      requireLiveNetwork || run['liveNetworkRequested'] == true;
   final bool releasePassed =
-      corePassed &&
-      (run['liveNetworkRequested'] != true || supplementalFailures.isEmpty);
+      corePassed && (!liveNetworkGateEnabled || supplementalFailures.isEmpty);
   return PixaProfileEvaluation(
     passed: corePassed,
     releasePassed: releasePassed,
@@ -471,6 +479,7 @@ List<String> _evaluateLiveNetworkObject(Map<String, Object?> live) {
   final Set<int> encodedByteSizes = <int>{};
   var hasLandscape = false;
   var hasPortrait = false;
+  var dimensionsInRange = true;
   var probeCount = 0;
   for (final Map<String, Object?> sample in samples) {
     final int index = _integer(sample, 'index');
@@ -492,6 +501,12 @@ List<String> _evaluateLiveNetworkObject(Map<String, Object?> live) {
     final int width = _integer(sample, 'width');
     final int height = _integer(sample, 'height');
     dimensions.add((width, height));
+    dimensionsInRange =
+        dimensionsInRange &&
+        width >= _profileLiveNetworkMinimumDimension &&
+        width <= _profileLiveNetworkMaximumDimension &&
+        height >= _profileLiveNetworkMinimumDimension &&
+        height <= _profileLiveNetworkMaximumDimension;
     hasLandscape = hasLandscape || width > height;
     hasPortrait = hasPortrait || height > width;
     final int timedBytes = _integer(sample, 'timedPixaBytes');
@@ -524,14 +539,26 @@ List<String> _evaluateLiveNetworkObject(Map<String, Object?> live) {
       !indices.containsAll(expectedIndices)) {
     failures.add('Live network indices must uniquely cover 0..239.');
   }
+  if (dimensions.length != _profileLiveNetworkSamples) {
+    failures.add(
+      'Live network corpus must contain $_profileLiveNetworkSamples unique '
+      'dimensions; measured ${dimensions.length}.',
+    );
+  }
+  if (!dimensionsInRange) {
+    failures.add(
+      'Live network dimensions must stay within '
+      '$_profileLiveNetworkMinimumDimension..'
+      '$_profileLiveNetworkMaximumDimension pixels.',
+    );
+  }
   if (contentSeeds.length != _profileLiveNetworkSamples ||
-      dimensions.length < 8 ||
       encodedByteSizes.length < 8 ||
       !hasLandscape ||
       !hasPortrait) {
     failures.add(
       'Live network corpus diversity is insufficient: '
-      'unique seeds=${contentSeeds.length}, dimensions=${dimensions.length}, '
+      'unique seeds=${contentSeeds.length}, '
       'encoded byte sizes=${encodedByteSizes.length}, '
       'landscape=$hasLandscape, portrait=$hasPortrait.',
     );
@@ -688,15 +715,24 @@ _MemoryEvaluation _evaluateMemory(
     );
   }
 
-  final int encodedBudget = _integer(workload, 'memoryCacheBudgetBytes');
+  final int runtimeMemoryBudget = _integer(workload, 'memoryCacheBudgetBytes');
   final int decodedBudget = _integer(workload, 'decodedCacheBudgetBytes');
+  for (var index = 0; index < samples.length; index += 1) {
+    _validateRuntimeMemoryAccounting(
+      samples[index],
+      label: 'Memory sample $index',
+      failures: failures,
+    );
+  }
+  final int maxRuntimeMemory = _maximum(samples, 'runtimeMemoryBytes');
   final int maxEncoded = _maximum(samples, 'encodedMemoryBytes');
+  final int maxProcessed = _maximum(samples, 'processedMemoryBytes');
   final int maxDecoded = _maximum(samples, 'decodedCacheBytes');
   final int maxRegistry = _maximum(samples, 'decodedRegistryEntries');
-  if (maxEncoded > encodedBudget) {
+  if (maxRuntimeMemory > runtimeMemoryBudget) {
     failures.add(
-      'Encoded memory ${_bytes(maxEncoded)} exceeds budget '
-      '${_bytes(encodedBudget)}.',
+      'Rust memory cache ${_bytes(maxRuntimeMemory)} exceeds budget '
+      '${_bytes(runtimeMemoryBudget)}.',
     );
   }
   if (maxDecoded > decodedBudget) {
@@ -715,7 +751,9 @@ _MemoryEvaluation _evaluateMemory(
   return _MemoryEvaluation(
     plateauGrowthBytes: rssGrowth,
     slopeBytesPerCycle: rssSlope,
+    maxRuntimeMemoryBytes: maxRuntimeMemory,
     maxEncodedBytes: maxEncoded,
+    maxProcessedBytes: maxProcessed,
     maxDecodedBytes: maxDecoded,
     maxRegistryEntries: maxRegistry,
     registryPlateauGrowthEntries: registryGrowth,
@@ -746,6 +784,11 @@ void _validateMemoryWarmup(Map<String, Object?> warmup, List<String> failures) {
     return;
   }
   for (var index = 0; index < samples.length; index += 1) {
+    _validateRuntimeMemoryAccounting(
+      samples[index],
+      label: 'Memory warmup sample $index',
+      failures: failures,
+    );
     _validateDrainedSample(
       samples[index],
       label: 'Memory warmup sample $index',
@@ -755,9 +798,9 @@ void _validateMemoryWarmup(Map<String, Object?> warmup, List<String> failures) {
   final List<Map<String, Object?>> stableWindow = samples.sublist(
     samples.length - _profileMemoryWarmupStableSamples,
   );
-  final List<int> encoded = <int>[
+  final List<int> runtimeMemory = <int>[
     for (final Map<String, Object?> sample in stableWindow)
-      _integer(sample, 'encodedMemoryBytes'),
+      _integer(sample, 'runtimeMemoryBytes'),
   ];
   final List<int> decoded = <int>[
     for (final Map<String, Object?> sample in stableWindow)
@@ -768,13 +811,13 @@ void _validateMemoryWarmup(Map<String, Object?> warmup, List<String> failures) {
       _integer(sample, 'decodedRegistryEntries'),
   ];
   final bool stable =
-      encoded.reduce(math.max) - encoded.reduce(math.min) <=
+      runtimeMemory.reduce(math.max) - runtimeMemory.reduce(math.min) <=
           _profileMemoryWarmupMaxEncodedDriftBytes &&
       decoded.reduce(math.max) - decoded.reduce(math.min) <=
           _profileMemoryWarmupMaxEntryDrift &&
       registry.reduce(math.max) - registry.reduce(math.min) <=
           _profileMemoryWarmupMaxEntryDrift &&
-      encoded.every((int value) => value > 0) &&
+      runtimeMemory.every((int value) => value > 0) &&
       decoded.every((int value) => value > 0) &&
       registry.every((int value) => value > 0);
   if (!stable) {
@@ -788,6 +831,21 @@ void _validateMemoryWarmup(Map<String, Object?> warmup, List<String> failures) {
       'Memory warmup must exercise at least '
       '$_profileDecodedCacheWarmupMinimumEntries/'
       '$_profileDecodedCacheEntryBudget decoded cache capacity entries.',
+    );
+  }
+}
+
+void _validateRuntimeMemoryAccounting(
+  Map<String, Object?> sample, {
+  required String label,
+  required List<String> failures,
+}) {
+  final int runtimeBytes = _integer(sample, 'runtimeMemoryBytes');
+  final int encodedBytes = _integer(sample, 'encodedMemoryBytes');
+  final int processedBytes = _integer(sample, 'processedMemoryBytes');
+  if (runtimeBytes != encodedBytes + processedBytes) {
+    failures.add(
+      '$label memory accounting must equal encoded plus processed bytes.',
     );
   }
 }
@@ -873,7 +931,9 @@ final class _MemoryEvaluation {
   const _MemoryEvaluation({
     required this.plateauGrowthBytes,
     required this.slopeBytesPerCycle,
+    required this.maxRuntimeMemoryBytes,
     required this.maxEncodedBytes,
+    required this.maxProcessedBytes,
     required this.maxDecodedBytes,
     required this.maxRegistryEntries,
     required this.registryPlateauGrowthEntries,
@@ -883,7 +943,9 @@ final class _MemoryEvaluation {
   const _MemoryEvaluation.empty()
     : plateauGrowthBytes = 0,
       slopeBytesPerCycle = 0,
+      maxRuntimeMemoryBytes = 0,
       maxEncodedBytes = 0,
+      maxProcessedBytes = 0,
       maxDecodedBytes = 0,
       maxRegistryEntries = 0,
       registryPlateauGrowthEntries = 0,
@@ -891,7 +953,9 @@ final class _MemoryEvaluation {
 
   final int plateauGrowthBytes;
   final double slopeBytesPerCycle;
+  final int maxRuntimeMemoryBytes;
   final int maxEncodedBytes;
+  final int maxProcessedBytes;
   final int maxDecodedBytes;
   final int maxRegistryEntries;
   final int registryPlateauGrowthEntries;
@@ -902,6 +966,7 @@ Future<void> main(List<String> arguments) async {
   var inputPath = 'build/reports/pixa_profile_scroll_raw.json';
   var baselinePath = 'build/reports/pixa_profile_scroll_baseline.json';
   var outputPath = 'build/reports/pixa_profile_scroll_report.md';
+  var requireLiveNetwork = false;
   for (final String argument in arguments) {
     if (argument.startsWith('--input=')) {
       inputPath = argument.substring('--input='.length);
@@ -909,11 +974,13 @@ Future<void> main(List<String> arguments) async {
       baselinePath = argument.substring('--baseline='.length);
     } else if (argument.startsWith('--output=')) {
       outputPath = argument.substring('--output='.length);
+    } else if (argument == '--require-live-network') {
+      requireLiveNetwork = true;
     } else if (argument == '--help' || argument == '-h') {
       stdout.writeln(
         'Usage: dart run tool/pixa_profile_report.dart '
         '[--input=<raw.json>] [--baseline=<baseline.json>] '
-        '[--output=<report.md>]',
+        '[--output=<report.md>] [--require-live-network]',
       );
       return;
     } else {
@@ -937,6 +1004,7 @@ Future<void> main(List<String> arguments) async {
     run,
     baseline: baseline,
     currentGitCommit: git.commit,
+    requireLiveNetwork: requireLiveNetwork,
   );
   await writeProfileReportAtomically(output.path, evaluation.markdown);
   stdout.writeln(

@@ -193,17 +193,12 @@ abstract final class PixaMjpegVideoFrame {
 
 /// Registers the official MJPEG video-frame backend descriptor.
 ///
-/// The package provides only descriptor/helpers and a runtime manifest. It does
-/// not add Dart video decoding, FFmpeg/libav, or a second scheduler/cache path.
+/// Pixa's build hook discovers this package's runtime manifest from the
+/// resolved package graph. The package does not add Dart video decoding,
+/// FFmpeg/libav, or a second scheduler/cache path.
 final class PixaMjpegVideoFramePlugin implements PixaPlugin {
   /// Creates the MJPEG video-frame plugin descriptor.
-  const PixaMjpegVideoFramePlugin({this.hostRuntimeAvailable = false});
-
-  /// Whether the root app enabled this package's `pixa_plugin.json`.
-  ///
-  /// Keep the default false for pub packages: the dependency itself cannot
-  /// auto-link code into Pixa's runtime host.
-  final bool hostRuntimeAvailable;
+  const PixaMjpegVideoFramePlugin();
 
   @override
   String get id => pixaMjpegVideoFramePluginId;
@@ -223,11 +218,8 @@ final class PixaMjpegVideoFramePlugin implements PixaPlugin {
         PixaPluginIntegrationCandidate.runtimeHost(
           id: 'runtime-host',
           packageName: 'pixa_video_frame_mjpeg',
-          hostRuntimeAvailable: hostRuntimeAvailable,
+          hostRuntimeAvailable: true,
           requiredIntegration: true,
-          unavailableMessage:
-              'Root app must enable plugin_manifest or '
-              'plugin_manifest_directory for pixa_video_frame_mjpeg.',
           register: _registerMjpegVideoFrameBackend,
         ),
       ],

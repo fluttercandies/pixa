@@ -8,9 +8,7 @@ void main() {
   test('MJPEG plugin registers a runtime video-frame backend', () {
     final PixaRegistry registry = PixaRegistry();
 
-    const PixaMjpegVideoFramePlugin(
-      hostRuntimeAvailable: true,
-    ).register(registry);
+    const PixaMjpegVideoFramePlugin().register(registry);
 
     expect(registry.videoFrameBackends, hasLength(1));
     final PixaVideoFrameBackendDescriptor descriptor =
@@ -44,27 +42,6 @@ void main() {
     expect(
       registry.adaptiveIntegrationSelections.single.mode,
       PixaPluginIntegrationMode.runtimeHost,
-    );
-  });
-
-  test('MJPEG plugin fails fast until the host manifest is enabled', () {
-    final PixaRegistry registry = PixaRegistry();
-
-    expect(
-      () => const PixaMjpegVideoFramePlugin().register(registry),
-      throwsA(
-        isA<StateError>()
-            .having(
-              (StateError error) => error.message,
-              'message',
-              contains('pixa_video_frame_mjpeg'),
-            )
-            .having(
-              (StateError error) => error.message,
-              'message',
-              contains('plugin_manifest'),
-            ),
-      ),
     );
   });
 

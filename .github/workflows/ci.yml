@@ -15,16 +15,16 @@ jobs:
     name: Flutter 3.41 Linux
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: subosito/flutter-action@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           flutter-version: "3.41.9"
           cache: true
-      - name: Install Rust stable
+      - name: Install Rust 1.89.0
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          rustup toolchain install 1.89.0 --profile minimal --component clippy --component rustfmt
+          rustup default 1.89.0
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked
       - name: Install root dependencies
@@ -55,21 +55,21 @@ jobs:
           - os: windows-latest
             platform: windows
     steps:
-      - uses: actions/checkout@v7
-      - uses: subosito/flutter-action@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           cache: true
-      - name: Install Rust stable
+      - name: Install Rust 1.89.0
         shell: bash
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          rustup toolchain install 1.89.0 --profile minimal --component clippy --component rustfmt
+          rustup default 1.89.0
       - name: Install cargo-audit
         shell: bash
         run: cargo install cargo-audit --version 0.22.2 --locked
       - name: Install Melos
-        run: dart pub global activate melos 8.1.0
+        run: dart pub global activate melos 8.2.0
       - name: Add Pub cache bin
         shell: bash
         run: |
@@ -89,20 +89,20 @@ jobs:
       - name: Platform self-check
         run: dart run tool/pixa_platform_self_check.dart --output=build/reports/pixa_platform_self_check_${{ matrix.platform }}.json
       - name: Upload platform self-check
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pixa-platform-self-check-${{ matrix.platform }}
           path: build/reports/pixa_platform_self_check_${{ matrix.platform }}.json
 
   rust:
-    name: Rust stable
+    name: Rust 1.89.0
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - name: Install Rust stable
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Install Rust 1.89.0
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          rustup toolchain install 1.89.0 --profile minimal --component clippy --component rustfmt
+          rustup default 1.89.0
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked
       - name: Format
@@ -121,15 +121,15 @@ jobs:
       - flutter-stable
       - platform-build
     steps:
-      - uses: actions/checkout@v7
-      - uses: subosito/flutter-action@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           cache: true
       - name: Install root dependencies
         run: dart pub get
       - name: Download platform self-check reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: pixa-platform*check-*
           path: build/reports
@@ -137,7 +137,12 @@ jobs:
       - name: Self-test platform evidence verifier
         run: dart run tool/pixa_platform_evidence_self_test.dart
       - name: Validate hosted platform evidence
-        run: dart run tool/pixa_platform_evidence.dart --require-platforms=android,ios,linux,macos,windows --require-run-mode=integration-test --require-native-modules=jpeg-turbo-roi,webp-roi
+        run: >-
+          dart run tool/pixa_platform_evidence.dart
+          --require-platforms=android,ios,linux,macos,windows
+          --require-run-mode=integration-test
+          --require-native-modules=jpeg-turbo-roi,webp-roi
+          --require-git-commit=${{ github.sha }}
 
   platform-build:
     name: Platform build ${{ matrix.platform }}
@@ -162,17 +167,17 @@ jobs:
             os: windows-latest
             rust-targets: x86_64-pc-windows-msvc
     steps:
-      - uses: actions/checkout@v7
-      - uses: subosito/flutter-action@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           cache: true
-      - name: Install Rust stable
+      - name: Install Rust 1.89.0
         shell: bash
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup target add ${{ matrix.rust-targets }}
+          rustup toolchain install 1.89.0 --profile minimal --component clippy --component rustfmt
+          rustup default 1.89.0
+          rustup target add ${{ matrix.rust-targets }} --toolchain 1.89.0
       - name: Install Linux build dependencies
         if: matrix.platform == 'linux'
         run: |
@@ -190,7 +195,7 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         run: choco install nasm -y
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
         if: matrix.platform == 'android'
       - name: Install Android NDK
         if: matrix.platform == 'android'
@@ -217,9 +222,9 @@ jobs:
       - name: Enable Swift Package Manager
         if: matrix.platform == 'ios' || matrix.platform == 'macos'
         run: flutter config --enable-swift-package-manager
-      - name: Build and run Android platform probe
+      - name: Build and run Android platform acceptance
         if: matrix.platform == 'android'
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: 30
           arch: x86_64
@@ -230,21 +235,8 @@ jobs:
           emulator-boot-timeout: 2700
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           script: |
-            dart run tool/pixa_platform_build.dart --platform=android --enable-native-roi --run-self-check --device=emulator-5554 --device-kind=emulator --connection=local --signing=debug --report-output=build/reports/pixa_platform_probe_self_check_android.json
-      - name: Run Android gallery cockpit acceptance
-        if: matrix.platform == 'android'
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          arch: x86_64
-          target: google_atd
-          profile: pixel_2
-          ram-size: 2048M
-          heap-size: 512M
-          emulator-boot-timeout: 2700
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: |
-            bash tool/pixa_android_cockpit_ci.sh
+            dart run tool/pixa_platform_build.dart --platform=android --enable-native-roi --run-self-check --device=emulator-5554 --device-kind=emulator --connection=local --signing=debug --report-output=build/reports/pixa_platform_probe_self_check_android.json &&
+              bash tool/pixa_android_cockpit_ci.sh
       - name: Boot iOS simulator
         if: matrix.platform == 'ios'
         shell: bash
@@ -288,19 +280,19 @@ jobs:
         run: dart run tool/pixa_gallery_cockpit_acceptance.dart --platform=${{ matrix.platform }} --device-id=${{ matrix.platform }} --output-root=build/reports/pixa_gallery_cockpit_${{ matrix.platform }}
       - name: Upload desktop platform probe self-check
         if: always() && (matrix.platform == 'linux' || matrix.platform == 'macos' || matrix.platform == 'windows')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pixa-platform-probe-self-check-${{ matrix.platform }}
           path: build/reports/pixa_platform_probe_self_check_${{ matrix.platform }}.json
       - name: Upload mobile platform probe self-check
         if: always() && (matrix.platform == 'android' || matrix.platform == 'ios')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pixa-platform-probe-self-check-${{ matrix.platform }}
           path: build/reports/pixa_platform_probe_self_check_${{ matrix.platform }}.json
       - name: Upload gallery cockpit acceptance
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pixa-gallery-cockpit-${{ matrix.platform }}
           path: build/reports/pixa_gallery_cockpit_${{ matrix.platform }}

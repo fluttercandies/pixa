@@ -155,7 +155,11 @@ String _renderMarkdown(
       '| Theil-Sen RSS slope | '
       '${_bytes(memory.slopeBytesPerCycle.round())}/cycle |',
     )
+    ..writeln(
+      '| Peak Rust memory cache | ${_bytes(memory.maxRuntimeMemoryBytes)} |',
+    )
     ..writeln('| Peak encoded memory | ${_bytes(memory.maxEncodedBytes)} |')
+    ..writeln('| Peak processed memory | ${_bytes(memory.maxProcessedBytes)} |')
     ..writeln('| Peak decoded cache | ${_bytes(memory.maxDecodedBytes)} |')
     ..writeln(
       '| Peak decoded registry | ${memory.maxRegistryEntries} entries |',

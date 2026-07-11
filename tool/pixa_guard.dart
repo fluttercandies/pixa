@@ -58,12 +58,14 @@ void main() {
   _checkUserFacingReadmes(root, failures);
   _checkReleaseNeutralReadmeInstallCopy(root, failures);
   _checkPubReleaseReadiness(root, failures);
+  _checkReleasePreflightHardening(root, failures);
   _checkExplicitPluginVersionConstraints(root, failures);
   _checkSwiftPackageManagerSupport(root, failures);
   _checkPublicExports(root, failures);
   _checkUnsafeBoundary(root, failures);
   _checkRustResolvedLicenses(root, failures);
   _checkRustDependencyAdvisories(root, failures);
+  _checkRustDependencyCurrency(root, failures);
   _checkDartDependencyAdvisories(root, failures);
 
   if (failures.isNotEmpty) {
@@ -654,7 +656,7 @@ void _checkPluginAuthoringDocs(Directory root, List<String> failures) {
     'hostRuntimeAvailable',
     'platformAvailable',
     'adaptivePluginIntegrations',
-    'pub.dev package cannot auto-link runtime host code',
+    'resolved package graph',
     'local `path`, a `git` dependency, or a workspace package',
     'must register at least one fetcher, decoder, processor',
     'every descriptor it adds must match the candidate mode',
@@ -665,9 +667,7 @@ void _checkPluginAuthoringDocs(Directory root, List<String> failures) {
     'Host-merge mode',
     'Standalone FFI mode',
     'Asset module mode',
-    'plugin_manifest',
-    'plugin_manifest_directory',
-    'root app',
+    'pixa_plugin.json',
     'breaking changes',
   ]) {
     if (!guideText.contains(token)) {
@@ -732,7 +732,7 @@ void _checkPipelineExtensibilityDocs(Directory root, List<String> failures) {
       'PixaRegistry.registerAdaptiveIntegration',
       'automatic integration selection',
       'adaptivePluginIntegrations',
-      'pub.dev package cannot auto-link runtime host code',
+      'resolved package graph',
     ],
     'README_ZH.md': <String>[
       'compiled route plan',
@@ -742,7 +742,7 @@ void _checkPipelineExtensibilityDocs(Directory root, List<String> failures) {
       'PixaRegistry.registerAdaptiveIntegration',
       'automatic integration selection',
       'adaptivePluginIntegrations',
-      'pub.dev package cannot auto-link runtime host code',
+      '已解析 package graph',
     ],
     'packages/pixa/README.md': <String>[
       'compiled route plan',
@@ -752,7 +752,7 @@ void _checkPipelineExtensibilityDocs(Directory root, List<String> failures) {
       'PixaRegistry.registerAdaptiveIntegration',
       'automatic integration selection',
       'adaptivePluginIntegrations',
-      'pub.dev package cannot auto-link runtime host code',
+      'resolved package graph',
     ],
     'packages/pixa/README_ZH.md': <String>[
       'compiled route plan',
@@ -762,7 +762,7 @@ void _checkPipelineExtensibilityDocs(Directory root, List<String> failures) {
       'PixaRegistry.registerAdaptiveIntegration',
       'automatic integration selection',
       'adaptivePluginIntegrations',
-      'pub.dev package cannot auto-link runtime host code',
+      '已解析 package graph',
     ],
   };
   for (final MapEntry<String, List<String>> entry in docs.entries) {
@@ -791,7 +791,7 @@ void _checkVideoFramePluginPackage(Directory root, List<String> failures) {
       'PixaMjpegVideoFramePlugin',
       'PixaMjpegVideoFrame.request',
       'PixaMjpegVideoFrame.image',
-      'hostRuntimeAvailable',
+      'const PixaMjpegVideoFramePlugin();',
       'pixaMjpegVideoFrameDescriptor',
       'PixaRuntimeVideoFrameBackendDescriptor',
       'video-frame:mjpeg',
@@ -806,52 +806,45 @@ void _checkVideoFramePluginPackage(Directory root, List<String> failures) {
     ],
     'packages/pixa_video_frame_mjpeg/README.md': <String>[
       'PixaMjpegVideoFramePlugin',
-      'hostRuntimeAvailable',
       'PixaMjpegVideoFrame.request',
       'PixaMjpegVideoFrame.image',
       'pixa_plugin.json',
-      'plugin_manifest',
-      'plugin_manifest_directory',
-      'pub.dev package cannot auto-link runtime host code',
+      'resolved dependency graph',
+      'No `hooks.user_defines`',
       'video-frame:mjpeg',
       'image/jpeg',
     ],
     'README.md': <String>[
       'pixa_video_frame_mjpeg',
       'PixaMjpegVideoFramePlugin',
-      'hostRuntimeAvailable',
       'does not ship a default video-frame backend',
-      'plugin_manifest_directory',
+      "PixaMjpegVideoFramePlugin()",
     ],
     'README_ZH.md': <String>[
       'pixa_video_frame_mjpeg',
       'PixaMjpegVideoFramePlugin',
-      'hostRuntimeAvailable',
       '不内置默认 video-frame backend',
-      'plugin_manifest_directory',
+      '自动发现',
     ],
     'packages/pixa/README.md': <String>[
       'pixa_video_frame_mjpeg',
       'PixaMjpegVideoFramePlugin',
-      'hostRuntimeAvailable',
       'does not ship a default video-frame backend',
-      'plugin_manifest_directory',
+      'resolved package graph',
     ],
     'packages/pixa/README_ZH.md': <String>[
       'pixa_video_frame_mjpeg',
       'PixaMjpegVideoFramePlugin',
-      'hostRuntimeAvailable',
       '不内置默认 video-frame backend',
-      'plugin_manifest_directory',
+      '自动发现',
     ],
     'packages/pixa/PLUGIN_AUTHORING.md': <String>[
       'pixa_video_frame_mjpeg',
       'PixaMjpegVideoFramePlugin',
       'PixaMjpegVideoFrame.request',
-      'hostRuntimeAvailable',
       'video-frame:mjpeg',
       'does not expose the MJPEG manifest',
-      'plugin_manifest_directory',
+      'resolved package graph',
     ],
   };
 
@@ -1046,7 +1039,7 @@ void _checkUserFacingReadmes(Directory root, List<String> failures) {
     'packages/pixa_video_frame_mjpeg/README.md': <String>[
       'Official Pixa MJPEG AVI video-frame backend package',
       '## Install',
-      '## Enable The Runtime Module',
+      'No `hooks.user_defines`',
       '## Register',
       '## Use',
       '## Failure Behavior',
@@ -1114,35 +1107,53 @@ void _checkReleaseNeutralReadmeInstallCopy(
     }
   }
 
-  final Map<String, List<String>> requiredInstallTokens =
+  failures.addAll(pixaReadmeDependencyInstallFailures(readmes));
+}
+
+List<String> pixaReadmeDependencyInstallFailures(Map<String, String> readmes) {
+  const Map<String, List<String>> requiredInstallTokens =
       <String, List<String>>{
-        'README.md': <String>['pixa: ^1.0.0', 'path: packages/pixa'],
-        'README_ZH.md': <String>['pixa: ^1.0.0', 'path: packages/pixa'],
-        'packages/pixa/README.md': <String>['pixa: ^1.0.0', 'path: ../pixa'],
-        'packages/pixa/README_ZH.md': <String>['pixa: ^1.0.0', 'path: ../pixa'],
+        'README.md': <String>['pixa: ^1.0.0'],
+        'README_ZH.md': <String>['pixa: ^1.0.0'],
+        'packages/pixa/README.md': <String>['pixa: ^1.0.0'],
+        'packages/pixa/README_ZH.md': <String>['pixa: ^1.0.0'],
         'packages/pixa_fetcher_s3/README.md': <String>[
-          'pixa: ^1.0.0',
           'pixa_fetcher_s3: ^1.0.0',
-          'path: ../pixa',
-          'path: ../pixa_fetcher_s3',
         ],
         'packages/pixa_video_frame_mjpeg/README.md': <String>[
-          'pixa: ^1.0.0',
           'pixa_video_frame_mjpeg: ^1.0.0',
-          'path: ../pixa',
-          'path: ../pixa_video_frame_mjpeg',
         ],
       };
-
-  for (final MapEntry<String, List<String>> entry
+  final List<String> failures = <String>[];
+  for (final MapEntry<String, List<String>> required
       in requiredInstallTokens.entries) {
-    final String text = readmes[entry.key]!;
-    for (final String token in entry.value) {
+    final String? text = readmes[required.key];
+    if (text == null) {
+      failures.add('${required.key} is missing from README install checks');
+      continue;
+    }
+    for (final String token in required.value) {
       if (!text.contains(token)) {
-        failures.add('${entry.key} must keep install token `$token`');
+        failures.add('${required.key} must keep install token `$token`');
       }
     }
+    if (RegExp(r'^\s*path\s*:', multiLine: true).hasMatch(text)) {
+      failures.add(
+        '${required.key} must not document a path dependency in its user '
+        'install flow',
+      );
+    }
+    if (RegExp(
+      r'^\s*dependency_overrides\s*:',
+      multiLine: true,
+    ).hasMatch(text)) {
+      failures.add(
+        '${required.key} must not require dependency_overrides in its user '
+        'install flow',
+      );
+    }
   }
+  return failures;
 }
 
 void _checkPubReleaseReadiness(Directory root, List<String> failures) {
@@ -1276,6 +1287,183 @@ void _checkPubReleaseReadiness(Directory root, List<String> failures) {
 
   _checkPublishedRustSource(root, failures);
   _checkSingleRustWorkspaceReferences(root, failures);
+}
+
+void _checkReleasePreflightHardening(Directory root, List<String> failures) {
+  final Map<String, List<String>> requiredTokens = <String, List<String>>{
+    'packages/pixa/dartdoc_options.yaml': <String>[
+      'ambiguous-reexport',
+      'unresolved-doc-reference',
+    ],
+    'packages/pixa/.pubignore': <String>['*.iml'],
+    'packages/pixa_fetcher_s3/.pubignore': <String>['*.iml'],
+    'packages/pixa_video_frame_mjpeg/.pubignore': <String>['*.iml'],
+    '$_rustWorkspacePath/rust-toolchain.toml': <String>[
+      'channel = "1.89.0"',
+      'profile = "minimal"',
+    ],
+    _rustManifestPath: <String>['rust-version = "1.89"'],
+    'packages/pixa/hook/build.dart': <String>[
+      'pixaValidateRustToolchain',
+      "const String pixaRustToolchainVersion = '1.89.0'",
+      r'rustup toolchain install $pixaRustToolchainVersion --profile minimal',
+    ],
+    'tool/pixa_release_preflight.dart': <String>[
+      "id: 'release-preflight-self-test'",
+      "id: 'dartdoc'",
+      "id: 'rust-audit'",
+      "id: 'guard-self-test'",
+      "id: 'profile-report-self-test'",
+      "id: 'profile-acceptance-self-test'",
+      "id: 'profile-evidence'",
+      "id: 'gallery-tests'",
+      "id: 'native-assets-log-self-test'",
+      "id: 'native-assets-log'",
+      "id: 'pub-dependency-smoke'",
+      "id: 'publish-dry-run-pixa'",
+      "id: 'publish-dry-run-s3'",
+      "id: 'publish-dry-run-mjpeg'",
+      "id: 'platform-evidence'",
+      "id: 'git-diff-check'",
+      '--platform-reports=',
+      '--native-assets-log=',
+      '--profile-input=',
+      '--profile-baseline=',
+      '--require-live-network',
+      '--require-git-commit=',
+    ],
+    'tool/pixa_profile_report.dart': <String>[
+      'requireLiveNetwork',
+      '--require-live-network',
+      'Live network evidence is required for release acceptance.',
+    ],
+    'tool/pixa_profile_acceptance.dart': <String>[
+      "'rustup'",
+      "'1.89.0'",
+      'profileRustVersionCommand',
+    ],
+    'tool/pixa_native_assets_log_check.dart': <String>[
+      'package:objective_c/objective_c.dylib',
+      'objective_c.framework',
+      'objective_c1.framework',
+      'package:pixa/pixa_runtime',
+      'pixa_runtime.framework',
+      'pixa_runtime1.framework',
+      'mapping is not an approved Flutter toolchain collision',
+    ],
+    'tool/pixa_pub_dependency_smoke.dart': <String>[
+      '--to-archive=',
+      'PUB_HOSTED_URL',
+      'source: hosted',
+      'await Pixa.configure(',
+      'Pixa.pipeline.cacheStats()',
+      "'test',",
+      "'--concurrency=1'",
+    ],
+    'README.md': <String>[
+      "import 'package:flutter/material.dart';",
+      "import 'package:pixa/pixa.dart';",
+      'Visual Studio',
+      'NASM',
+      'Android NDK',
+      'CMake',
+      'Ninja',
+    ],
+    'README_ZH.md': <String>[
+      "import 'package:flutter/material.dart';",
+      "import 'package:pixa/pixa.dart';",
+      'Visual Studio',
+      'NASM',
+      'Android NDK',
+      'CMake',
+      'Ninja',
+    ],
+    'packages/pixa/README.md': <String>[
+      "import 'package:flutter/material.dart';",
+      "import 'package:pixa/pixa.dart';",
+      "import 'package:pixa/pixa_debug.dart';",
+      'Visual Studio',
+      'NASM',
+      'Android NDK',
+      'CMake',
+      'Ninja',
+    ],
+    'packages/pixa/README_ZH.md': <String>[
+      "import 'package:flutter/material.dart';",
+      "import 'package:pixa/pixa.dart';",
+      "import 'package:pixa/pixa_debug.dart';",
+      'Visual Studio',
+      'NASM',
+      'Android NDK',
+      'CMake',
+      'Ninja',
+    ],
+    'packages/pixa_video_frame_mjpeg/README.md': <String>[
+      'No `hooks.user_defines`',
+      'resolved dependency graph',
+      "import 'package:pixa_video_frame_mjpeg/pixa_video_frame_mjpeg.dart';",
+    ],
+    'packages/pixa_fetcher_s3/README.md': <String>[
+      'AWS Signature Version 4',
+      "import 'package:pixa_fetcher_s3/pixa_fetcher_s3.dart';",
+      "import 'package:pixa/pixa_debug.dart';",
+    ],
+  };
+  for (final MapEntry<String, List<String>> entry in requiredTokens.entries) {
+    final File file = File('${root.path}/${entry.key}');
+    if (!file.existsSync()) {
+      failures.add('release preflight hardening: ${entry.key} is missing');
+      continue;
+    }
+    final String source = file.readAsStringSync();
+    for (final String token in entry.value) {
+      if (!source.contains(token)) {
+        failures.add(
+          'release preflight hardening: ${entry.key} must contain `$token`',
+        );
+      }
+    }
+  }
+
+  for (final String readme in <String>[
+    'README.md',
+    'README_ZH.md',
+    'packages/pixa/README.md',
+    'packages/pixa/README_ZH.md',
+  ]) {
+    final String source = File('${root.path}/$readme').readAsStringSync();
+    if (!source.contains('1.89.0') ||
+        !source.contains('rustup toolchain install')) {
+      failures.add(
+        'release preflight hardening: $readme must document the pinned Rust '
+        'toolchain install command',
+      );
+    }
+  }
+
+  final String s3Pubspec = File(
+    '${root.path}/packages/pixa_fetcher_s3/pubspec.yaml',
+  ).readAsStringSync();
+  if (RegExp(
+    r'^description:.*descriptor',
+    multiLine: true,
+  ).hasMatch(s3Pubspec)) {
+    failures.add(
+      'release preflight hardening: S3 pub metadata must describe the '
+      'production SigV4 fetcher, not a descriptor package',
+    );
+  }
+
+  final String workflow = File(
+    '${root.path}/.github/workflows/ci.yml',
+  ).readAsStringSync();
+  if (RegExp(r'uses:\s+[^\s#]+@v\d+').hasMatch(workflow) ||
+      workflow.contains('rustup toolchain install stable')) {
+    failures.add(
+      'release preflight hardening: CI actions and Rust must use immutable '
+      'pins',
+    );
+  }
 }
 
 void _checkPublishedRustSource(Directory root, List<String> failures) {
@@ -1883,8 +2071,8 @@ void _checkPublicExports(Directory root, List<String> failures) {
     'packages/pixa/lib/pixa_debug.dart': <String>{
       'src/cache/cache_stats.dart',
       'src/debug/debug_inspector.dart',
+      'src/debug/registry_architecture_snapshot.dart',
       'src/display_decoder.dart',
-      'src/registry.dart',
       'src/runtime/capabilities.dart',
       'src/runtime/runtime_plugin_stats.dart',
       'src/scheduler_stats.dart',
@@ -1991,6 +2179,7 @@ void _checkDartDependencyAdvisories(Directory root, List<String> failures) {
 
   final Map<String, Object?> outdated =
       jsonDecode(result.stdout as String) as Map<String, Object?>;
+  failures.addAll(pixaDartDependencyCurrencyFailures(outdated));
   final List<Object?> packages = outdated['packages']! as List<Object?>;
   for (final Object? package in packages) {
     final Map<String, Object?> typed = package! as Map<String, Object?>;
@@ -2008,6 +2197,75 @@ void _checkDartDependencyAdvisories(Directory root, List<String> failures) {
       );
     }
   }
+}
+
+/// Returns release failures for dependencies with a compatible Dart upgrade.
+List<String> pixaDartDependencyCurrencyFailures(Map<String, Object?> outdated) {
+  final Object? rawPackages = outdated['packages'];
+  if (rawPackages is! List<Object?>) {
+    return <String>['dart dependency currency: invalid outdated output'];
+  }
+  final List<String> failures = <String>[];
+  for (final Object? rawPackage in rawPackages) {
+    if (rawPackage is! Map<String, Object?>) {
+      failures.add('dart dependency currency: invalid package entry');
+      continue;
+    }
+    final String name = rawPackage['package']?.toString() ?? 'unknown';
+    final Object? rawCurrent = rawPackage['current'];
+    final Object? rawUpgradable = rawPackage['upgradable'];
+    if (rawCurrent is! Map<String, Object?> ||
+        rawUpgradable is! Map<String, Object?>) {
+      failures.add('dart dependency currency: $name has incomplete versions');
+      continue;
+    }
+    final String? current = rawCurrent['version']?.toString();
+    final String? upgradable = rawUpgradable['version']?.toString();
+    if (current == null || upgradable == null) {
+      failures.add('dart dependency currency: $name has incomplete versions');
+    } else if (current != upgradable) {
+      failures.add(
+        'dart dependency currency: compatible update available for '
+        '$name $current -> $upgradable',
+      );
+    }
+  }
+  return failures;
+}
+
+void _checkRustDependencyCurrency(Directory root, List<String> failures) {
+  final ProcessResult result = Process.runSync('rustup', <String>[
+    'run',
+    '1.89.0',
+    'cargo',
+    'update',
+    '--manifest-path',
+    _rustManifestPath,
+    '--dry-run',
+  ], workingDirectory: root.path);
+  if (result.exitCode != 0) {
+    failures.add('rust dependency currency: cargo update --dry-run failed');
+    return;
+  }
+  final String output = '${result.stdout}\n${result.stderr}';
+  final RegExp lockCount = RegExp(r'Locking\s+\d+\s+packages?');
+  if (!lockCount.hasMatch(output)) {
+    failures.add('rust dependency currency: unable to parse Cargo dry-run');
+  } else if (pixaCargoUpdateDryRunHasCompatibleUpdates(output)) {
+    failures.add(
+      'rust dependency currency: Cargo.lock has compatible updates; '
+      'run rustup run 1.89.0 cargo update --manifest-path '
+      '$_rustManifestPath',
+    );
+  }
+}
+
+/// Whether Cargo's update dry-run reports compatible lockfile changes.
+bool pixaCargoUpdateDryRunHasCompatibleUpdates(String output) {
+  final RegExpMatch? match = RegExp(
+    r'Locking\s+(\d+)\s+packages?',
+  ).firstMatch(output);
+  return match != null && int.parse(match.group(1)!) > 0;
 }
 
 bool _isDirectDartDependency(String kind) {

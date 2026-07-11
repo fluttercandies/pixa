@@ -8,7 +8,7 @@ import 'pixa_gallery_cockpit_acceptance.dart' as acceptance;
 void main() {
   _mobilePlatformsUseCiSizedLaunchBudget();
   _androidCiEnablesHardwareAcceleration();
-  _androidCiUsesFreshEmulatorForCockpitAcceptance();
+  _androidCiUsesOneEmulatorForPlatformAcceptance();
   _androidCiUsesCiSizedEmulatorBootBudget();
   _androidCiCapturesCockpitDiagnosticsOnFailure();
   _androidCiCapturesLiveCockpitDiagnostics();
@@ -68,27 +68,35 @@ void _workflowAllowsSlowGalleryBootstrap() {
   );
 }
 
-void _androidCiUsesFreshEmulatorForCockpitAcceptance() {
+void _androidCiUsesOneEmulatorForPlatformAcceptance() {
   final workflow = File('.github/workflows/ci.yml').readAsStringSync();
-  const probeStep = '- name: Build and run Android platform probe';
-  const cockpitStep = '- name: Run Android gallery cockpit acceptance';
-  final probeIndex = workflow.indexOf(probeStep);
-  final cockpitIndex = workflow.indexOf(cockpitStep);
+  const acceptanceStep = '- name: Build and run Android platform acceptance';
+  final acceptanceIndex = workflow.indexOf(acceptanceStep);
 
-  _expect(probeIndex >= 0, 'Android platform probe step should exist.');
   _expect(
-    cockpitIndex > probeIndex,
-    'Android cockpit acceptance should run after the platform probe.',
+    acceptanceIndex >= 0,
+    'Android platform acceptance step should exist.',
+  );
+  _expect(
+    RegExp(
+          r'reactivecircus/android-emulator-runner@',
+        ).allMatches(workflow).length ==
+        1,
+    'Android platform probe and cockpit acceptance should share one emulator.',
   );
 
-  final nextStepIndex = workflow.indexOf('\n      - name:', probeIndex + 1);
-  final probeBlock = workflow.substring(
-    probeIndex,
+  final nextStepIndex = workflow.indexOf(
+    '\n      - name:',
+    acceptanceIndex + 1,
+  );
+  final acceptanceBlock = workflow.substring(
+    acceptanceIndex,
     nextStepIndex == -1 ? workflow.length : nextStepIndex,
   );
   _expect(
-    !probeBlock.contains('pixa_gallery_cockpit_acceptance.dart'),
-    'Android platform probe should not reuse its emulator for cockpit acceptance.',
+    acceptanceBlock.contains('pixa_platform_build.dart') &&
+        acceptanceBlock.contains('bash tool/pixa_android_cockpit_ci.sh'),
+    'One Android emulator step should run both platform acceptance surfaces.',
   );
 }
 
@@ -96,7 +104,7 @@ void _androidCiEnablesHardwareAcceleration() {
   final workflow = File('.github/workflows/ci.yml').readAsStringSync();
   const kvmStep = '- name: Enable Android emulator KVM acceleration';
   final kvmIndex = workflow.indexOf(kvmStep);
-  const probeStep = '- name: Build and run Android platform probe';
+  const probeStep = '- name: Build and run Android platform acceptance';
   final probeIndex = workflow.indexOf(probeStep);
   _expect(kvmIndex >= 0, 'Android CI should enable KVM acceleration.');
   _expect(
@@ -121,8 +129,8 @@ void _androidCiUsesCiSizedEmulatorBootBudget() {
   ).allMatches(workflow);
   final timeouts = <int>[for (final m in matches) int.parse(m.group(1)!)];
   _expect(
-    timeouts.length == 2,
-    'Android CI should declare boot timeouts for both emulator runs.',
+    timeouts.length == 1,
+    'Android CI should declare one emulator boot timeout.',
   );
   _expect(
     timeouts.every((timeout) => timeout == 2700),
@@ -133,7 +141,7 @@ void _androidCiUsesCiSizedEmulatorBootBudget() {
 void _androidCiCapturesCockpitDiagnosticsOnFailure() {
   final workflow = File('.github/workflows/ci.yml').readAsStringSync();
   final script = File('tool/pixa_android_cockpit_ci.sh').readAsStringSync();
-  const cockpitStep = '- name: Run Android gallery cockpit acceptance';
+  const cockpitStep = '- name: Build and run Android platform acceptance';
   final cockpitIndex = workflow.indexOf(cockpitStep);
   _expect(cockpitIndex >= 0, 'Android cockpit acceptance step should exist.');
   final nextStepIndex = workflow.indexOf('\n      - name:', cockpitIndex + 1);

@@ -10,6 +10,23 @@ import 'package:pixa/src/runtime/runtime_disk_cache.dart';
 import 'package:pixa/src/runtime/runtime_memory_cache.dart';
 
 void main() {
+  test('pipeline preserves inferred MIME type for runtime bytes', () async {
+    final PixaPipeline pipeline = PixaPipeline(cacheRootPath: '');
+
+    final PixaPipelineLoad load = await pipeline.load(
+      PixaRequest.bytes(
+        _minimalGif(),
+        cachePolicy: const PixaCachePolicy.noStore(),
+      ),
+    );
+
+    try {
+      expect(load.mimeType, 'image/gif');
+    } finally {
+      load.dispose();
+    }
+  });
+
   test(
     'priority bucket scheduler starts immediate work before thousands of low requests',
     () async {
@@ -449,7 +466,13 @@ void main() {
         (PixaEvent event) => event.name == 'request.failure',
       );
       expect(failureEvent.stage, PixaStage.fetch);
-      expect(failureEvent.failure, same(failure));
+      expect(failureEvent.failure, isNot(same(failure)));
+      expect(failureEvent.failure?.requestId, failure.requestId);
+      expect(failureEvent.failure?.stage, failure.stage);
+      expect(failureEvent.failure?.safeMessage, failure.safeMessage);
+      expect(failureEvent.failure?.retryability, failure.retryability);
+      expect(failureEvent.failure?.originalError, isNull);
+      expect(failureEvent.failure?.stackTrace, isNull);
     },
   );
 
@@ -1189,6 +1212,29 @@ void main() {
     } finally {
       load.dispose();
     }
+  });
+
+  test('runtime load public bytes remain safe after disposal', () async {
+    final PixaPipeline pipeline = PixaPipeline(
+      cacheRootPath: '',
+      maxConcurrentRuntimeLoads: 1,
+    );
+    final Uint8List expected = _minimalGif();
+    final PixaRequest request = PixaRequest(
+      source: PixaSource.custom(
+        'retained-runtime-buffer',
+        () async => expected,
+      ),
+      cachePolicy: const PixaCachePolicy.noStore(),
+    );
+
+    final PixaPipelineLoad load = await pipeline.load(request);
+    final Uint8List retained = load.bytes;
+    load.dispose();
+
+    expect(load.bytes, same(retained));
+    expect(retained, orderedEquals(expected));
+    expect(() => retained[0] = 0, throwsUnsupportedError);
   });
 
   test('runtime load exposes MIME detected from untransformed bytes', () async {

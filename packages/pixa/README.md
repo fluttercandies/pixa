@@ -18,17 +18,28 @@ dependencies:
   pixa: ^1.0.0
 ```
 
-```yaml
-dependencies:
-  pixa:
-    path: ../pixa
+### Native build prerequisite
+
+Pixa compiles its packaged Rust runtime with Flutter Native Assets. Install the
+pinned toolchain before building an app that depends on Pixa:
+
+```bash
+rustup toolchain install 1.89.0 --profile minimal
 ```
+
+Cross targets also require `rustup target add <target> --toolchain 1.89.0` and
+their platform compiler. The Native Assets hook emits an actionable command if
+Rust, Cargo, or the requested target is unavailable. Windows JPEG Turbo ROI
+builds require Visual Studio with the Desktop development with C++ workload and
+NASM. Android builds require the Android NDK, SDK CMake, and Ninja.
 
 ## Quick Start
 
 Configure Pixa before loading images:
 
 ```dart
+import 'package:pixa/pixa.dart';
+
 await Pixa.configure(const PixaConfig(
   memoryCacheBytes: 96 * 1024 * 1024,
   diskCacheBytes: 512 * 1024 * 1024,
@@ -40,6 +51,9 @@ await Pixa.configure(const PixaConfig(
 Use `PixaImage.network` for normal image widgets:
 
 ```dart
+import 'package:flutter/material.dart';
+import 'package:pixa/pixa.dart';
+
 PixaImage.network(
   imageUrl,
   width: 96,
@@ -58,6 +72,9 @@ PixaImage.network(
 Use `PixaProvider` with Flutter APIs that expect an `ImageProvider`:
 
 ```dart
+import 'package:flutter/material.dart';
+import 'package:pixa/pixa.dart';
+
 Image(
   image: PixaProvider.network(imageUrl, targetWidth: 300),
   fit: BoxFit.cover,
@@ -70,6 +87,8 @@ Image(
 the lower-level pipeline:
 
 ```dart
+import 'package:pixa/pixa.dart';
+
 final request = PixaRequest.network(
   imageUrl,
   headers: const {'Accept': 'image/webp,image/*,*/*'},
@@ -106,6 +125,8 @@ Dense galleries should use explicit budgets instead of relying on device
 defaults:
 
 ```dart
+import 'package:pixa/pixa.dart';
+
 await Pixa.configure(const PixaConfig(
   memoryCacheBytes: 160 * 1024 * 1024,
   diskCacheBytes: 1024 * 1024 * 1024,
@@ -159,6 +180,37 @@ filter3x3, flip, grayscale, invert, brighten, contrast, and hue rotate.
 Processor output is cached as a processed variant and reuses the same origin
 cache, scheduler, resource limits, and display selector.
 
+Large-image ROI support is deliberately narrower than the general decode
+matrix:
+
+- Static, non-interlaced PNG decodes sequential rows while bounding both the
+  full decoded row and requested region. APNG and interlaced PNG tile requests
+  fail with a typed unsupported error.
+- Farbfeld and WBMP read only the requested byte/bit rows.
+- Optional Native Assets processors provide decoder-native crop and scaling
+  for single-scan lossy JPEG and opaque lossy VP8 WebP. JPEG EXIF orientation
+  is mapped before the native crop. Progressive JPEG, VP8L, and WebP with
+  alpha are accepted only when their full-source hidden working set fits the
+  request limits; lossless JPEG and animated WebP are not advertised as ROI.
+- BMP, TIFF, GIF, ICO, PNM, QOI, TGA, DDS, HDR, PCX, SGI, XBM, and XPM do not
+  advertise ROI. A tile request uses the conservatively bounded full-decode
+  fallback or fails before allocation.
+
+The normal dependency-only setup works without hook configuration. Apps that
+want the optional JPEG and WebP native ROI processors can enable both in the
+app or workspace-root `pubspec.yaml`:
+
+```yaml
+hooks:
+  user_defines:
+    pixa:
+      enable_native_roi: true
+```
+
+Use `enable_jpeg_turbo_roi` or `enable_webp_roi` instead when only one native
+processor is required. Availability remains visible through runtime plugin
+capabilities, so an app never has to infer native support from the platform.
+
 ## Privacy And Limits
 
 Pixa redacts sensitive URL query values, authorization headers, cookies, signed
@@ -193,6 +245,8 @@ observer model.
 Pure Dart plugins are available only for explicit opt-in requests:
 
 ```dart
+import 'package:pixa/pixa.dart';
+
 final request = PixaRequest.network(
   imageUrl,
   pluginExecutionPolicy: const PixaPluginExecutionPolicy.runtimeFirstWithDart(),
@@ -213,7 +267,9 @@ Published plugins that support more than one boundary can use automatic integrat
 candidate during `Pixa.configure`, records it in `adaptivePluginIntegrations`,
 and keeps unselected routes out of the compiled route plan.
 
-Plugin authors should follow [PLUGIN_AUTHORING.md](PLUGIN_AUTHORING.md). A pub.dev package cannot auto-link runtime host code into Pixa's shared runtime just by being added as a transitive dependency.
+Plugin authors should follow [PLUGIN_AUTHORING.md](PLUGIN_AUTHORING.md).
+Pixa's Native Assets hook discovers validated `pixa_plugin.json` manifests
+from the resolved package graph and links host modules into one shared runtime.
 
 ## Official Plugin Packages
 
@@ -225,15 +281,18 @@ Video-frame extraction follows the same plugin boundary. Core Pixa exposes
 `PixaRequest.videoFrame`, `PixaImage.videoFrame`, backend descriptors, and typed
 unsupported failures, but it does not ship a default video-frame backend. The
 official MJPEG backend lives in `pixa_video_frame_mjpeg`; apps register
-`PixaMjpegVideoFramePlugin(hostRuntimeAvailable: true)` only after explicitly
-enabling that package's `pixa_plugin.json` through `plugin_manifest` or
-`plugin_manifest_directory`.
+`PixaMjpegVideoFramePlugin()` after adding the package dependency. Its
+`pixa_plugin.json` is discovered automatically during Native Assets build.
 
 ## Diagnostics
 
 Use redacted diagnostics when filing issues or supporting users:
 
 ```dart
+import 'package:flutter/foundation.dart';
+import 'package:pixa/pixa.dart';
+import 'package:pixa/pixa_debug.dart';
+
 final snapshot = PixaDebugInspector.snapshot();
 debugPrint(snapshot.toDiagnosticString());
 

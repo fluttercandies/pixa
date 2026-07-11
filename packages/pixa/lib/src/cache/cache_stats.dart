@@ -16,6 +16,8 @@ final class PixaCacheStats {
     this.staleRevalidatesFailed = 0,
     this.staleRevalidatesSkipped = 0,
     this.staleRevalidatesInFlight = 0,
+    this.processedMemoryEntries = 0,
+    this.processedMemoryBytes = 0,
     this.processedMemoryHits = 0,
     this.processedMemoryMisses = 0,
     this.processedMemoryEvictions = 0,
@@ -34,10 +36,10 @@ final class PixaCacheStats {
     this.progressEventsDrained = 0,
   });
 
-  /// Number of encoded memory entries.
+  /// Total entries retained by the shared encoded and processed memory LRU.
   final int memoryEntries;
 
-  /// Encoded memory bytes currently retained.
+  /// Total bytes retained by the shared encoded and processed memory LRU.
   final int memoryBytes;
 
   /// Encoded memory cache hits.
@@ -75,6 +77,12 @@ final class PixaCacheStats {
 
   /// Stale-while-revalidate refreshes currently in flight.
   final int staleRevalidatesInFlight;
+
+  /// Processed variant entries retained in the shared memory LRU.
+  final int processedMemoryEntries;
+
+  /// Processed variant bytes retained in the shared memory LRU.
+  final int processedMemoryBytes;
 
   /// Processed variant encoded memory hits.
   final int processedMemoryHits;
@@ -143,6 +151,12 @@ final class PixaCacheStats {
     }
     return hits / total;
   }
+
+  /// Encoded source entries retained in the shared memory LRU.
+  int get encodedMemoryEntries => memoryEntries - processedMemoryEntries;
+
+  /// Encoded source bytes retained in the shared memory LRU.
+  int get encodedMemoryBytes => memoryBytes - processedMemoryBytes;
 
   /// Owned runtime buffers that have not been released yet.
   int get liveOwnedBufferHandles {

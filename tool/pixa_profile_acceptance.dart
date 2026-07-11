@@ -4,6 +4,117 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 
+import 'pixa_native_assets_log_check.dart' show nativeAssetsEvidencePrefix;
+
+const String _profileRustToolchainVersion = '1.89.0';
+
+/// Exact Rust compiler probe used for release profile metadata.
+List<String> profileRustVersionCommand() => const <String>[
+  'rustup',
+  'run',
+  _profileRustToolchainVersion,
+  'rustc',
+  '--version',
+];
+
+/// Maps Flutter target-platform identifiers to Pixa release platform ids.
+String profilePlatformFromTarget(String targetPlatform) {
+  final String normalized = targetPlatform.trim().toLowerCase();
+  if (normalized.startsWith('android')) {
+    return 'android';
+  }
+  if (normalized.startsWith('ios')) {
+    return 'ios';
+  }
+  if (normalized.startsWith('darwin') || normalized.startsWith('macos')) {
+    return 'macos';
+  }
+  if (normalized.startsWith('linux')) {
+    return 'linux';
+  }
+  if (normalized.startsWith('windows')) {
+    return 'windows';
+  }
+  throw StateError('Unsupported Flutter target platform: $targetPlatform');
+}
+
+/// Locates the Native Assets runtime copied into a Flutter project output.
+Future<File> locatePixaRuntimeArtifact(Directory project) async {
+  final Directory nativeAssets = Directory('${project.path}/.dart_tool/lib');
+  if (!await nativeAssets.exists()) {
+    throw StateError(
+      'Native Assets output directory does not exist: ${nativeAssets.path}',
+    );
+  }
+  final List<File> candidates = <File>[];
+  await for (final FileSystemEntity entity in nativeAssets.list(
+    recursive: true,
+    followLinks: false,
+  )) {
+    if (entity is File && _isPixaRuntimeArtifact(entity)) {
+      candidates.add(entity);
+    }
+  }
+  if (candidates.isEmpty) {
+    throw StateError(
+      'Pixa runtime artifact was not produced under ${nativeAssets.path}.',
+    );
+  }
+  candidates.sort((File left, File right) {
+    return right.lastModifiedSync().compareTo(left.lastModifiedSync());
+  });
+  final File artifact = candidates.first;
+  if (await artifact.length() <= 0) {
+    throw StateError('Pixa runtime artifact is empty: ${artifact.path}');
+  }
+  return artifact;
+}
+
+bool _isPixaRuntimeArtifact(File file) {
+  final String name = file.uri.pathSegments.last.toLowerCase();
+  return name == 'libpixa_runtime.dylib' ||
+      name == 'libpixa_runtime.so' ||
+      name == 'pixa_runtime.dll' ||
+      name == 'pixa_runtime';
+}
+
+/// Writes a structured, commit-bound Native Assets build evidence log.
+Future<void> writeNativeAssetsEvidenceLog({
+  required File output,
+  required File rawBuildLog,
+  required String platform,
+  required String mode,
+  required String gitCommit,
+  required String gitTreeState,
+  required File? artifact,
+  required int exitCode,
+}) async {
+  await output.parent.create(recursive: true);
+  final IOSink sink = output.openWrite();
+  try {
+    sink.writeln(
+      '$nativeAssetsEvidencePrefix${jsonEncode(<String, Object?>{'schema': 1, 'event': 'buildStart', 'platform': platform, 'mode': mode, 'gitCommit': gitCommit, 'gitTreeState': gitTreeState})}',
+    );
+    if (await rawBuildLog.exists()) {
+      await sink.addStream(rawBuildLog.openRead());
+      sink.writeln();
+    }
+    if (artifact != null && await artifact.exists()) {
+      final int bytes = await artifact.length();
+      final Digest digest = await sha256.bind(artifact.openRead()).first;
+      sink.writeln(
+        '$nativeAssetsEvidencePrefix${jsonEncode(<String, Object?>{'schema': 1, 'event': 'artifact', 'asset': 'package:pixa/pixa_runtime', 'path': artifact.absolute.path, 'bytes': bytes, 'sha256': digest.toString()})}',
+      );
+    }
+    sink.writeln(
+      '$nativeAssetsEvidencePrefix${jsonEncode(<String, Object?>{'schema': 1, 'event': 'buildComplete', 'status': exitCode == 0 ? 'succeeded' : 'failed', 'exitCode': exitCode})}',
+    );
+  } finally {
+    await sink.flush();
+    await sink.close();
+  }
+}
+
 /// Builds the exact foreground Flutter command used for profile evidence.
 List<String> buildProfileDriveArguments({
   required String deviceId,
@@ -59,10 +170,27 @@ Future<void> main(List<String> arguments) async {
   );
   final File raw = File('${root.path}/${options.rawPath}');
   final File output = File('${root.path}/${options.outputPath}');
-  await removeProfileArtifacts(<String>{driverRaw.path, raw.path, output.path});
+  final File nativeAssetsLog = File(
+    '${root.path}/${options.nativeAssetsLogPath}',
+  );
+  final File rawNativeAssetsLog = File('${nativeAssetsLog.path}.raw');
+  await removeProfileArtifacts(<String>{
+    driverRaw.path,
+    raw.path,
+    output.path,
+    nativeAssetsLog.path,
+    rawNativeAssetsLog.path,
+  });
 
   final String deviceId = options.deviceId!;
-  final String deviceName = await _resolveDeviceName(root, deviceId);
+  final ({String name, String targetPlatform}) device = await _resolveDevice(
+    root,
+    deviceId,
+  );
+  final String deviceName = device.name;
+  final String evidencePlatform = profilePlatformFromTarget(
+    device.targetPlatform,
+  );
   final String deviceLabel = options.deviceName ?? 'flutter-profile-device';
   final String deviceIdHash = sha256.convert(utf8.encode(deviceId)).toString();
   final Map<String, Object?> flutter = _jsonObject(
@@ -75,10 +203,10 @@ Future<void> main(List<String> arguments) async {
   if (flutterVersion.isEmpty) {
     throw StateError('Flutter did not report flutterVersion.');
   }
-  final String rustVersion = await _runForOutput(root, <String>[
-    'rustc',
-    '--version',
-  ]);
+  final String rustVersion = await _runForOutput(
+    root,
+    profileRustVersionCommand(),
+  );
   final ({String commit, String treeState}) git = await _gitIdentity(root);
   if (git.treeState != 'clean') {
     throw StateError(
@@ -92,6 +220,7 @@ Future<void> main(List<String> arguments) async {
   stdout.writeln(
     'Running Pixa profile scroll acceptance on $deviceName ($deviceId).',
   );
+  await rawNativeAssetsLog.parent.create(recursive: true);
   final int driveExitCode = await _runForeground(
     gallery,
     buildProfileDriveArguments(
@@ -106,10 +235,36 @@ Future<void> main(List<String> arguments) async {
       networkConcurrency: options.networkConcurrency,
       includeLiveNetwork: options.includeLiveNetwork,
     ),
+    captureLog: rawNativeAssetsLog,
   );
+  File? runtimeArtifact;
+  Object? artifactError;
+  if (driveExitCode == 0) {
+    try {
+      runtimeArtifact = await locatePixaRuntimeArtifact(gallery);
+    } on Object catch (error) {
+      artifactError = error;
+    }
+  }
+  await writeNativeAssetsEvidenceLog(
+    output: nativeAssetsLog,
+    rawBuildLog: rawNativeAssetsLog,
+    platform: evidencePlatform,
+    mode: 'profile',
+    gitCommit: git.commit,
+    gitTreeState: git.treeState,
+    artifact: runtimeArtifact,
+    exitCode: artifactError == null ? driveExitCode : 1,
+  );
+  if (await rawNativeAssetsLog.exists()) {
+    await rawNativeAssetsLog.delete();
+  }
   if (driveExitCode != 0) {
     exitCode = driveExitCode;
     return;
+  }
+  if (artifactError != null) {
+    throw StateError('$artifactError');
   }
   await moveProfileRawArtifact(
     driverRawPath: driverRaw.path,
@@ -145,7 +300,10 @@ Future<void> main(List<String> arguments) async {
   }
 }
 
-Future<String> _resolveDeviceName(Directory root, String deviceId) async {
+Future<({String name, String targetPlatform})> _resolveDevice(
+  Directory root,
+  String deviceId,
+) async {
   final Object? decoded = jsonDecode(
     await _runForOutput(root, <String>['flutter', 'devices', '--machine']),
   );
@@ -155,8 +313,9 @@ Future<String> _resolveDeviceName(Directory root, String deviceId) async {
   for (final Object? entry in decoded) {
     if (entry is Map && entry['id']?.toString() == deviceId) {
       final String name = entry['name']?.toString() ?? '';
-      if (name.isNotEmpty) {
-        return name;
+      final String targetPlatform = entry['targetPlatform']?.toString() ?? '';
+      if (name.isNotEmpty && targetPlatform.isNotEmpty) {
+        return (name: name, targetPlatform: targetPlatform);
       }
     }
   }
@@ -229,19 +388,37 @@ Future<String> _runForOutput(
 
 Future<int> _runForeground(
   Directory workingDirectory,
-  List<String> arguments,
-) async {
+  List<String> arguments, {
+  File? captureLog,
+}) async {
   final Process process = await Process.start(
     'rtk',
     arguments,
     workingDirectory: workingDirectory.path,
     mode: ProcessStartMode.normal,
   );
-  await Future.wait<void>(<Future<void>>[
-    stdout.addStream(process.stdout),
-    stderr.addStream(process.stderr),
-  ]);
-  return process.exitCode;
+  final Future<int> processExit = process.exitCode;
+  final IOSink? logSink = captureLog?.openWrite();
+  Future<void> forward(Stream<List<int>> stream, IOSink terminal) async {
+    await for (final List<int> chunk in stream) {
+      terminal.add(chunk);
+      logSink?.add(chunk);
+    }
+  }
+
+  try {
+    await Future.wait<void>(<Future<void>>[
+      forward(process.stdout, stdout),
+      forward(process.stderr, stderr),
+    ]);
+    return await processExit;
+  } finally {
+    await processExit;
+    if (logSink != null) {
+      await logSink.flush();
+      await logSink.close();
+    }
+  }
 }
 
 Map<String, Object?> _jsonObject(Object? value, String source) {
@@ -264,6 +441,7 @@ final class _Options {
     required this.rawPath,
     required this.baselinePath,
     required this.outputPath,
+    required this.nativeAssetsLogPath,
     required this.networkConcurrency,
     required this.includeLiveNetwork,
     required this.captureOnly,
@@ -276,6 +454,8 @@ final class _Options {
     var rawPath = 'build/reports/pixa_profile_scroll_raw.json';
     var baselinePath = 'build/reports/pixa_profile_scroll_baseline.json';
     var outputPath = 'build/reports/pixa_profile_scroll_report.md';
+    var nativeAssetsLogPath =
+        'build/reports/pixa_profile_native_assets_evidence.log';
     var networkConcurrency = 6;
     var includeLiveNetwork = false;
     var captureOnly = false;
@@ -291,6 +471,8 @@ final class _Options {
         baselinePath = argument.substring('--baseline='.length);
       } else if (argument.startsWith('--output=')) {
         outputPath = argument.substring('--output='.length);
+      } else if (argument.startsWith('--native-assets-log=')) {
+        nativeAssetsLogPath = argument.substring('--native-assets-log='.length);
       } else if (argument.startsWith('--network-concurrency=')) {
         networkConcurrency = int.parse(
           argument.substring('--network-concurrency='.length),
@@ -313,12 +495,16 @@ final class _Options {
         throw ArgumentError('Unknown profile acceptance argument: $argument');
       }
     }
+    if (nativeAssetsLogPath.trim().isEmpty) {
+      throw ArgumentError('--native-assets-log must not be empty.');
+    }
     return _Options(
       deviceId: deviceId,
       deviceName: deviceName,
       rawPath: rawPath,
       baselinePath: baselinePath,
       outputPath: outputPath,
+      nativeAssetsLogPath: nativeAssetsLogPath,
       networkConcurrency: networkConcurrency,
       includeLiveNetwork: includeLiveNetwork,
       captureOnly: captureOnly,
@@ -331,6 +517,7 @@ final class _Options {
   final String rawPath;
   final String baselinePath;
   final String outputPath;
+  final String nativeAssetsLogPath;
   final int networkConcurrency;
   final bool includeLiveNetwork;
   final bool captureOnly;
@@ -351,4 +538,6 @@ Options:
   --raw=<path>          Raw evidence path under the repository root.
   --baseline=<path>     Comparable baseline JSON path.
   --output=<path>       Markdown report path.
+  --native-assets-log=<path>
+                        Structured Native Assets evidence log path.
 ''';

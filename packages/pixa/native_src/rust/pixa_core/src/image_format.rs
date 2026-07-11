@@ -262,12 +262,15 @@ macro_rules! image_crate_backend {
 
 macro_rules! image_extras_backend {
     ($backend:ident, $decode:ident, $dimensions:ident, $id:expr, $decoder:path) => {
+        image_extras_backend!($backend, $decode, $dimensions, $id, $decoder, None);
+    };
+    ($backend:ident, $decode:ident, $dimensions:ident, $id:expr, $decoder:path, $region_decode:expr) => {
         static $backend: RuntimeImageDecodeBackend = RuntimeImageDecodeBackend {
             id: $id,
             provider: &IMAGE_EXTRAS_PROVIDER,
             decode: $decode,
             dimensions: $dimensions,
-            region_decode: None,
+            region_decode: $region_decode,
         };
 
         fn $decode(
@@ -318,8 +321,7 @@ image_crate_backend!(
     decode_image_crate_bmp,
     dimensions_image_crate_bmp,
     "image-crate/bmp",
-    ImageFormat::Bmp,
-    Some(decode_image_crate_bmp_region)
+    ImageFormat::Bmp
 );
 image_crate_backend!(
     IMAGE_CRATE_ICO_BACKEND,
@@ -384,7 +386,8 @@ image_extras_backend!(
     decode_image_extras_wbmp,
     dimensions_image_extras_wbmp,
     "image-extras/wbmp",
-    image_extras::wbmp::WbmpDecoder::new
+    image_extras::wbmp::WbmpDecoder::new,
+    Some(decode_wbmp_region)
 );
 image_extras_backend!(
     IMAGE_EXTRAS_PCX_BACKEND,
@@ -469,7 +472,7 @@ const RUNTIME_IMAGE_FORMAT_DESCRIPTORS: &[RuntimeImageFormatDescriptor] = &[
         sniff: is_bmp,
         decode_backend: &IMAGE_CRATE_BMP_BACKEND,
         dimensions_backend: DECODER_DIMENSIONS,
-        flags: COMMON.union(RuntimeImageFormatCapabilityFlags::REGION_DECODE),
+        flags: COMMON,
     },
     RuntimeImageFormatDescriptor {
         format: RuntimeImageFormat::Wbmp,
@@ -480,7 +483,7 @@ const RUNTIME_IMAGE_FORMAT_DESCRIPTORS: &[RuntimeImageFormatDescriptor] = &[
         sniff: is_wbmp,
         decode_backend: &IMAGE_EXTRAS_WBMP_BACKEND,
         dimensions_backend: RuntimeDimensionsBackend::Header(wbmp_header_dimensions),
-        flags: COMMON,
+        flags: COMMON.union(RuntimeImageFormatCapabilityFlags::REGION_DECODE),
     },
     RuntimeImageFormatDescriptor {
         format: RuntimeImageFormat::Ico,
@@ -684,6 +687,57 @@ fn wbmp_header_dimensions(bytes: &[u8]) -> RuntimeResult<(u32, u32)> {
     Ok((width, height))
 }
 
+fn decode_wbmp_region(
+    bytes: &[u8],
+    region: RuntimeImageRegion,
+    max_region_bytes: usize,
+    stage: &'static str,
+    label: &'static str,
+) -> RuntimeResult<DynamicImage> {
+    let (image_width, image_height, data_offset) = wbmp_dimensions(bytes).map_err(|error| {
+        RuntimeError::new(
+            stage,
+            error.retryable,
+            format!("failed to initialize {label} decoder: {}", error.message),
+        )
+    })?;
+    validate_region_bounds(region, image_width, image_height, stage)?;
+    let region_len = (region.width as usize)
+        .checked_mul(region.height as usize)
+        .ok_or_else(|| RuntimeError::new(stage, false, "WBMP region byte length overflows"))?;
+    if region_len > max_region_bytes {
+        return Err(RuntimeError::new(
+            stage,
+            false,
+            format!("tile region decoded bytes exceed limit ({region_len}>{max_region_bytes})"),
+        ));
+    }
+    let source_row_bytes = image_width.div_ceil(8) as usize;
+    let mut pixels = Vec::with_capacity(region_len);
+    for row in 0..region.height {
+        let source_y = region
+            .y
+            .checked_add(row)
+            .ok_or_else(|| RuntimeError::new(stage, false, "WBMP row index overflows"))?;
+        let row_offset = (source_y as usize)
+            .checked_mul(source_row_bytes)
+            .and_then(|offset| data_offset.checked_add(offset))
+            .ok_or_else(|| RuntimeError::new(stage, false, "WBMP row offset overflows"))?;
+        for column in 0..region.width {
+            let source_x = region
+                .x
+                .checked_add(column)
+                .ok_or_else(|| RuntimeError::new(stage, false, "WBMP column index overflows"))?;
+            let byte = bytes[row_offset + (source_x / 8) as usize];
+            let mask = 1_u8 << (7 - source_x % 8);
+            pixels.push(if byte & mask == 0 { 0 } else { 255 });
+        }
+    }
+    image::GrayImage::from_raw(region.width, region.height, pixels)
+        .map(DynamicImage::ImageLuma8)
+        .ok_or_else(|| RuntimeError::new(stage, false, "invalid WBMP tile region buffer"))
+}
+
 fn decode_image_crate(
     format: ImageFormat,
     bytes: &[u8],
@@ -748,6 +802,13 @@ fn decode_png_region_rows(
     }
     validate_region_bounds(region, image_width, image_height, stage)?;
     let full_row_pitch = png_output_line_size(&reader, image_width, stage)?;
+    if full_row_pitch > max_region_bytes {
+        return Err(RuntimeError::new(
+            stage,
+            false,
+            format!("PNG row decoded bytes exceed limit ({full_row_pitch}>{max_region_bytes})"),
+        ));
+    }
     let x_offset = png_output_line_size(&reader, region.x, stage)?;
     let region_row_pitch = png_output_line_size(&reader, region.width, stage)?;
     let region_row_end = x_offset
@@ -806,48 +867,6 @@ fn decode_png_region_rows(
     if bit_depth == png::BitDepth::Sixteen {
         convert_png_region_to_native_endian(&mut region_bytes, stage)?;
     }
-    dynamic_image_from_region(region_bytes, region.width, region.height, color_type, stage)
-}
-
-fn decode_image_crate_bmp_region(
-    bytes: &[u8],
-    region: RuntimeImageRegion,
-    max_region_bytes: usize,
-    stage: &'static str,
-    label: &'static str,
-) -> RuntimeResult<DynamicImage> {
-    let mut decoder = image::codecs::bmp::BmpDecoder::new(Cursor::new(bytes)).map_err(|error| {
-        RuntimeError::new(
-            stage,
-            false,
-            format!("failed to initialize {label} decoder: {error}"),
-        )
-    })?;
-    let color_type = decoder.color_type();
-    let row_pitch = checked_region_row_pitch(region.width, color_type.bytes_per_pixel(), stage)?;
-    let region_len = row_pitch
-        .checked_mul(region.height as usize)
-        .ok_or_else(|| RuntimeError::new(stage, false, "tile region byte length overflows"))?;
-    if region_len > max_region_bytes {
-        return Err(RuntimeError::new(
-            stage,
-            false,
-            format!("tile region decoded bytes exceed limit ({region_len}>{max_region_bytes})"),
-        ));
-    }
-    let mut region_bytes = vec![0_u8; region_len];
-    decoder
-        .read_rect(
-            region.x,
-            region.y,
-            region.width,
-            region.height,
-            &mut region_bytes,
-            row_pitch,
-        )
-        .map_err(|error| {
-            RuntimeError::new(stage, false, format!("failed to decode {label}: {error}"))
-        })?;
     dynamic_image_from_region(region_bytes, region.width, region.height, color_type, stage)
 }
 
@@ -1332,7 +1351,8 @@ mod tests {
         assert_eq!(backend_counts_by_provider["image-extras"], 5);
         assert_eq!(region_decode_backends, 3);
         assert!(RuntimeImageFormat::Png.supports_region_decode());
-        assert!(RuntimeImageFormat::Bmp.supports_region_decode());
+        assert!(!RuntimeImageFormat::Bmp.supports_region_decode());
+        assert!(RuntimeImageFormat::Wbmp.supports_region_decode());
         assert!(RuntimeImageFormat::Farbfeld.supports_region_decode());
         assert!(!RuntimeImageFormat::Jpeg.supports_region_decode());
     }
@@ -1350,8 +1370,16 @@ mod tests {
             .iter()
             .find(|capability| capability.format == RuntimeImageFormat::Bmp)
             .expect("BMP capability should exist");
-        assert_ne!(
+        assert_eq!(
             bmp.flags.bits() & RuntimeImageFormatCapabilityFlags::REGION_DECODE.bits(),
+            0
+        );
+        let wbmp = capabilities
+            .iter()
+            .find(|capability| capability.format == RuntimeImageFormat::Wbmp)
+            .expect("WBMP capability should exist");
+        assert_ne!(
+            wbmp.flags.bits() & RuntimeImageFormatCapabilityFlags::REGION_DECODE.bits(),
             0
         );
         let png = capabilities
@@ -1395,5 +1423,61 @@ mod tests {
             descriptor.dimensions_backend,
             RuntimeDimensionsBackend::Header(_)
         ));
+    }
+
+    #[test]
+    fn png_region_decode_rejects_an_unbounded_full_row_buffer() {
+        let source = image::RgbaImage::new(16, 1);
+        let mut cursor = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(source)
+            .write_to(&mut cursor, ImageFormat::Png)
+            .expect("PNG fixture should encode");
+
+        let error = decode_png_region_rows(
+            &cursor.into_inner(),
+            RuntimeImageRegion {
+                x: 8,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            4,
+            "processor",
+            "PNG tile",
+        )
+        .expect_err("full decoded row must obey the region allocation limit");
+
+        assert!(error.message.contains("row decoded bytes exceed limit"));
+    }
+
+    #[test]
+    fn wbmp_region_decode_reads_only_requested_bits() {
+        let bytes = [
+            0x00,
+            0x00,
+            0x08,
+            0x03,
+            0b1010_0101,
+            0b0101_1010,
+            0b1111_0000,
+        ];
+        let decoded = decode_wbmp_region(
+            &bytes,
+            RuntimeImageRegion {
+                x: 2,
+                y: 1,
+                width: 4,
+                height: 2,
+            },
+            8,
+            "processor",
+            "WBMP tile",
+        )
+        .expect("WBMP ROI should decode");
+
+        assert_eq!(
+            decoded.to_luma8().into_raw(),
+            [0, 255, 255, 0, 255, 255, 0, 0]
+        );
     }
 }

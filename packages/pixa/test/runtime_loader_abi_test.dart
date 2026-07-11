@@ -65,11 +65,11 @@ void main() {
     expect(jpeg.regionDecode, isFalse);
     expect(jpeg.defaultRuntimeDisplay, isFalse);
     expect(png.regionDecode, isTrue);
-    expect(bmp.regionDecode, isTrue);
+    expect(bmp.regionDecode, isFalse);
     expect(farbfeld.regionDecode, isTrue);
     expect(wbmp.engineDisplay, isTrue);
     expect(wbmp.runtimeDisplay, isTrue);
-    expect(wbmp.regionDecode, isFalse);
+    expect(wbmp.regionDecode, isTrue);
     expect(wbmp.defaultRuntimeDisplay, isFalse);
     expect(ico.engineDisplay, isFalse);
     expect(ico.runtimeDisplay, isTrue);

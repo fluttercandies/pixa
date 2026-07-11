@@ -204,7 +204,12 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
       for (final PixaLargeImageTile tile in plan.visibleTiles)
         tile.key: tile.requestFor(widget.request),
     };
-    final String visibleSignature = _signatureFor(visible.keys);
+    final String visibleSignature = _signatureFor(
+      visible.entries.map(
+        (MapEntry<String, PixaRequest> entry) =>
+            '${entry.key}:${entry.value.cacheKey.value}',
+      ),
+    );
     if (visibleSignature != _lastVisibleTileSignature) {
       _lastVisibleTileSignature = visibleSignature;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -212,10 +217,11 @@ final class _PixaLargeImageState extends State<PixaLargeImage>
           return;
         }
         final Iterable<PixaRequest> exited = _visibleTileRequests.entries
-            .where(
-              (MapEntry<String, PixaRequest> entry) =>
-                  !visible.containsKey(entry.key),
-            )
+            .where((MapEntry<String, PixaRequest> entry) {
+              final PixaRequest? replacement = visible[entry.key];
+              return replacement == null ||
+                  replacement.cacheKey != entry.value.cacheKey;
+            })
             .map((MapEntry<String, PixaRequest> entry) => entry.value)
             .toList(growable: false);
         _visibleTileRequests

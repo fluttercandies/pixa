@@ -28,8 +28,8 @@ final class PixaEvent {
       request: request == null
           ? null
           : PixaRequestSnapshot.fromRequest(request),
-      progress: progress,
-      failure: failure,
+      progress: _observerProgress(progress),
+      failure: _observerFailure(failure),
       cacheStats: cacheStats,
       timestampMicros: timestampMicros ?? DateTime.now().microsecondsSinceEpoch,
       durationMicros: durationMicros,
@@ -163,7 +163,7 @@ final class PixaRequestSnapshot {
 
   /// JSON-like representation for logging.
   Map<String, Object?> toJson() {
-    return <String, Object?>{
+    return Map<String, Object?>.unmodifiable(<String, Object?>{
       'sourceLabel': sourceLabel,
       'cacheKey': cacheKey,
       'cacheNamespace': cacheNamespace,
@@ -177,26 +177,75 @@ final class PixaRequestSnapshot {
       'allowCrossHostRedirects': allowCrossHostRedirects,
       'allowHttpsToHttpRedirect': allowHttpsToHttpRedirect,
       'headers': headers,
-    };
+    });
   }
 }
 
 Map<String, Object?> _redactAttributes(Map<String, Object?> attributes) {
-  return attributes.map((String key, Object? value) {
-    return MapEntry<String, Object?>(key, _redactAttributeValue(value));
+  return Map<String, Object?>.unmodifiable(<String, Object?>{
+    for (final MapEntry<String, Object?> entry in attributes.entries)
+      PixaRedactor.redactText(
+        entry.key,
+      ): PixaRedactor.isSensitiveFieldName(entry.key)
+          ? '<redacted>'
+          : _redactAttributeValue(entry.value),
   });
 }
 
 Object? _redactAttributeValue(Object? value) {
   return switch (value) {
+    null || num() || bool() => value,
     String() => PixaRedactor.redactText(value),
-    Map() => value.map((Object? key, Object? nested) {
-      return MapEntry<Object?, Object?>(key, _redactAttributeValue(nested));
+    Uri() => PixaRedactor.redactUri(value).toString(),
+    Uint8List() => Uint8List.fromList(value).asUnmodifiableView(),
+    Map() => Map<Object?, Object?>.unmodifiable(<Object?, Object?>{
+      for (final MapEntry<Object?, Object?> entry in value.entries)
+        PixaRedactor.redactText(
+          entry.key.toString(),
+        ): PixaRedactor.isSensitiveFieldName(entry.key.toString())
+            ? '<redacted>'
+            : _redactAttributeValue(entry.value),
     }),
-    Iterable() when value is! String =>
-      value.map(_redactAttributeValue).toList(),
-    _ => value,
+    Iterable() when value is! String => List<Object?>.unmodifiable(
+      value.map(_redactAttributeValue),
+    ),
+    _ => PixaRedactor.redactText(value.toString()),
   };
+}
+
+PixaProgress? _observerProgress(PixaProgress? progress) {
+  if (progress == null) {
+    return null;
+  }
+  final PixaProgressivePreview? preview = progress.progressivePreview;
+  return PixaProgress(
+    requestId: progress.requestId,
+    stage: progress.stage,
+    receivedBytes: progress.receivedBytes,
+    expectedBytes: progress.expectedBytes,
+    message: progress.message == null
+        ? null
+        : PixaRedactor.redactText(progress.message!),
+    progressivePreview: preview == null
+        ? null
+        : PixaProgressivePreview(
+            bytes: preview.bytes,
+            mimeType: preview.mimeType,
+            sequence: preview.sequence,
+          ),
+  );
+}
+
+PixaFailure? _observerFailure(PixaFailure? failure) {
+  if (failure == null) {
+    return null;
+  }
+  return PixaFailure(
+    requestId: failure.requestId,
+    stage: failure.stage,
+    safeMessage: failure.safeMessage,
+    retryability: failure.retryability,
+  );
 }
 
 /// Observer interface for request, cache, scheduler, runtime, and failure events.

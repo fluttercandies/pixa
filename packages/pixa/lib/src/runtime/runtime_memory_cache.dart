@@ -160,6 +160,8 @@ PixaCacheStats decodeRuntimeCacheStatsForTest(Uint8List bytes) {
       staleRevalidatesFailed: reader.readUint64(),
       staleRevalidatesSkipped: reader.readUint64(),
       staleRevalidatesInFlight: reader.readUint64(),
+      processedMemoryEntries: reader.readUint64(),
+      processedMemoryBytes: reader.readUint64(),
       processedMemoryHits: reader.readUint64(),
       processedMemoryMisses: reader.readUint64(),
       processedMemoryEvictions: reader.readUint64(),

@@ -121,7 +121,7 @@ final class PixaCacheWarmupReport {
   /// Failed entries.
   final List<PixaCacheWarmupFailure> failures;
 
-  /// Whether execution stopped because [continueOnError] was false.
+  /// Whether execution stopped because `continueOnError` was false.
   final bool stoppedAfterFailure;
 
   /// Total execution duration.

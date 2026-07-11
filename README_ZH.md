@@ -21,17 +21,27 @@ dependencies:
   pixa: ^1.0.0
 ```
 
-```yaml
-dependencies:
-  pixa:
-    path: packages/pixa
+### Native 构建前置条件
+
+Pixa 通过 Flutter Native Assets 编译包内 Rust runtime。首次 Flutter 构建前安装项目
+固定的 Rust toolchain：
+
+```bash
+rustup toolchain install 1.89.0 --profile minimal
 ```
+
+跨平台构建还需要对应 target 的 Rust standard library 和 native compiler。缺少 target
+时 build hook 会输出准确的 `rustup target add` 命令。Windows JPEG Turbo ROI 构建需要
+Visual Studio C++ workload 和 NASM；Android 构建需要 Android NDK、SDK CMake 和
+Ninja。
 
 ## 快速开始
 
 应用启动时配置一次：
 
 ```dart
+import 'package:pixa/pixa.dart';
+
 await Pixa.configure(const PixaConfig(
   memoryCacheBytes: 96 * 1024 * 1024,
   diskCacheBytes: 512 * 1024 * 1024,
@@ -43,6 +53,9 @@ await Pixa.configure(const PixaConfig(
 像使用 `Image.network` 一样使用 `PixaImage.network`：
 
 ```dart
+import 'package:flutter/material.dart';
+import 'package:pixa/pixa.dart';
+
 PixaImage.network(
   imageUrl,
   width: 96,
@@ -61,6 +74,9 @@ PixaImage.network(
 当 Flutter API 需要 `ImageProvider` 时使用 `PixaProvider`：
 
 ```dart
+import 'package:flutter/material.dart';
+import 'package:pixa/pixa.dart';
+
 Image(
   image: PixaProvider.network(imageUrl, targetWidth: 300),
   fit: BoxFit.cover,
@@ -94,6 +110,8 @@ runtime-plugin source-set candidate 都复用同一个 request model。
 图库类应用建议显式配置预算：
 
 ```dart
+import 'package:pixa/pixa.dart';
+
 await Pixa.configure(const PixaConfig(
   memoryCacheBytes: 160 * 1024 * 1024,
   diskCacheBytes: 1024 * 1024 * 1024,
@@ -112,13 +130,13 @@ runtime-only fetcher 路径进入 Pixa，凭据不会写入 locator 或 cache la
 
 Video-frame 抽帧也走同一套插件边界。Pixa core 提供 request helper 和 typed
 unsupported failure，但不内置默认 video-frame backend。官方 MJPEG backend 位于
-`pixa_video_frame_mjpeg`；应用必须先通过 `plugin_manifest` 或
-`plugin_manifest_directory` 显式启用该包的 `pixa_plugin.json`，再注册
-`PixaMjpegVideoFramePlugin(hostRuntimeAvailable: true)`。
+`pixa_video_frame_mjpeg`；添加依赖后，Pixa Native Assets hook 会从已解析 package
+graph 自动发现该包的 `pixa_plugin.json`，应用只需在 `PixaConfig` 中注册
+`PixaMjpegVideoFramePlugin()`。
 
 插件作者请从 [packages/pixa/PLUGIN_AUTHORING.md](packages/pixa/PLUGIN_AUTHORING.md)
 开始。文档说明 package layout、应用接入、Pure Dart mode、platform channel mode、
-Standalone FFI mode，以及由应用选择的 Host-merge mode。pub.dev package cannot auto-link runtime host code into Pixa's shared runtime just by being added as a transitive dependency.
+Standalone FFI mode，以及从已解析 package graph 自动发现的 host-linked module。
 
 高级插件可以用 `PixaPluginExecutionPolicy.runtimeFirstWithPlatform()` 显式 opt in
 平台边界。`Pixa.configure` 会生成 compiled route plan 和 platform capability matrix，

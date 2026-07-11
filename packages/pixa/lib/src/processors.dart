@@ -108,7 +108,6 @@ abstract final class PixaProcessors {
     required int height,
     required int decodedWidth,
     required int decodedHeight,
-    int sampleSize = 1,
     PixaResizeFilter filter = PixaResizeFilter.lanczos3,
   }) {
     return 'tile(x=${_checkNonNegativeInt(x, 'x')},'
@@ -117,7 +116,6 @@ abstract final class PixaProcessors {
         'height=${_checkPositiveInt(height, 'height')},'
         'decodedWidth=${_checkPositiveInt(decodedWidth, 'decodedWidth')},'
         'decodedHeight=${_checkPositiveInt(decodedHeight, 'decodedHeight')},'
-        'sampleSize=${_checkPositiveInt(sampleSize, 'sampleSize')},'
         'filter=${_resizeFilter(filter)})';
   }
 

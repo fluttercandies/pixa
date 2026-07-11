@@ -8,6 +8,82 @@ const int pixaPluginManifestSchema = 1;
 const int pixaPluginAbiVersion = 1;
 const String pixaPluginManifestFileName = 'pixa_plugin.json';
 
+/// Discovers runtime manifests shipped by packages in a resolved app graph.
+///
+/// Each manifest is bound to the package that owns its root directory so a
+/// dependency cannot claim another package's runtime identity.
+List<Uri> pixaDiscoverResolvedPluginManifests(Uri packageConfigUri) {
+  final File packageConfig = File.fromUri(packageConfigUri);
+  if (!packageConfig.existsSync()) {
+    throw StateError(
+      'Dart package configuration does not exist: ${packageConfig.path}',
+    );
+  }
+  final Object? decoded = json.decode(packageConfig.readAsStringSync());
+  if (decoded is! Map<Object?, Object?>) {
+    throw StateError('Dart package configuration must be an object.');
+  }
+  final Object? rawPackages = decoded['packages'];
+  if (rawPackages is! List<Object?>) {
+    throw StateError('Dart package configuration must contain packages.');
+  }
+
+  final List<({String packageName, Uri manifest})> discovered =
+      <({String packageName, Uri manifest})>[];
+  for (final Object? rawPackage in rawPackages) {
+    if (rawPackage is! Map<Object?, Object?>) {
+      throw StateError('Dart package configuration entry must be an object.');
+    }
+    final Object? rawName = rawPackage['name'];
+    final Object? rawRoot = rawPackage['rootUri'];
+    if (rawName is! String || rawName.trim().isEmpty || rawRoot is! String) {
+      throw StateError(
+        'Dart package configuration entry requires name and rootUri.',
+      );
+    }
+    final Uri packageRoot = packageConfigUri.resolve(
+      rawRoot.endsWith('/') ? rawRoot : '$rawRoot/',
+    );
+    if (packageRoot.scheme != 'file') {
+      continue;
+    }
+    final Uri manifestUri = packageRoot.resolve(pixaPluginManifestFileName);
+    if (!File.fromUri(manifestUri).existsSync()) {
+      continue;
+    }
+    final _PixaRuntimePluginManifestInput manifest = _readManifestInput(
+      manifestUri,
+    );
+    final Object? rawModules = manifest.json['modules'];
+    if (rawModules is! List<Object?>) {
+      throw StateError(
+        'Resolved Pixa manifest from "$rawName" must contain modules.',
+      );
+    }
+    for (final Object? rawModule in rawModules) {
+      if (rawModule is! Map<Object?, Object?> ||
+          rawModule['packageName'] != rawName) {
+        throw StateError(
+          'Resolved Pixa manifest from "$rawName" must declare '
+          'packageName "$rawName" on every module.',
+        );
+      }
+    }
+    discovered.add((packageName: rawName, manifest: manifestUri));
+  }
+  discovered.sort(
+    (
+      ({String packageName, Uri manifest}) left,
+      ({String packageName, Uri manifest}) right,
+    ) => left.packageName.compareTo(right.packageName),
+  );
+  return List<Uri>.unmodifiable(
+    discovered.map(
+      (({String packageName, Uri manifest}) entry) => entry.manifest,
+    ),
+  );
+}
+
 final class PixaRuntimePluginBuildPlan {
   const PixaRuntimePluginBuildPlan({
     required this.modules,

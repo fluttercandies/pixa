@@ -17,20 +17,21 @@ use crate::{
     runtime_decoder_executor_for_mime_type, runtime_decoder_executor_for_signature,
     runtime_decoder_for_format_id, runtime_decoder_for_mime_type,
     runtime_fetcher_executor_for_source_kind, runtime_fetcher_for_source_kind, runtime_process,
-    RuntimeError, RuntimePluginDecodeRequest, RuntimePluginExecutorRef, RuntimePluginFetchContext,
-    RuntimePluginFetchRequest, RuntimePluginModule, RuntimePluginOutput,
+    BoundedBytesWriter, RuntimeError, RuntimePluginDecodeRequest, RuntimePluginExecutorRef,
+    RuntimePluginFetchContext, RuntimePluginFetchRequest, RuntimePluginModule, RuntimePluginOutput,
     RuntimePluginProcessRequest, RuntimePluginVideoFrameSpec, RuntimeResult,
 };
-use image::GenericImageView;
+use image::{GenericImageView, ImageEncoder};
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::io::{Cursor, Read};
+use std::io::Read;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
 
 const DEFAULT_MEMORY_BYTES: usize = 96 * 1024 * 1024;
+const MAX_DYNAMIC_IMAGE_BYTES_PER_PIXEL: usize = 16;
 
 static MEMORY_CACHE: OnceLock<Mutex<MemoryCache>> = OnceLock::new();
 static CONFIG: OnceLock<Mutex<RuntimePipelineConfig>> = OnceLock::new();
@@ -128,6 +129,8 @@ pub struct RuntimeCacheStats {
     pub stale_revalidates_failed: u64,
     pub stale_revalidates_skipped: u64,
     pub stale_revalidates_in_flight: u64,
+    pub processed_memory_entries: usize,
+    pub processed_memory_bytes: usize,
     pub processed_memory_hits: u64,
     pub processed_memory_misses: u64,
     pub processed_memory_evictions: u64,
@@ -238,7 +241,7 @@ pub fn decode_image_to_rgba(
     let (width, height) = image.dimensions();
     let row_bytes =
         validate_rgba_display_dimensions(width, height, max_decoded_pixels, max_output_bytes)?;
-    let rgba = image.to_rgba8();
+    let rgba = image.into_rgba8();
     let raw = rgba.into_raw();
     let expected_len = row_bytes
         .checked_mul(height as usize)
@@ -1043,6 +1046,8 @@ pub fn cache_stats() -> RuntimeResult<RuntimeCacheStats> {
         stale_revalidates_failed: STALE_REVALIDATES_FAILED.load(Ordering::Relaxed) as u64,
         stale_revalidates_skipped: STALE_REVALIDATES_SKIPPED.load(Ordering::Relaxed) as u64,
         stale_revalidates_in_flight: BACKGROUND_REFRESH_COUNT.load(Ordering::Relaxed) as u64,
+        processed_memory_entries: memory.processed_entries,
+        processed_memory_bytes: memory.processed_bytes,
         processed_memory_hits: memory.processed_hits,
         processed_memory_misses: memory.processed_misses,
         processed_memory_evictions: memory.processed_evictions,
@@ -2674,7 +2679,6 @@ struct TileSpec {
     height: u32,
     decoded_width: u32,
     decoded_height: u32,
-    sample_size: u32,
     filter: image::imageops::FilterType,
 }
 
@@ -2753,8 +2757,6 @@ fn parse_processor_descriptor(descriptor: &str) -> RuntimeResult<RuntimeProcesso
             height: required_processor_u32(&args, "height")?,
             decoded_width: required_processor_u32_alias(&args, "decodedwidth", "decoded_width")?,
             decoded_height: required_processor_u32_alias(&args, "decodedheight", "decoded_height")?,
-            sample_size: optional_processor_u32_alias(&args, "samplesize", "sample_size")?
-                .unwrap_or(1),
             filter: parse_resize_filter(args.get("filter").map(String::as_str))?,
         })),
         "rotate" => Ok(RuntimeProcessor::Rotate {
@@ -2840,8 +2842,6 @@ fn parse_tile_processor_descriptor(descriptor: &str) -> RuntimeResult<Option<Til
     let mut decoded_width_snake = None;
     let mut decoded_height_camel = None;
     let mut decoded_height_snake = None;
-    let mut sample_size_camel = None;
-    let mut sample_size_snake = None;
     let mut filter = image::imageops::FilterType::Lanczos3;
 
     for part in trimmed[start + 1..end].split(',') {
@@ -2866,12 +2866,12 @@ fn parse_tile_processor_descriptor(descriptor: &str) -> RuntimeResult<Option<Til
             decoded_height_camel = Some(parse_processor_u32_fast(value, "decodedheight", false)?);
         } else if key.eq_ignore_ascii_case("decoded_height") {
             decoded_height_snake = Some(parse_processor_u32_fast(value, "decoded_height", false)?);
-        } else if key.eq_ignore_ascii_case("samplesize") {
-            sample_size_camel = Some(parse_processor_u32_fast(value, "samplesize", false)?);
-        } else if key.eq_ignore_ascii_case("sample_size") {
-            sample_size_snake = Some(parse_processor_u32_fast(value, "sample_size", false)?);
         } else if key.eq_ignore_ascii_case("filter") {
             filter = parse_resize_filter_fast(value)?;
+        } else {
+            return processor_descriptor_error(format!(
+                "unsupported tile processor argument {key}"
+            ));
         }
     }
 
@@ -2906,13 +2906,6 @@ fn parse_tile_processor_descriptor(descriptor: &str) -> RuntimeResult<Option<Til
                 "missing processor argument decodedheight",
             )
         })?,
-        sample_size: resolve_fast_alias(
-            sample_size_camel,
-            sample_size_snake,
-            "samplesize",
-            "sample_size",
-        )?
-        .unwrap_or(1),
         filter,
     }))
 }
@@ -3411,8 +3404,13 @@ fn apply_processor_chain_for_request(
     progress_sink: Option<&dyn RuntimeProgressSink>,
 ) -> RuntimeResult<SharedBytes> {
     if let Some(tile) = single_tile_processor(processors) {
+        validate_processor_target_dimensions(
+            tile.decoded_width,
+            tile.decoded_height,
+            &request.limits,
+        )?;
         if let Some(processed) =
-            try_apply_runtime_plugin_tile_processor(request, bytes.as_ref(), progress_sink)?
+            try_apply_runtime_plugin_tile_processor(request, bytes.as_ref(), tile, progress_sink)?
         {
             return Ok(processed);
         }
@@ -3482,27 +3480,22 @@ fn encode_png_variant(
     label: &'static str,
     max_output_bytes: usize,
 ) -> RuntimeResult<Vec<u8>> {
-    let mut cursor = Cursor::new(Vec::new());
     // Processed variants are shared cache artifacts; normalize decoder-specific
     // color types before encoding so future backends do not leak into PNG output.
-    image::DynamicImage::ImageRgba8(image.to_rgba8())
-        .write_to(&mut cursor, image::ImageFormat::Png)
+    let rgba = image.into_rgba8();
+    let (width, height) = rgba.dimensions();
+    let mut output = BoundedBytesWriter::new(max_output_bytes);
+    image::codecs::png::PngEncoder::new(&mut output)
+        .write_image(
+            rgba.as_raw(),
+            width,
+            height,
+            image::ExtendedColorType::Rgba8,
+        )
         .map_err(|error| {
             RuntimeError::new(stage, false, format!("failed to encode {label}: {error}"))
         })?;
-    let output = cursor.into_inner();
-    if output.len() > max_output_bytes {
-        return Err(RuntimeError::new(
-            stage,
-            false,
-            format!(
-                "{label} exceeds max byte limit ({}>{})",
-                output.len(),
-                max_output_bytes
-            ),
-        ));
-    }
-    Ok(output)
+    Ok(output.into_inner())
 }
 
 fn single_tile_processor(processors: &[RuntimeProcessor]) -> Option<TileSpec> {
@@ -3555,6 +3548,7 @@ fn decoded_image_bytes(image: &image::DynamicImage) -> usize {
 fn try_apply_runtime_plugin_tile_processor(
     request: &RuntimeRequest,
     bytes: &[u8],
+    tile: TileSpec,
     progress_sink: Option<&dyn RuntimeProgressSink>,
 ) -> RuntimeResult<Option<SharedBytes>> {
     let Some(descriptor) = request.processors.first() else {
@@ -3563,6 +3557,22 @@ fn try_apply_runtime_plugin_tile_processor(
     let format = sniff_image_format(bytes);
     let format_id = format.map(RuntimeImageFormat::format_id);
     let mime_type = format.map(RuntimeImageFormat::primary_mime_type);
+    let orientation = if format == Some(RuntimeImageFormat::Jpeg) {
+        jpeg_exif_orientation(bytes)?.unwrap_or(1)
+    } else {
+        1
+    };
+    let plugin_tile = if orientation == 1 {
+        tile
+    } else {
+        let (source_width, source_height) = RuntimeImageFormat::Jpeg.dimensions(bytes)?;
+        map_oriented_tile_to_source(tile, source_width, source_height, orientation)?
+    };
+    let plugin_descriptor = if plugin_tile == tile {
+        Cow::Borrowed(descriptor.as_str())
+    } else {
+        Cow::Owned(tile_processor_descriptor(plugin_tile))
+    };
     let mut route_operations = Vec::<Cow<'_, str>>::with_capacity(2);
     if let Some(format_id) = format_id {
         route_operations.push(Cow::Owned(format!("tile:{format_id}")));
@@ -3583,7 +3593,7 @@ fn try_apply_runtime_plugin_tile_processor(
         );
         let Some(output) = runtime_process(RuntimePluginProcessRequest {
             operation: operation.as_ref(),
-            descriptor,
+            descriptor: plugin_descriptor.as_ref(),
             format_id,
             mime_type,
             bytes,
@@ -3593,26 +3603,199 @@ fn try_apply_runtime_plugin_tile_processor(
         else {
             return Ok(None);
         };
-        if output.bytes.len() > request.limits.max_processor_output_bytes {
-            return Err(RuntimeError::new(
+        let output_format = validate_runtime_tile_processor_output(
+            output.bytes.as_ref(),
+            plugin_tile.decoded_width,
+            plugin_tile.decoded_height,
+            &request.limits,
+        )?;
+        let output_bytes = if orientation == 1 {
+            output.bytes
+        } else {
+            let image = output_format.decode(
+                output.bytes.as_ref(),
                 "processor",
-                false,
-                "runtime processor output exceeds max output byte limit",
-            ));
-        }
-        validate_supported_image(output.bytes.as_ref(), &request.limits)?;
+                "runtime tile processor output",
+            )?;
+            let image = apply_image_orientation(image, orientation)?;
+            validate_processor_target_dimensions(image.width(), image.height(), &request.limits)?;
+            if image.dimensions() != (tile.decoded_width, tile.decoded_height) {
+                return Err(RuntimeError::new(
+                    "processor",
+                    false,
+                    "oriented runtime tile processor output dimensions do not match request",
+                ));
+            }
+            shared_bytes(encode_processor_output(image, &request.limits)?)
+        };
         emit_progress(
             progress_sink,
             RuntimeProgressEvent::new(
                 RuntimeProgressStage::Process,
                 "plugin.runtime.processor.complete",
             )
-            .with_bytes(output.bytes.len(), Some(output.bytes.len()))
+            .with_bytes(output_bytes.len(), Some(output_bytes.len()))
             .with_message(operation.as_ref()),
         );
-        return Ok(Some(output.bytes));
+        return Ok(Some(output_bytes));
     }
     Ok(None)
+}
+
+fn validate_runtime_tile_processor_output(
+    bytes: &[u8],
+    expected_width: u32,
+    expected_height: u32,
+    limits: &RuntimeLimits,
+) -> RuntimeResult<RuntimeImageFormat> {
+    if bytes.len() > limits.max_processor_output_bytes {
+        return Err(RuntimeError::new(
+            "processor",
+            false,
+            "runtime processor output exceeds max output byte limit",
+        ));
+    }
+    validate_supported_image(bytes, limits)?;
+    reject_animated_processor_input(bytes)?;
+    let format = select_runtime_image_format(bytes, "processor", "runtime tile processor output")?;
+    let (width, height) = format.dimensions(bytes)?;
+    validate_processor_target_dimensions(width, height, limits)?;
+    if (width, height) != (expected_width, expected_height) {
+        return Err(RuntimeError::new(
+            "processor",
+            false,
+            "runtime tile processor output dimensions do not match request",
+        ));
+    }
+    Ok(format)
+}
+
+fn map_oriented_tile_to_source(
+    tile: TileSpec,
+    source_width: u32,
+    source_height: u32,
+    orientation: u16,
+) -> RuntimeResult<TileSpec> {
+    let swaps_axes = matches!(orientation, 5..=8);
+    let (oriented_width, oriented_height) = if swaps_axes {
+        (source_height, source_width)
+    } else {
+        (source_width, source_height)
+    };
+    validate_tile_spec_for_dimensions(tile, oriented_width, oriented_height)?;
+    let right = tile
+        .x
+        .checked_add(tile.width)
+        .ok_or_else(|| RuntimeError::new("processor", false, "tile x range overflows"))?;
+    let bottom = tile
+        .y
+        .checked_add(tile.height)
+        .ok_or_else(|| RuntimeError::new("processor", false, "tile y range overflows"))?;
+    let (x, y, width, height) = match orientation {
+        1 => (tile.x, tile.y, tile.width, tile.height),
+        2 => (
+            source_width.checked_sub(right).ok_or_else(|| {
+                RuntimeError::new("processor", false, "oriented tile x is out of bounds")
+            })?,
+            tile.y,
+            tile.width,
+            tile.height,
+        ),
+        3 => (
+            source_width.checked_sub(right).ok_or_else(|| {
+                RuntimeError::new("processor", false, "oriented tile x is out of bounds")
+            })?,
+            source_height.checked_sub(bottom).ok_or_else(|| {
+                RuntimeError::new("processor", false, "oriented tile y is out of bounds")
+            })?,
+            tile.width,
+            tile.height,
+        ),
+        4 => (
+            tile.x,
+            source_height.checked_sub(bottom).ok_or_else(|| {
+                RuntimeError::new("processor", false, "oriented tile y is out of bounds")
+            })?,
+            tile.width,
+            tile.height,
+        ),
+        5 => (tile.y, tile.x, tile.height, tile.width),
+        6 => (
+            tile.y,
+            source_height.checked_sub(right).ok_or_else(|| {
+                RuntimeError::new("processor", false, "oriented tile y is out of bounds")
+            })?,
+            tile.height,
+            tile.width,
+        ),
+        7 => (
+            source_width.checked_sub(bottom).ok_or_else(|| {
+                RuntimeError::new("processor", false, "oriented tile x is out of bounds")
+            })?,
+            source_height.checked_sub(right).ok_or_else(|| {
+                RuntimeError::new("processor", false, "oriented tile y is out of bounds")
+            })?,
+            tile.height,
+            tile.width,
+        ),
+        8 => (
+            source_width.checked_sub(bottom).ok_or_else(|| {
+                RuntimeError::new("processor", false, "oriented tile x is out of bounds")
+            })?,
+            tile.x,
+            tile.height,
+            tile.width,
+        ),
+        _ => {
+            return Err(RuntimeError::new(
+                "metadata",
+                false,
+                "EXIF orientation is out of range",
+            ))
+        }
+    };
+    let mapped = TileSpec {
+        x,
+        y,
+        width,
+        height,
+        decoded_width: if swaps_axes {
+            tile.decoded_height
+        } else {
+            tile.decoded_width
+        },
+        decoded_height: if swaps_axes {
+            tile.decoded_width
+        } else {
+            tile.decoded_height
+        },
+        filter: tile.filter,
+    };
+    validate_tile_spec_for_dimensions(mapped, source_width, source_height)?;
+    Ok(mapped)
+}
+
+fn tile_processor_descriptor(tile: TileSpec) -> String {
+    format!(
+        "tile(x={},y={},width={},height={},decodedWidth={},decodedHeight={},filter={})",
+        tile.x,
+        tile.y,
+        tile.width,
+        tile.height,
+        tile.decoded_width,
+        tile.decoded_height,
+        resize_filter_name(tile.filter),
+    )
+}
+
+fn resize_filter_name(filter: image::imageops::FilterType) -> &'static str {
+    match filter {
+        image::imageops::FilterType::Nearest => "nearest",
+        image::imageops::FilterType::Triangle => "triangle",
+        image::imageops::FilterType::CatmullRom => "catmullrom",
+        image::imageops::FilterType::Gaussian => "gaussian",
+        image::imageops::FilterType::Lanczos3 => "lanczos3",
+    }
 }
 
 fn runtime_processor_for_operation_fast_path(
@@ -3635,6 +3818,18 @@ fn try_apply_encoded_region_tile_processor(
     }
     let (image_width, image_height) = format.dimensions(bytes)?;
     validate_tile_spec_for_dimensions(spec, image_width, image_height)?;
+    let _ = validate_decoded_pixel_count(
+        "processor",
+        spec.decoded_width,
+        spec.decoded_height,
+        limits.max_decoded_pixels,
+    )?;
+    let _ = validate_decoded_pixel_count(
+        "processor",
+        spec.width,
+        spec.height,
+        limits.max_decoded_pixels,
+    )?;
     emit_progress(
         progress_sink,
         RuntimeProgressEvent::new(RuntimeProgressStage::Process, "process.regionDecode.start")
@@ -3694,8 +3889,9 @@ fn validate_tile_full_decode_fallback_budget(
             ),
         )
     })?;
-    let pixels =
-        validate_decoded_pixel_count("processor", width, height, limits.max_decoded_pixels)?;
+    let pixels = u64::from(width)
+        .checked_mul(u64::from(height))
+        .ok_or_else(|| RuntimeError::new("processor", false, "decoded pixel count overflows"))?;
     let fallback_pixels = tile_full_decode_fallback_pixel_limit(limits)?;
     if pixels > fallback_pixels {
         return Err(RuntimeError::new(
@@ -3713,9 +3909,10 @@ fn validate_tile_full_decode_fallback_budget(
 
 fn tile_full_decode_fallback_pixel_limit(limits: &RuntimeLimits) -> RuntimeResult<u64> {
     let output_bound_pixels =
-        u64::try_from(limits.max_processor_output_bytes / 4).map_err(|_| {
-            RuntimeError::new("processor", false, "tile fallback pixel limit overflows")
-        })?;
+        u64::try_from(limits.max_processor_output_bytes / MAX_DYNAMIC_IMAGE_BYTES_PER_PIXEL)
+            .map_err(|_| {
+                RuntimeError::new("processor", false, "tile fallback pixel limit overflows")
+            })?;
     if output_bound_pixels == 0 {
         return Err(RuntimeError::new(
             "processor",
@@ -3733,6 +3930,13 @@ fn apply_exif_orientation(
     let Some(orientation) = jpeg_exif_orientation(bytes)? else {
         return Ok(image);
     };
+    apply_image_orientation(image, orientation)
+}
+
+fn apply_image_orientation(
+    image: image::DynamicImage,
+    orientation: u16,
+) -> RuntimeResult<image::DynamicImage> {
     let oriented = match orientation {
         1 => image,
         2 => image.fliph(),
@@ -3846,9 +4050,6 @@ fn validate_tile_spec_for_dimensions(
     image_width: u32,
     image_height: u32,
 ) -> RuntimeResult<()> {
-    if !spec.sample_size.is_power_of_two() {
-        return processor_descriptor_error("tile sampleSize must be a power of two");
-    }
     let end_x = spec
         .x
         .checked_add(spec.width)
@@ -3908,8 +4109,19 @@ fn validate_processor_dimensions(
     limits: &RuntimeLimits,
 ) -> RuntimeResult<()> {
     let (width, height) = image.dimensions();
-    let pixels = u64::from(width).saturating_mul(u64::from(height));
-    let estimated_rgba_bytes = pixels.saturating_mul(4);
+    validate_processor_target_dimensions(width, height, limits)
+}
+
+fn validate_processor_target_dimensions(
+    width: u32,
+    height: u32,
+    limits: &RuntimeLimits,
+) -> RuntimeResult<()> {
+    let pixels =
+        validate_decoded_pixel_count("processor", width, height, limits.max_decoded_pixels)?;
+    let estimated_rgba_bytes = pixels
+        .checked_mul(4)
+        .ok_or_else(|| RuntimeError::new("processor", false, "processor output bytes overflow"))?;
     if estimated_rgba_bytes > limits.max_processor_output_bytes as u64 {
         return Err(RuntimeError::new(
             "processor",
@@ -3927,7 +4139,7 @@ fn apply_watermark_processor(
     image: image::DynamicImage,
     spec: &WatermarkSpec,
 ) -> image::DynamicImage {
-    let mut rgba = image.to_rgba8();
+    let mut rgba = image.into_rgba8();
     let width = rgba.width();
     let height = rgba.height();
     let glyph_count = spec.text.chars().count().max(1) as u32;
@@ -5110,7 +5322,7 @@ mod tests {
     use crate::request::{RuntimeLimits, RuntimePriority, RuntimeRedirectPolicy};
     use image::ImageEncoder;
     use std::collections::BTreeMap;
-    use std::io::{Read, Write};
+    use std::io::{Cursor, Read, Write};
     use std::net::Shutdown;
     use std::net::TcpListener;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -6629,6 +6841,44 @@ mod tests {
     }
 
     #[test]
+    fn encoded_memory_hit_reapplies_animation_frame_limit() {
+        let bytes = minimal_gif(2, 10);
+        let mut request = bytes_request(RuntimeLimits::default());
+        request.cache_mode = CacheMode::MemoryOnly;
+        request.cache_key = "encoded-memory-animation-limit".to_string();
+        request.encoded_cache_key = request.cache_key.clone();
+        load_image("", request.clone(), Some(&bytes)).expect("cache seed should load");
+
+        request.limits.max_animation_frames = 1;
+        let error = load_image("", request.clone(), None)
+            .expect_err("encoded memory hit must reapply animation frame limit");
+        memory_remove(&request.encoded_cache_key).unwrap();
+
+        assert!(error
+            .message
+            .contains("animation frame count exceeds limit"));
+    }
+
+    #[test]
+    fn encoded_disk_hit_reapplies_animation_duration_limit() {
+        let root = temp_cache_root("encoded-disk-animation-limit");
+        let bytes = minimal_gif(2, 100);
+        let mut request = bytes_request(RuntimeLimits::default());
+        request.cache_mode = CacheMode::DiskOnly;
+        request.cache_key = "3333444455556666".to_string();
+        request.encoded_cache_key = request.cache_key.clone();
+        load_image(&root, request.clone(), Some(&bytes)).expect("cache seed should load");
+
+        request.cache_mode = CacheMode::CacheOnly;
+        request.limits.max_animation_duration_ms = 1_000;
+        let error = load_image(&root, request, None)
+            .expect_err("encoded disk hit must reapply animation duration limit");
+        let _ = std::fs::remove_dir_all(root);
+
+        assert!(error.message.contains("animation duration exceeds limit"));
+    }
+
+    #[test]
     fn processed_memory_hit_reapplies_output_limit() {
         let mut request = bytes_request(RuntimeLimits::default());
         request.cache_mode = CacheMode::MemoryOnly;
@@ -6668,6 +6918,58 @@ mod tests {
     }
 
     #[test]
+    fn prepared_decoder_memory_hit_reapplies_output_limit() {
+        let final_bytes = shared_bytes(minimal_png(2, 2));
+        let mut request = bytes_request(RuntimeLimits::default());
+        request.cache_mode = CacheMode::MemoryOnly;
+        request.cache_key = "prepared-decoder-memory-final".to_string();
+        request.encoded_cache_key = "prepared-decoder-memory-origin".to_string();
+        memory_cache()
+            .lock()
+            .expect("memory cache lock should not be poisoned")
+            .put_processed(
+                &request.namespace,
+                request.cache_key.clone(),
+                final_bytes.clone(),
+                None,
+            );
+        let permissive = load_image("", request.clone(), None)
+            .expect("prepared decoder memory entry should hit");
+        assert_eq!(permissive.source_label, "decoder-memory-cache");
+
+        request.limits.max_processor_output_bytes = final_bytes.len().saturating_sub(1);
+        let error = load_image("", request.clone(), None)
+            .expect_err("prepared decoder memory hit must reapply output limit");
+        memory_remove(&request.cache_key).unwrap();
+
+        assert!(error.message.contains("cached processor output"));
+    }
+
+    #[test]
+    fn prepared_decoder_disk_hit_reapplies_encoded_limit() {
+        let root = temp_cache_root("prepared-decoder-disk-limit");
+        let final_bytes = minimal_png(2, 2);
+        let mut request = bytes_request(RuntimeLimits::default());
+        request.cache_mode = CacheMode::DiskOnly;
+        request.cache_key = "777788889999aaaa".to_string();
+        request.encoded_cache_key = "777788889999aaab".to_string();
+        DiskCache::new(&root)
+            .write(&request.namespace, &request.cache_key, &final_bytes, None)
+            .expect("prepared decoder disk entry should be written");
+        let permissive = load_image(&root, request.clone(), None)
+            .expect("prepared decoder disk entry should hit");
+        assert_eq!(permissive.source_label, "decoder-disk-cache");
+
+        request.cache_mode = CacheMode::CacheOnly;
+        request.limits.max_encoded_bytes = final_bytes.len().saturating_sub(1);
+        let error = load_image(&root, request, None)
+            .expect_err("prepared decoder disk hit must reapply encoded limit");
+        let _ = std::fs::remove_dir_all(root);
+
+        assert!(error.message.contains("max encoded byte limit"));
+    }
+
+    #[test]
     fn file_fetch_rechecks_limit_after_stat_read_race() {
         let root = temp_cache_root("file-read-race");
         std::fs::create_dir_all(&root).unwrap();
@@ -6693,6 +6995,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
 
         assert_eq!(error.stage, "fetch");
+        assert!(error.message.contains("max encoded byte limit"));
+    }
+
+    #[test]
+    fn file_length_check_never_truncates_values_above_u32() {
+        let above_u32 = u64::from(u32::MAX) + 1;
+        if usize::BITS == 32 {
+            let error = checked_file_length(above_u32, usize::MAX)
+                .expect_err("32-bit targets must reject unaddressable file lengths");
+            assert!(error.message.contains("addressable memory"));
+        } else {
+            assert_eq!(
+                checked_file_length(above_u32, above_u32 as usize)
+                    .expect("64-bit targets must preserve the full file length"),
+                above_u32 as usize,
+            );
+        }
+        let error = checked_file_length(above_u32, u32::MAX as usize)
+            .expect_err("the encoded byte budget must reject the full untruncated length");
         assert!(error.message.contains("max encoded byte limit"));
     }
 
@@ -6724,7 +7045,7 @@ mod tests {
         request.cache_key = "processor-tile-final".to_string();
         request.encoded_cache_key = "processor-tile-origin".to_string();
         request.processors = vec![
-            "tile(x=0,y=0,width=2,height=2,decodedWidth=1,decodedHeight=1,sampleSize=2,filter=nearest)"
+            "tile(x=0,y=0,width=2,height=2,decodedWidth=1,decodedHeight=1,filter=nearest)"
                 .to_string(),
         ];
 
@@ -6736,12 +7057,12 @@ mod tests {
     }
 
     #[test]
-    fn applies_bmp_tile_processor_with_region_decoder() {
+    fn applies_bmp_tile_processor_with_guarded_full_decode_fallback() {
         let mut request = bytes_request(RuntimeLimits::default());
         request.cache_key = "processor-bmp-tile-final".to_string();
         request.encoded_cache_key = "processor-bmp-tile-origin".to_string();
         request.processors = vec![
-            "tile(x=1,y=1,width=2,height=2,decodedWidth=2,decodedHeight=2,sampleSize=1,filter=nearest)"
+            "tile(x=1,y=1,width=2,height=2,decodedWidth=2,decodedHeight=2,filter=nearest)"
                 .to_string(),
         ];
         let sink = CapturingProgressSink::default();
@@ -6753,16 +7074,37 @@ mod tests {
             None,
             Some(&sink),
         )
-        .expect("BMP tile processor should use region decoder");
+        .expect("small BMP tile processor should use guarded full decode");
         let decoded = image::load_from_memory(&outcome.bytes).expect("processed PNG should decode");
         let rgb = decoded.to_rgb8();
 
         assert_eq!(decoded.dimensions(), (2, 2));
         assert_eq!(rgb.get_pixel(0, 0).0, [40, 40, 0]);
-        assert!(sink
+        assert!(!sink
             .names()
             .iter()
             .any(|name| name == "process.regionDecode.complete"));
+    }
+
+    #[test]
+    fn rejects_bmp_tile_when_full_frame_exceeds_budget() {
+        let mut request = bytes_request(RuntimeLimits {
+            max_decoded_pixels: 4,
+            ..RuntimeLimits::default()
+        });
+        request.cache_key = "processor-bmp-tile-budget-final".to_string();
+        request.encoded_cache_key = "processor-bmp-tile-budget-origin".to_string();
+        request.processors = vec![
+            "tile(x=1,y=1,width=1,height=1,decodedWidth=1,decodedHeight=1,filter=nearest)"
+                .to_string(),
+        ];
+
+        let error = load_image("", request, Some(&bmp_rgb_4x4()))
+            .expect_err("BMP full-frame fallback must obey the decoded pixel budget");
+
+        assert_eq!(error.stage, "processor");
+        assert!(error.message.contains("tile full-decode fallback"));
+        assert!(error.message.contains("bmp"));
     }
 
     #[test]
@@ -6771,7 +7113,7 @@ mod tests {
         request.cache_key = "processor-png-tile-final".to_string();
         request.encoded_cache_key = "processor-png-tile-origin".to_string();
         request.processors = vec![
-            "tile(x=1,y=1,width=2,height=2,decodedWidth=2,decodedHeight=2,sampleSize=1,filter=nearest)"
+            "tile(x=1,y=1,width=2,height=2,decodedWidth=2,decodedHeight=2,filter=nearest)"
                 .to_string(),
         ];
         let sink = CapturingProgressSink::default();
@@ -6789,6 +7131,91 @@ mod tests {
 
         assert_eq!(decoded.dimensions(), (2, 2));
         assert_eq!(rgb.get_pixel(0, 0).0, [40, 40, 0]);
+        assert!(sink
+            .names()
+            .iter()
+            .any(|name| name == "process.regionDecode.complete"));
+    }
+
+    #[test]
+    fn rejects_region_tile_target_bytes_before_region_decode() {
+        let mut request = bytes_request(RuntimeLimits {
+            max_decoded_pixels: 100,
+            max_processor_output_bytes: 32,
+            ..RuntimeLimits::default()
+        });
+        request.cache_key = "processor-png-target-byte-limit-final".to_string();
+        request.encoded_cache_key = "processor-png-target-byte-limit-origin".to_string();
+        request.processors = vec![
+            "tile(x=0,y=0,width=1,height=1,decodedWidth=4,decodedHeight=4,filter=nearest)"
+                .to_string(),
+        ];
+        let sink = CapturingProgressSink::default();
+
+        let error = load_image_with_cancel_and_progress(
+            "",
+            request,
+            Some(&minimal_png(2, 2)),
+            None,
+            Some(&sink),
+        )
+        .expect_err("tile target bytes must be rejected before region decode");
+
+        assert_eq!(error.stage, "processor");
+        assert!(error.message.contains("decoded bytes exceed limit"));
+        assert!(!sink
+            .names()
+            .iter()
+            .any(|name| name == "process.regionDecode.start"));
+    }
+
+    #[test]
+    fn rejects_png_source_region_over_pixel_budget_before_resize() {
+        let mut request = bytes_request(RuntimeLimits {
+            max_decoded_pixels: 4,
+            ..RuntimeLimits::default()
+        });
+        request.cache_key = "processor-png-region-budget-final".to_string();
+        request.encoded_cache_key = "processor-png-region-budget-origin".to_string();
+        request.processors = vec![
+            "tile(x=0,y=0,width=4,height=4,decodedWidth=1,decodedHeight=1,filter=nearest)"
+                .to_string(),
+        ];
+
+        let error = load_image("", request, Some(&png_rgba_4x4()))
+            .expect_err("PNG source ROI allocation must obey max decoded pixels");
+
+        assert_eq!(error.stage, "processor");
+        assert!(error.message.contains("decoded pixel count exceeds limit"));
+    }
+
+    #[test]
+    fn applies_wbmp_tile_processor_under_full_frame_budget() {
+        let mut request = bytes_request(RuntimeLimits {
+            max_decoded_pixels: 8,
+            ..RuntimeLimits::default()
+        });
+        request.cache_key = "processor-wbmp-tile-final".to_string();
+        request.encoded_cache_key = "processor-wbmp-tile-origin".to_string();
+        request.processors = vec![
+            "tile(x=2,y=1,width=4,height=2,decodedWidth=4,decodedHeight=2,filter=nearest)"
+                .to_string(),
+        ];
+        let mut wbmp = wbmp_image(64, 64);
+        let data_offset = wbmp.len() - 64 * 8;
+        wbmp[data_offset + 8] = 0b0101_1010;
+        wbmp[data_offset + 16] = 0b1111_0000;
+        let sink = CapturingProgressSink::default();
+
+        let outcome =
+            load_image_with_cancel_and_progress("", request, Some(&wbmp), None, Some(&sink))
+                .expect("WBMP ROI should not allocate the 64x64 full frame");
+        let decoded = image::load_from_memory(&outcome.bytes)
+            .expect("processed PNG should decode")
+            .to_luma8();
+
+        assert_eq!(decoded.dimensions(), (4, 2));
+        assert_eq!(decoded.into_raw(), [0, 255, 255, 0, 255, 255, 0, 0]);
         assert!(sink
             .names()
             .iter()
@@ -6953,7 +7380,7 @@ mod tests {
         request.cache_key = "processor-farbfeld-tile-final".to_string();
         request.encoded_cache_key = "processor-farbfeld-tile-origin".to_string();
         request.processors = vec![
-            "tile(x=1,y=1,width=2,height=2,decodedWidth=2,decodedHeight=2,sampleSize=1,filter=nearest)"
+            "tile(x=1,y=1,width=2,height=2,decodedWidth=2,decodedHeight=2,filter=nearest)"
                 .to_string(),
         ];
         let sink = CapturingProgressSink::default();
@@ -6987,7 +7414,7 @@ mod tests {
         request.cache_key = "processor-jpeg-tile-fallback-final".to_string();
         request.encoded_cache_key = "processor-jpeg-tile-fallback-origin".to_string();
         request.processors = vec![
-            "tile(x=0,y=0,width=16,height=16,decodedWidth=1,decodedHeight=1,sampleSize=16,filter=nearest)"
+            "tile(x=0,y=0,width=16,height=16,decodedWidth=1,decodedHeight=1,filter=nearest)"
                 .to_string(),
         ];
 
@@ -7028,7 +7455,7 @@ mod tests {
         request.cache_key = "processor-plugin-jpeg-tile-final".to_string();
         request.encoded_cache_key = "processor-plugin-jpeg-tile-origin".to_string();
         request.processors = vec![
-            "tile(x=0,y=0,width=16,height=16,decodedWidth=1,decodedHeight=1,sampleSize=16,filter=nearest)"
+            "tile(x=0,y=0,width=16,height=16,decodedWidth=1,decodedHeight=1,filter=nearest)"
                 .to_string(),
         ];
         let sink = CapturingProgressSink::default();
@@ -7053,6 +7480,104 @@ mod tests {
     }
 
     #[test]
+    fn runtime_jpeg_tile_plugin_maps_exif_oriented_coordinates() {
+        let _registry_guard = plugin_registry_test_guard();
+        clear_plugin_registry_for_test();
+        let mut capabilities = RuntimePluginCapabilities::hot_path();
+        capabilities.processor = true;
+        let executor = Arc::new(OrientedTileRuntimePluginExecutor::default());
+        register_plugin_module_with_executor(
+            RuntimePluginModule::host_linked(
+                "pixa.processor.jpeg_orientation.test",
+                "pixa_jpeg_orientation_init",
+                "rust",
+                capabilities,
+            )
+            .with_routes(RuntimePluginRoutes {
+                processor_operations: vec!["tile:jpeg".to_string()],
+                ..RuntimePluginRoutes::default()
+            }),
+            executor.clone(),
+        )
+        .expect("runtime processor route should register");
+        let mut request = bytes_request(RuntimeLimits::default());
+        request.cache_key = "processor-plugin-jpeg-orientation-final".to_string();
+        request.encoded_cache_key = "processor-plugin-jpeg-orientation-origin".to_string();
+        request.processors = vec![
+            "tile(x=0,y=1,width=2,height=2,decodedWidth=4,decodedHeight=2,filter=nearest)"
+                .to_string(),
+        ];
+
+        let outcome = load_image("", request, Some(&minimal_jpeg_with_orientation(3, 2, 6)))
+            .expect("JPEG tile plugin should preserve oriented crop semantics");
+        let decoded = image::load_from_memory(&outcome.bytes).expect("plugin PNG should decode");
+
+        assert_eq!(decoded.dimensions(), (4, 2));
+        assert_eq!(
+            executor
+                .observed
+                .lock()
+                .expect("orientation observation lock should not be poisoned")
+                .as_ref(),
+            Some(&TileSpec {
+                x: 1,
+                y: 0,
+                width: 2,
+                height: 2,
+                decoded_width: 2,
+                decoded_height: 4,
+                filter: image::imageops::FilterType::Nearest,
+            }),
+        );
+        clear_plugin_registry_for_test();
+    }
+
+    #[test]
+    fn oriented_tile_mapping_matches_full_image_for_all_exif_values() {
+        let source_width = 5;
+        let source_height = 4;
+        let source = image::RgbaImage::from_fn(source_width, source_height, |x, y| {
+            image::Rgba([(x * 31) as u8, (y * 47) as u8, (x + y * 5) as u8, 255])
+        });
+
+        for orientation in 1..=8 {
+            let fully_oriented = apply_image_orientation(
+                image::DynamicImage::ImageRgba8(source.clone()),
+                orientation,
+            )
+            .expect("test orientation should be valid")
+            .into_rgba8();
+            let tile = TileSpec {
+                x: 1,
+                y: 1,
+                width: fully_oriented.width() - 2,
+                height: fully_oriented.height() - 2,
+                decoded_width: fully_oriented.width() - 2,
+                decoded_height: fully_oriented.height() - 2,
+                filter: image::imageops::FilterType::Nearest,
+            };
+            let mapped =
+                map_oriented_tile_to_source(tile, source_width, source_height, orientation)
+                    .expect("oriented tile should map to source pixels");
+            let source_crop =
+                image::imageops::crop_imm(&source, mapped.x, mapped.y, mapped.width, mapped.height)
+                    .to_image();
+            let mapped_then_oriented =
+                apply_image_orientation(image::DynamicImage::ImageRgba8(source_crop), orientation)
+                    .expect("mapped tile orientation should be valid")
+                    .into_rgba8();
+            let expected =
+                image::imageops::crop_imm(&fully_oriented, tile.x, tile.y, tile.width, tile.height)
+                    .to_image();
+
+            assert_eq!(
+                mapped_then_oriented, expected,
+                "EXIF orientation {orientation} mapped the wrong source pixels",
+            );
+        }
+    }
+
+    #[test]
     fn runtime_limits_identity_includes_decoded_pixel_budget() {
         let low = RuntimeLimits {
             max_decoded_pixels: 1_024,
@@ -7070,9 +7595,24 @@ mod tests {
     }
 
     #[test]
+    fn tile_full_decode_budget_uses_worst_case_dynamic_image_pixel_size() {
+        let limits = RuntimeLimits {
+            max_decoded_pixels: 100,
+            max_processor_output_bytes: 160,
+            ..RuntimeLimits::default()
+        };
+
+        assert_eq!(
+            tile_full_decode_fallback_pixel_limit(&limits)
+                .expect("fallback budget should be valid"),
+            10,
+        );
+    }
+
+    #[test]
     fn parses_tile_processor_with_fast_descriptor_path() {
         let processor = parse_processor_descriptor(
-            "TiLe(x=0,y=1,width=2,height=3,decoded_width=1,decodedHeight=2,sample_size=2,filter=TRIANGLE)",
+            "TiLe(x=0,y=1,width=2,height=3,decoded_width=1,decodedHeight=2,filter=TRIANGLE)",
         )
         .expect("tile descriptor should parse");
 
@@ -7085,8 +7625,20 @@ mod tests {
         assert_eq!(tile.height, 3);
         assert_eq!(tile.decoded_width, 1);
         assert_eq!(tile.decoded_height, 2);
-        assert_eq!(tile.sample_size, 2);
         assert_eq!(tile.filter, image::imageops::FilterType::Triangle);
+    }
+
+    #[test]
+    fn rejects_obsolete_tile_sample_size_argument() {
+        let error = parse_processor_descriptor(
+            "tile(x=0,y=0,width=2,height=2,decodedWidth=1,decodedHeight=1,sampleSize=2,filter=triangle)",
+        )
+        .expect_err("decoder scaling must be derived from source and target geometry");
+
+        assert!(error
+            .message
+            .contains("unsupported tile processor argument"));
+        assert!(error.message.contains("sampleSize"));
     }
 
     #[test]
@@ -8210,6 +8762,11 @@ mod tests {
         process_count: AtomicUsize,
     }
 
+    #[derive(Default)]
+    struct OrientedTileRuntimePluginExecutor {
+        observed: Mutex<Option<TileSpec>>,
+    }
+
     #[derive(Debug, Eq, PartialEq)]
     struct ObservedVideoFrameFetch {
         source_kind: String,
@@ -8332,6 +8889,25 @@ mod tests {
             self.process_count.fetch_add(1, Ordering::Relaxed);
             Ok(Some(RuntimePluginOutput::from_vec(
                 minimal_png(1, 1),
+                Some("image/png"),
+            )))
+        }
+    }
+
+    impl RuntimePluginExecutor for OrientedTileRuntimePluginExecutor {
+        fn process(
+            &self,
+            request: RuntimePluginProcessRequest<'_>,
+        ) -> RuntimeResult<Option<RuntimePluginOutput>> {
+            assert_eq!(request.operation, "tile:jpeg");
+            let spec = parse_tile_processor_descriptor(request.descriptor)?
+                .expect("orientation test descriptor should be a tile");
+            *self
+                .observed
+                .lock()
+                .expect("orientation observation lock should not be poisoned") = Some(spec);
+            Ok(Some(RuntimePluginOutput::from_vec(
+                minimal_png(spec.decoded_width, spec.decoded_height),
                 Some("image/png"),
             )))
         }

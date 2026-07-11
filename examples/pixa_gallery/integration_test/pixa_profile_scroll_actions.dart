@@ -110,9 +110,9 @@ bool _memoryWarmupIsStable(List<Map<String, Object?>> samples) {
   final List<Map<String, Object?>> window = samples.sublist(
     samples.length - _memoryWarmupStableSamples,
   );
-  final List<int> encoded = <int>[
+  final List<int> runtimeMemory = <int>[
     for (final Map<String, Object?> sample in window)
-      sample['encodedMemoryBytes']! as int,
+      sample['runtimeMemoryBytes']! as int,
   ];
   final List<int> decoded = <int>[
     for (final Map<String, Object?> sample in window)
@@ -123,10 +123,10 @@ bool _memoryWarmupIsStable(List<Map<String, Object?>> samples) {
       sample['decodedRegistryEntries']! as int,
   ];
   return window.every(_memorySampleIsDrained) &&
-      encoded.every((int value) => value > 0) &&
+      runtimeMemory.every((int value) => value > 0) &&
       decoded.every((int value) => value > 0) &&
       registry.every((int value) => value > 0) &&
-      _range(encoded) <= _memoryWarmupMaxEncodedDriftBytes &&
+      _range(runtimeMemory) <= _memoryWarmupMaxEncodedDriftBytes &&
       _range(decoded) <= _memoryWarmupMaxEntryDrift &&
       _range(registry) <= _memoryWarmupMaxEntryDrift;
 }

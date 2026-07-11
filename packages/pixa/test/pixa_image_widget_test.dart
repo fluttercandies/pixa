@@ -66,6 +66,56 @@ void main() {
     expect(find.byType(RawImage), findsOneWidget);
   });
 
+  testWidgets('PixaImage opt-in transition fades from zero to fully visible', (
+    WidgetTester tester,
+  ) async {
+    await _configure('pixa-widget-transition-');
+    const PixaTargetSize target = PixaTargetSize(width: 1, height: 1);
+    final PixaRequest request = PixaRequest(
+      source: PixaSource.custom('transition', () async {
+        throw StateError('decoded cache should satisfy transition test');
+      }),
+      cachePolicy: const PixaCachePolicy.noStore(),
+    );
+    final ui.Image image =
+        await tester.runAsync(() => createTestImage(width: 1, height: 1)) ??
+        (throw StateError('Failed to create transition image.'));
+    addTearDown(image.dispose);
+    final Completer<ImageInfo> pendingFrame = Completer<ImageInfo>();
+    PaintingBinding.instance.imageCache.putIfAbsent(
+      PixaProvider(request: request.copyWith(targetSize: target)),
+      () => OneFrameImageStreamCompleter(pendingFrame.future),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(devicePixelRatio: 1),
+          child: PixaImage(
+            width: 1,
+            height: 1,
+            request: request,
+            transitionDuration: const Duration(milliseconds: 200),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    pendingFrame.complete(ImageInfo(image: image.clone()));
+    await _pumpUntil(tester, find.byType(Opacity));
+
+    Opacity opacity = tester.widget<Opacity>(find.byType(Opacity));
+    expect(opacity.opacity, 0);
+
+    await tester.pump(const Duration(milliseconds: 100));
+    opacity = tester.widget<Opacity>(find.byType(Opacity));
+    expect(opacity.opacity, inExclusiveRange(0, 1));
+
+    await tester.pump(const Duration(milliseconds: 100));
+    opacity = tester.widget<Opacity>(find.byType(Opacity));
+    expect(opacity.opacity, 1);
+  });
+
   testWidgets('PixaImage progress builder receives controller progress', (
     WidgetTester tester,
   ) async {
@@ -265,6 +315,66 @@ void main() {
 
     expect(controller.isAttached, isFalse);
   });
+
+  testWidgets(
+    'PixaImage pause and cancel evict pending decoded work for external controller',
+    (WidgetTester tester) async {
+      await _configure('pixa-widget-controller-active-work-');
+      final Completer<Uint8List> bytes = Completer<Uint8List>();
+      final PixaController controller = PixaController();
+      addTearDown(controller.dispose);
+      final PixaRequest request = PixaRequest(
+        source: PixaSource.custom('controller-active-work', () => bytes.future),
+        cachePolicy: const PixaCachePolicy.noStore(),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PixaImage(
+            controller: controller,
+            request: request,
+            placeholder: const PixaPlaceholder.widget(
+              SizedBox(key: Key('controller-placeholder')),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      final Image initialImage = tester.widget<Image>(find.byType(Image));
+      final PixaProvider provider = initialImage.image as PixaProvider;
+      expect(PaintingBinding.instance.imageCache.containsKey(provider), isTrue);
+
+      controller.pause();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.byType(Image), findsNothing);
+      expect(find.byKey(const Key('controller-placeholder')), findsOneWidget);
+      expect(
+        PaintingBinding.instance.imageCache.containsKey(provider),
+        isFalse,
+      );
+
+      controller.resume();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.byType(Image), findsOneWidget);
+      expect(PaintingBinding.instance.imageCache.containsKey(provider), isTrue);
+
+      controller.cancel();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.byType(Image), findsNothing);
+      expect(
+        PaintingBinding.instance.imageCache.containsKey(provider),
+        isFalse,
+      );
+
+      bytes.complete(_progressiveJpegWithScan());
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
 
   testWidgets(
     'PixaImage updates controller visibility when scrolled offscreen',

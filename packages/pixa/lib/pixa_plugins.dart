@@ -1,3 +1,4 @@
+/// Plugin authoring contracts, descriptors, and registry APIs.
 library;
 
 export 'src/contracts.dart';

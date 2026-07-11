@@ -1,5 +1,5 @@
 name: pixa_fetcher_s3
-description: Official Pixa S3 fetcher plugin descriptor package.
+description: Official Pixa AWS SigV4 image fetcher with S3-compatible endpoint support.
 version: 1.0.0
 repository: https://github.com/fluttercandies/pixa
 resolution: workspace

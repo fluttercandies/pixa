@@ -217,6 +217,89 @@ void main() {
   });
 
   testWidgets(
+    'large image request swap replaces same-geometry tile lifecycle',
+    (WidgetTester tester) async {
+      await _configure('pixa-large-image-request-swap-');
+      final Completer<Uint8List> firstBytes = Completer<Uint8List>();
+      final Completer<Uint8List> secondBytes = Completer<Uint8List>();
+      final PixaRequest firstRequest = PixaRequest(
+        source: PixaSource.custom(
+          'large-image-swap-first',
+          () => firstBytes.future,
+        ),
+        cachePolicy: const PixaCachePolicy.noStore(),
+      );
+      final PixaRequest secondRequest = PixaRequest(
+        source: PixaSource.custom(
+          'large-image-swap-second',
+          () => secondBytes.future,
+        ),
+        cachePolicy: const PixaCachePolicy.noStore(),
+      );
+
+      Widget build(PixaRequest request) {
+        return MaterialApp(
+          home: MediaQuery(
+            data: const MediaQueryData(devicePixelRatio: 1),
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: 256,
+                height: 256,
+                child: PixaLargeImage(
+                  request: request,
+                  imageWidth: 512,
+                  imageHeight: 512,
+                  tileMode: PixaLargeImageTileMode.always,
+                  tileSize: 512,
+                  showOverview: false,
+                  prefetchTiles: false,
+                  evictDecodedTilesOnExit: true,
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+
+      await tester.pumpWidget(build(firstRequest));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      PixaImage tile = tester.widget<PixaImage>(find.byType(PixaImage));
+      final PixaRequest firstTileRequest = tile.request;
+      final PixaProvider firstProvider = PixaProvider(
+        request: firstTileRequest,
+      );
+      expect(
+        PaintingBinding.instance.imageCache.containsKey(firstProvider),
+        isTrue,
+      );
+
+      await tester.pumpWidget(build(secondRequest));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      tile = tester.widget<PixaImage>(find.byType(PixaImage));
+      final PixaRequest secondTileRequest = tile.request;
+      final PixaProvider secondProvider = PixaProvider(
+        request: secondTileRequest,
+      );
+
+      expect(secondTileRequest.cacheKey, isNot(firstTileRequest.cacheKey));
+      expect(
+        PaintingBinding.instance.imageCache.containsKey(firstProvider),
+        isFalse,
+      );
+      expect(
+        PaintingBinding.instance.imageCache.containsKey(secondProvider),
+        isTrue,
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
     'large image never tile mode displays oversized images directly',
     (WidgetTester tester) async {
       await _configure('pixa-large-image-never-direct-');

@@ -5,13 +5,13 @@ repository and let application developers opt into it through Pixa.
 
 For third-party packages, the stable public entry point is a Dart or Flutter
 package that depends on `pixa`, implements `PixaPlugin`, and registers
-descriptors through `PixaRegistry`. Publishing a package to pub.dev does not
-silently inject native code into Pixa's shared Rust host. Native runtime
-integration is a separate app-selected build-time step.
+descriptors through `PixaRegistry`. A package that owns host-linked runtime modules
+also ships a validated root-level `pixa_plugin.json`; adding that
+dependency is the application's build-time opt-in.
 
 In short: packages publish plugin descriptors; apps opt in with
-`PixaConfig(plugins: [...])`; host-linked runtime modules require the root app
-to provide a Pixa runtime manifest.
+`PixaConfig(plugins: [...])`; Pixa discovers host-linked runtime manifests from
+the resolved package graph.
 
 For packages that ship more than one integration path, use automatic integration selection through `PixaRegistry.registerAdaptiveIntegration` and
 `PixaPluginIntegrationCandidate`. The plugin still has one public
@@ -31,18 +31,18 @@ that matches the cost and ownership of your plugin.
 | Pure Dart mode | Your handler is light, uses Dart APIs, wraps app-specific bytes, or is mainly for testing/debugging. | Add the package, register `PixaPlugin`, and use a request policy that permits Dart execution. |
 | Platform channel mode | Your handler calls MethodChannel, EventChannel, Pigeon, or Flutter platform plugin APIs and returns bounded encoded image data. | Register a platform descriptor with `PixaPlatformContract`, then use `PixaPluginExecutionPolicy.runtimeFirstWithPlatform()` for requests that may cross that boundary. |
 | Standalone FFI mode | Your package owns a native SDK or library and can load it with normal Flutter native assets, platform plugin code, or `dart:ffi`. | Expose a Pixa Dart handler that calls your native code, register it with `PixaConfig(plugins: [...])`, and opt into Dart/external cost explicitly. |
-| Host-merge mode | The plugin must run in Pixa's image hot path and share Pixa's runtime, cache, scheduler, cancellation, progress, and owned-buffer ABI. | The root app points Pixa's build hook at a `plugin_manifest` or `plugin_manifest_directory`. |
+| Host-merge mode | The plugin must run in Pixa's image hot path and share Pixa's runtime, cache, scheduler, cancellation, progress, and owned-buffer ABI. | Ship `pixa_plugin.json` at package root; adding the dependency makes it visible to Pixa's build hook. |
 | Asset module mode | You need an explicit dynamic runtime boundary and the Pixa release you target documents that boundary for your platform. | Treat it as advanced integration, not the default 1.0.0 third-party path. |
 
 Adaptive registration is not a sixth execution mode. It is a selection helper
 for published pub packages that can offer several of the modes above without
 asking app authors to swap plugin classes manually.
 
-The important boundary is ownership. Pub packages can provide Dart code,
-tests, README instructions, and optional manifest files. The root app decides
-whether any native module is merged into Pixa's host binary because Native
-Assets user defines are read from the app or workspace `pubspec.yaml`, not from
-a transitive dependency.
+The important boundary is ownership. Pub packages provide Dart code, tests,
+documentation, and an optional root manifest. Pixa binds every discovered
+manifest to its package-config owner and rejects mismatched package names,
+duplicate routes, duplicate module ids, or invalid ABI contracts before native
+compilation.
 
 The Dart integration path is identical whether the app depends on the plugin
 from pub.dev, a local `path`, a `git` dependency, or a workspace package: the
@@ -55,15 +55,14 @@ Official packages follow the same boundary. `pixa_video_frame_mjpeg` ships
 `PixaMjpegVideoFramePlugin`, `PixaMjpegVideoFrame.request`,
 `PixaMjpegVideoFrame.image`, and `pixa_plugin.json` for the
 `pixa.video_frame.mjpeg` host-linked runtime module. Core Pixa keeps only the
-video-frame source, request, descriptor, and typed unsupported behavior; it does
-not expose the MJPEG manifest from `packages/pixa/plugins/optional`.
-Applications must register the Dart plugin and explicitly select the package
-manifest with `plugin_manifest` or `plugin_manifest_directory` before the
-`video-frame:mjpeg` route can run in the shared host. The plugin uses
-`hostRuntimeAvailable`; keep it false until the root app has selected the
-manifest, then register `PixaMjpegVideoFramePlugin(hostRuntimeAvailable: true)`.
-Core Pixa does not expose the MJPEG manifest from its optional manifest
-directory.
+video-frame source, request, descriptor, and typed unsupported behavior; it
+does not expose the MJPEG manifest from `packages/pixa/plugins/optional`.
+Its runtime source route is `video-frame:mjpeg`.
+Pixa discovers the package manifest from the consumer's resolved
+`package_config.json`, verifies that every module declares the owning package
+name, and links it during Native Assets build. Applications add the dependency
+and register `PixaMjpegVideoFramePlugin()`; they do not copy manifests or add
+app-level hook configuration.
 
 ## Third-party plugin package layout
 
@@ -236,18 +235,16 @@ remain runtime-only unless the app chooses a Dart-owned source or policy.
 
 A published plugin can expose one stable plugin object and let Pixa choose the
 best registered implementation at configuration time. This is the recommended
-shape when a package supports a runtime host module for apps that enable a Pixa
-manifest, a platform-channel implementation for mobile platforms, and a Pure
-Dart fallback for tests or low-cost sources.
+shape when a package supports an automatically discovered runtime host module,
+a platform-channel implementation for mobile platforms, and a Pure Dart
+fallback for tests or low-cost sources.
 
 ```dart
 final class MyAdaptiveFetcherPlugin implements PixaPlugin {
   const MyAdaptiveFetcherPlugin({
-    this.hostRuntimeAvailable = false,
     this.platformAvailable = true,
   });
 
-  final bool hostRuntimeAvailable;
   final bool platformAvailable;
 
   @override
@@ -268,9 +265,7 @@ final class MyAdaptiveFetcherPlugin implements PixaPlugin {
         PixaPluginIntegrationCandidate.runtimeHost(
           id: 'runtime-host',
           packageName: 'my_pixa_fetcher',
-          hostRuntimeAvailable: hostRuntimeAvailable,
-          unavailableMessage:
-              'Enable plugin_manifest or plugin_manifest_directory in the root app.',
+          hostRuntimeAvailable: true,
           register: _registerRuntimeHostFetcher,
         ),
         PixaPluginIntegrationCandidate.platformChannel(
@@ -322,12 +317,12 @@ ABI can make the runtime-host candidate required. Pixa will fail during
 configuration with the candidate's safe `unavailableMessage` instead of silently
 registering a slower or less capable path.
 
-Do not default `hostRuntimeAvailable` to true in a public pub package. A
-pub.dev package cannot auto-link runtime host code into the root app. Set it to
-true only when the root app has enabled the matching manifest and the plugin's
-README tells the app owner which manifest path and native artifacts are being
-selected. Platform and Dart candidates may be available from the package itself,
-but requests must still opt into their execution boundary with
+For a package-owned host module, ship a root `pixa_plugin.json` and set
+`hostRuntimeAvailable` to true: Pixa validates and links that manifest from the
+resolved package graph. A candidate backed by an external or platform-owned
+asset must instead use real capability detection. Platform and Dart candidates
+may be available from the package itself, but requests must still opt into
+their execution boundary with
 `PixaPluginExecutionPolicy.runtimeFirstWithPlatform()`,
 `PixaPluginExecutionPolicy.runtimeFirstWithDart()`, or
 `PixaPluginExecutionPolicy.withExternal(...)`.

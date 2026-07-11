@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import '../hook/build.dart';
@@ -21,35 +23,88 @@ void main() {
     );
   });
 
-  test('Windows TurboJPEG CMake processor is explicit for MSVC targets', () {
-    expect(
-      pixaWindowsTurboJpegCmakeSystemProcessor('x86_64-pc-windows-msvc'),
-      'AMD64',
-    );
-    expect(
-      pixaWindowsTurboJpegCmakeSystemProcessor('aarch64-pc-windows-msvc'),
-      'ARM64',
-    );
-    expect(
-      pixaWindowsTurboJpegCmakeSystemProcessor('i686-pc-windows-msvc'),
-      'X86',
-    );
-    expect(
-      pixaWindowsTurboJpegCmakeSystemProcessor('x86_64-unknown-linux-gnu'),
-      isNull,
-    );
+  test('Windows TurboJPEG delegates native compiler discovery to cmake-rs', () {
+    final String hook = File('hook/build.dart').readAsStringSync();
+
+    expect(hook, isNot(contains('pixaWindowsTurboJpegCmakeToolchain')));
+    expect(hook, isNot(contains('_configureWindowsTurboJpegCmakeEnvironment')));
+    expect(hook, isNot(contains('set(CMAKE_SYSTEM_NAME Windows)')));
   });
 
-  test('Windows TurboJPEG toolchain defines system processor', () {
-    final String toolchain = pixaWindowsTurboJpegCmakeToolchain('AMD64');
+  test('published Rust workspace pins its toolchain and MSRV', () {
+    final String toolchain = File(
+      'native_src/rust/rust-toolchain.toml',
+    ).readAsStringSync();
+    final String workspace = File(
+      'native_src/rust/Cargo.toml',
+    ).readAsStringSync();
+    final String core = File(
+      'native_src/rust/pixa_core/Cargo.toml',
+    ).readAsStringSync();
+    final String runtime = File(
+      'native_src/rust/pixa_runtime/Cargo.toml',
+    ).readAsStringSync();
 
-    expect(
-      toolchain,
-      contains(
-        'set(CMAKE_SYSTEM_PROCESSOR "AMD64" CACHE STRING '
-        '"Pixa target processor for libjpeg-turbo" FORCE)',
-      ),
-    );
-    expect(toolchain, contains('set(CMAKE_SYSTEM_NAME Windows)'));
+    expect(toolchain, contains('channel = "1.89.0"'));
+    expect(workspace, contains('rust-version = "1.89"'));
+    expect(core, contains('rust-version.workspace = true'));
+    expect(runtime, contains('rust-version.workspace = true'));
   });
+
+  test(
+    'Rust prerequisite failure explains the pinned install and target',
+    () async {
+      final List<String> commands = <String>[];
+
+      await expectLater(
+        pixaValidateRustToolchain(
+          cargo: 'cargo',
+          rustc: 'rustc',
+          rustWorkspace: Uri.file('/tmp/pixa-rust/'),
+          environment: const <String, String>{},
+          targetTriple: 'x86_64-pc-windows-msvc',
+          runProcess:
+              (
+                String executable,
+                List<String> arguments, {
+                String? workingDirectory,
+                Map<String, String>? environment,
+              }) async {
+                commands.add('$executable ${arguments.join(' ')}');
+                if (executable == 'cargo') {
+                  return ProcessResult(1, 0, 'cargo 1.89.0', '');
+                }
+                return ProcessResult(2, 0, 'rustc 1.88.0', '');
+              },
+        ),
+        throwsA(
+          isA<StateError>()
+              .having(
+                (StateError error) => error.message,
+                'message',
+                contains('rustup toolchain install 1.89.0 --profile minimal'),
+              )
+              .having(
+                (StateError error) => error.message,
+                'message',
+                contains(
+                  'rustup target add x86_64-pc-windows-msvc '
+                  '--toolchain 1.89.0',
+                ),
+              )
+              .having(
+                (StateError error) => error.message,
+                'message',
+                contains('Desktop development with C++'),
+              )
+              .having(
+                (StateError error) => error.message,
+                'message',
+                contains('NASM'),
+              ),
+        ),
+      );
+      expect(commands, <String>['cargo --version', 'rustc --version']);
+    },
+  );
 }

@@ -1,8 +1,14 @@
 import 'dart:io';
 
 import 'pixa_profile_acceptance.dart' as acceptance;
+import 'pixa_native_assets_log_check.dart' as native_assets;
 
 Future<void> main() async {
+  _expect(
+    acceptance.profileRustVersionCommand().join(' ') ==
+        'rustup run 1.89.0 rustc --version',
+    'profile metadata must probe the pinned release toolchain',
+  );
   final String deviceIdHash = 'a'.padLeft(64, 'a');
   final List<String> arguments = acceptance.buildProfileDriveArguments(
     deviceId: 'fixture-device',
@@ -80,6 +86,45 @@ Future<void> main() async {
     _expect(
       await requestedRaw.readAsString() == '{"fresh":true}',
       'custom --raw paths must receive the fresh driver artifact',
+    );
+
+    final Directory project = Directory('${temp.path}/gallery')..createSync();
+    final File artifact = File(
+      '${project.path}/.dart_tool/lib/libpixa_runtime.dylib',
+    );
+    await artifact.parent.create(recursive: true);
+    await artifact.writeAsBytes(<int>[1, 2, 3, 4], flush: true);
+    final File rawBuildLog = File('${temp.path}/native.raw.log')
+      ..writeAsStringSync('Running build hooks...\n');
+    final File nativeLog = File('${temp.path}/native.log');
+
+    final File discovered = await acceptance.locatePixaRuntimeArtifact(project);
+    await acceptance.writeNativeAssetsEvidenceLog(
+      output: nativeLog,
+      rawBuildLog: rawBuildLog,
+      platform: 'macos',
+      mode: 'profile',
+      gitCommit: '0123456789abcdef0123456789abcdef01234567',
+      gitTreeState: 'clean',
+      artifact: discovered,
+      exitCode: 0,
+    );
+
+    final native_assets.NativeAssetFrameworkWarningReport nativeReport =
+        native_assets.NativeAssetFrameworkWarningReport.parse(
+          await nativeLog.readAsString(),
+          requiredGitCommit: '0123456789abcdef0123456789abcdef01234567',
+          requiredMode: 'profile',
+        );
+    _expect(nativeReport.passed, 'captured Native Assets evidence must pass');
+    _expect(
+      nativeReport.artifactBytes == 4,
+      'artifact evidence should record measured bytes',
+    );
+    _expect(
+      acceptance.profilePlatformFromTarget('darwin-arm64') == 'macos' &&
+          acceptance.profilePlatformFromTarget('android-arm64') == 'android',
+      'Flutter target platforms should map to release platform ids',
     );
   } finally {
     await temp.delete(recursive: true);

@@ -6,6 +6,10 @@ Use this package when images live in AWS S3 or an S3-compatible object store and
 you want them to enter Pixa through the same request, cache, scheduler,
 redaction, retry, and runtime-only fetcher path as other sources.
 
+The production fetch path runs in Pixa's Rust runtime and implements AWS Signature Version 4,
+temporary session credentials, virtual-hosted and path-style addressing, and
+custom HTTPS endpoints.
+
 ## Install
 
 ```yaml
@@ -19,16 +23,6 @@ dependencies:
   pixa_fetcher_s3: ^1.0.0
 ```
 
-```yaml
-dependencies:
-  pixa_fetcher_s3:
-    path: ../pixa_fetcher_s3
-
-dependency_overrides:
-  pixa:
-    path: ../pixa
-```
-
 This package re-exports `package:pixa/pixa.dart`, so apps that only use S3
 helpers can import `package:pixa_fetcher_s3/pixa_fetcher_s3.dart`.
 
@@ -37,6 +31,8 @@ helpers can import `package:pixa_fetcher_s3/pixa_fetcher_s3.dart`.
 Register the plugin during app startup:
 
 ```dart
+import 'package:pixa_fetcher_s3/pixa_fetcher_s3.dart';
+
 await Pixa.configure(
   const PixaConfig(
     plugins: <PixaPlugin>[
@@ -134,6 +130,8 @@ different transport.
 Use the standard Pixa diagnostics for support reports:
 
 ```dart
+import 'package:pixa/pixa_debug.dart';
+
 final snapshot = PixaDebugInspector.snapshot();
 debugPrint(snapshot.toDiagnosticString());
 ```

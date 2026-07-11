@@ -1,6 +1,6 @@
 use super::{
-    bytes_to_str, PixaPluginFetchRequestV1, PixaPluginHostApiV1, PixaPluginModuleApiV1,
-    PixaPluginOutputV1,
+    abi_struct_is_compatible, bytes_to_str, set_plugin_output_mime, PixaPluginFetchRequestV1,
+    PixaPluginHostApiV1, PixaPluginModuleApiV1, PixaPluginOutputV1,
 };
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 
 const OUTPUT_MIME: &[u8] = b"image/jpeg";
 const MAX_MJPEG_AVI_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_MJPEG_LIST_DEPTH: usize = 32;
 
 static HOST_API: OnceLock<PixaPluginHostApiV1> = OnceLock::new();
 
@@ -23,16 +24,24 @@ pub unsafe extern "C" fn pixa_mjpeg_video_frame_plugin_init(
         return -1;
     }
     let host_api = unsafe { *host };
-    if host_api.abi_version != pixa_core::PIXA_PLUGIN_ABI_VERSION
+    if !abi_struct_is_compatible::<PixaPluginHostApiV1>(host_api.abi_version, host_api.struct_size)
         || host_api.buffer_alloc.is_none()
         || host_api.buffer_data.is_none()
         || host_api.buffer_free.is_none()
+        || host_api.cancel_is_requested.is_none()
+        || host_api.progress_emit_fetch.is_none()
     {
+        return -2;
+    }
+    let module_api = unsafe { &*module };
+    if !abi_struct_is_compatible::<PixaPluginModuleApiV1>(
+        module_api.abi_version,
+        module_api.struct_size,
+    ) {
         return -2;
     }
     let _ = HOST_API.set(host_api);
     unsafe {
-        (*module).abi_version = pixa_core::PIXA_PLUGIN_ABI_VERSION;
         (*module).fetch = Some(fetch_mjpeg_video_frame);
     }
     0
@@ -46,6 +55,14 @@ unsafe extern "C" fn fetch_mjpeg_video_frame(
         return -1;
     }
     let request = unsafe { &*request };
+    let output = unsafe { &mut *output };
+    if !abi_struct_is_compatible::<PixaPluginFetchRequestV1>(
+        request.abi_version,
+        request.struct_size,
+    ) || !abi_struct_is_compatible::<PixaPluginOutputV1>(output.abi_version, output.struct_size)
+    {
+        return -2;
+    }
     let Some(source_kind) =
         (unsafe { bytes_to_str(request.source_kind_ptr, request.source_kind_len) })
     else {
@@ -145,7 +162,7 @@ fn extract_nearest_frame_jpeg(
     ));
     let scan_end = file_len.min(8_u64.saturating_add(riff_size));
     let mut scanner = AviScanner::new(timestamp_micros, max_output_bytes);
-    scan_chunks(&mut file, 12, scan_end, &mut scanner)?;
+    scan_chunks(&mut file, 12, scan_end, 0, &mut scanner)?;
     scanner.finish(&mut file)
 }
 
@@ -217,7 +234,16 @@ impl AviScanner {
     }
 }
 
-fn scan_chunks(file: &mut File, start: u64, end: u64, scanner: &mut AviScanner) -> Result<(), i32> {
+fn scan_chunks(
+    file: &mut File,
+    start: u64,
+    end: u64,
+    depth: usize,
+    scanner: &mut AviScanner,
+) -> Result<(), i32> {
+    if depth > MAX_MJPEG_LIST_DEPTH {
+        return Err(-54);
+    }
     let mut cursor = start;
     while cursor.checked_add(8).ok_or(-40)? <= end && !scanner.done() {
         file.seek(SeekFrom::Start(cursor)).map_err(|_| -41)?;
@@ -235,7 +261,7 @@ fn scan_chunks(file: &mut File, start: u64, end: u64, scanner: &mut AviScanner) 
             if size >= 4 {
                 let mut _list_type = [0_u8; 4];
                 file.read_exact(&mut _list_type).map_err(|_| -47)?;
-                scan_chunks(file, data_start + 4, data_end, scanner)?;
+                scan_chunks(file, data_start + 4, data_end, depth + 1, scanner)?;
             }
         } else if &id == b"avih" {
             if size >= 4 {
@@ -296,7 +322,7 @@ fn extract_jpeg_payload(bytes: &[u8], max_output_bytes: usize) -> Result<Vec<u8>
 
 fn copy_output_to_host_buffer(
     bytes: &[u8],
-    output: *mut PixaPluginOutputV1,
+    output: &mut PixaPluginOutputV1,
     max_output_bytes: usize,
 ) -> i32 {
     if bytes.is_empty() || bytes.len() > max_output_bytes {
@@ -327,9 +353,12 @@ fn copy_output_to_host_buffer(
     }
     unsafe {
         ptr::copy_nonoverlapping(bytes.as_ptr(), data, bytes.len());
-        (*output).buffer = handle;
-        (*output).mime_type_ptr = OUTPUT_MIME.as_ptr();
-        (*output).mime_type_len = OUTPUT_MIME.len();
+        output.buffer = handle;
+    }
+    if set_plugin_output_mime(output, OUTPUT_MIME).is_err() {
+        unsafe { buffer_free(handle) };
+        output.buffer = ptr::null_mut();
+        return -77;
     }
     0
 }
@@ -337,6 +366,7 @@ fn copy_output_to_host_buffer(
 #[cfg(test)]
 mod tests {
     use super::super::{ensure_generated_plugins_registered, PluginFetchRequest};
+    use super::extract_nearest_frame_jpeg;
     use pixa_core::{
         image_metadata, plugin_registry_stats, runtime_fetcher_executor_for_source_kind,
         ImageMetadataFormat, RuntimePluginVideoFrameSpec,
@@ -386,6 +416,25 @@ mod tests {
         assert_eq!(stats.video_frame_output_mime_types, vec!["image/jpeg"]);
     }
 
+    #[test]
+    fn mjpeg_nested_list_depth_is_bounded() {
+        let jpeg = jpeg_rgb([12, 34, 56]);
+        let allowed = mjpeg_avi_with_nested_frame(32, &jpeg);
+        let allowed_path = temp_video_path();
+        fs::write(&allowed_path, allowed).expect("boundary AVI should be writable");
+        let extracted = extract_nearest_frame_jpeg(allowed_path.clone(), 0, 8192)
+            .expect("maximum supported LIST depth should decode");
+        let _ = fs::remove_file(&allowed_path);
+        assert_eq!(extracted, jpeg);
+
+        let excessive = mjpeg_avi_with_nested_frame(33, &jpeg);
+        let excessive_path = temp_video_path();
+        fs::write(&excessive_path, excessive).expect("deep AVI should be writable");
+        let result = extract_nearest_frame_jpeg(excessive_path.clone(), 0, 8192);
+        let _ = fs::remove_file(&excessive_path);
+        assert_eq!(result, Err(-54));
+    }
+
     fn jpeg_rgb(pixel: [u8; 3]) -> Vec<u8> {
         let mut bytes = Vec::new();
         image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 90)
@@ -410,6 +459,30 @@ mod tests {
         payload.extend_from_slice(b"AVI ");
         payload.extend_from_slice(&hdrl);
         payload.extend_from_slice(&movi);
+
+        let mut riff = Vec::new();
+        riff.extend_from_slice(b"RIFF");
+        riff.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        riff.extend_from_slice(&payload);
+        riff
+    }
+
+    fn mjpeg_avi_with_nested_frame(depth: usize, jpeg: &[u8]) -> Vec<u8> {
+        let mut avih = vec![0_u8; 56];
+        avih[0..4].copy_from_slice(&1_000_000_u32.to_le_bytes());
+        avih[16..20].copy_from_slice(&1_u32.to_le_bytes());
+        avih[32..36].copy_from_slice(&1_u32.to_le_bytes());
+        avih[36..40].copy_from_slice(&1_u32.to_le_bytes());
+
+        let hdrl = list_chunk(b"hdrl", &[chunk(b"avih", &avih)].concat());
+        let mut nested = chunk(b"00dc", jpeg);
+        for _ in 0..depth {
+            nested = list_chunk(b"nest", &nested);
+        }
+        let mut payload = Vec::new();
+        payload.extend_from_slice(b"AVI ");
+        payload.extend_from_slice(&hdrl);
+        payload.extend_from_slice(&nested);
 
         let mut riff = Vec::new();
         riff.extend_from_slice(b"RIFF");

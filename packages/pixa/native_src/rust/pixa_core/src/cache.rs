@@ -20,6 +20,8 @@ static DISK_ACCESS_TIMES: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new(
 pub struct MemoryCache {
     max_bytes: usize,
     current_bytes: usize,
+    processed_entries: usize,
+    processed_bytes: usize,
     entries: HashMap<String, MemoryEntry>,
     order: VecDeque<String>,
     hits: u64,
@@ -36,6 +38,8 @@ impl MemoryCache {
         Self {
             max_bytes,
             current_bytes: 0,
+            processed_entries: 0,
+            processed_bytes: 0,
             entries: HashMap::new(),
             order: VecDeque::new(),
             hits: 0,
@@ -175,6 +179,10 @@ impl MemoryCache {
         }
         self.remove_entry(&key, false);
         self.current_bytes += bytes.len();
+        if kind == MemoryEntryKind::Processed {
+            self.processed_entries += 1;
+            self.processed_bytes += bytes.len();
+        }
         self.order.push_back(key.clone());
         self.entries.insert(
             key,
@@ -242,6 +250,8 @@ impl MemoryCache {
         self.entries.clear();
         self.order.clear();
         self.current_bytes = 0;
+        self.processed_entries = 0;
+        self.processed_bytes = 0;
     }
 
     /// Clears all entries for one namespace.
@@ -277,6 +287,8 @@ impl MemoryCache {
         MemoryCacheStats {
             entries: self.entries.len(),
             bytes: self.current_bytes,
+            processed_entries: self.processed_entries,
+            processed_bytes: self.processed_bytes,
             hits: self.hits,
             misses: self.misses,
             evictions: self.evictions,
@@ -289,6 +301,10 @@ impl MemoryCache {
     fn remove_entry(&mut self, key: &str, count_eviction: bool) -> bool {
         if let Some(entry) = self.entries.remove(key) {
             self.current_bytes = self.current_bytes.saturating_sub(entry.bytes.len());
+            if entry.kind == MemoryEntryKind::Processed {
+                self.processed_entries = self.processed_entries.saturating_sub(1);
+                self.processed_bytes = self.processed_bytes.saturating_sub(entry.bytes.len());
+            }
             self.order.retain(|candidate| candidate != key);
             if count_eviction {
                 self.evictions += 1;
@@ -340,6 +356,10 @@ impl MemoryCache {
             }
             if let Some(entry) = self.entries.remove(&key) {
                 self.current_bytes = self.current_bytes.saturating_sub(entry.bytes.len());
+                if entry.kind == MemoryEntryKind::Processed {
+                    self.processed_entries = self.processed_entries.saturating_sub(1);
+                    self.processed_bytes = self.processed_bytes.saturating_sub(entry.bytes.len());
+                }
                 self.evictions += 1;
                 if entry.kind == MemoryEntryKind::Processed {
                     self.processed_evictions += 1;
@@ -355,6 +375,8 @@ impl MemoryCache {
 pub struct MemoryCacheStats {
     pub entries: usize,
     pub bytes: usize,
+    pub processed_entries: usize,
+    pub processed_bytes: usize,
     pub hits: u64,
     pub misses: u64,
     pub evictions: u64,
@@ -1190,6 +1212,29 @@ mod tests {
         assert!(cache.get("same").is_none());
         assert_eq!(cache.get_processed("same").as_deref(), Some(&[5, 6][..]));
         assert_eq!(cache.stats().misses, 2);
+    }
+
+    #[test]
+    fn memory_stats_report_processed_entries_and_retained_bytes() {
+        let mut cache = MemoryCache::new(16);
+        cache.put(
+            "default",
+            "encoded".to_string(),
+            vec![1, 2, 3, 4].into(),
+            None,
+        );
+        cache.put_processed(
+            "default",
+            "processed".to_string(),
+            vec![5, 6, 7].into(),
+            None,
+        );
+
+        let stats = cache.stats();
+        assert_eq!(stats.entries, 2);
+        assert_eq!(stats.bytes, 7);
+        assert_eq!(stats.processed_entries, 1);
+        assert_eq!(stats.processed_bytes, 3);
     }
 
     #[test]

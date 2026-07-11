@@ -190,7 +190,7 @@ fn bench_region_tile_processors() {
             &format!("tile-region-{label}-final"),
             CacheMode::NoStore,
             vec![
-                "tile(x=64,y=64,width=128,height=128,decodedWidth=128,decodedHeight=128,sampleSize=1,filter=nearest)"
+                "tile(x=64,y=64,width=128,height=128,decodedWidth=128,decodedHeight=128,filter=nearest)"
                     .to_string(),
             ],
         );

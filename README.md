@@ -23,17 +23,27 @@ dependencies:
   pixa: ^1.0.0
 ```
 
-```yaml
-dependencies:
-  pixa:
-    path: packages/pixa
+### Native build prerequisite
+
+Pixa builds its packaged Rust runtime through Flutter Native Assets. Install
+the pinned Rust toolchain before the first Flutter build:
+
+```bash
+rustup toolchain install 1.89.0 --profile minimal
 ```
+
+Cross-platform builds also need that target's Rust standard library and native
+compiler. The build hook reports the exact `rustup target add` command when a
+target is missing. Windows JPEG Turbo ROI builds require the Visual Studio C++
+workload and NASM; Android builds require the Android NDK, SDK CMake, and Ninja.
 
 ## Quick Start
 
 Configure Pixa once during app startup:
 
 ```dart
+import 'package:pixa/pixa.dart';
+
 await Pixa.configure(const PixaConfig(
   memoryCacheBytes: 96 * 1024 * 1024,
   diskCacheBytes: 512 * 1024 * 1024,
@@ -45,6 +55,9 @@ await Pixa.configure(const PixaConfig(
 Use `PixaImage.network` where you would normally use `Image.network`:
 
 ```dart
+import 'package:flutter/material.dart';
+import 'package:pixa/pixa.dart';
+
 PixaImage.network(
   imageUrl,
   width: 96,
@@ -63,6 +76,9 @@ PixaImage.network(
 Use `PixaProvider` when a Flutter API expects an `ImageProvider`:
 
 ```dart
+import 'package:flutter/material.dart';
+import 'package:pixa/pixa.dart';
+
 Image(
   image: PixaProvider.network(imageUrl, targetWidth: 300),
   fit: BoxFit.cover,
@@ -97,6 +113,8 @@ dominant color, and a small palette for placeholders or diagnostics.
 For dense galleries, set explicit budgets instead of relying on device defaults:
 
 ```dart
+import 'package:pixa/pixa.dart';
+
 await Pixa.configure(const PixaConfig(
   memoryCacheBytes: 160 * 1024 * 1024,
   diskCacheBytes: 1024 * 1024 * 1024,
@@ -117,15 +135,15 @@ locators or cache labels.
 Video-frame extraction uses the same plugin boundary. Core Pixa exposes request
 helpers and typed unsupported failures, but it does not ship a default video-frame backend.
 The official MJPEG backend lives in
-`pixa_video_frame_mjpeg`; apps register
-`PixaMjpegVideoFramePlugin(hostRuntimeAvailable: true)` only after explicitly
-enabling that package's `pixa_plugin.json` through `plugin_manifest` or
-`plugin_manifest_directory`.
+`pixa_video_frame_mjpeg`. Adding that dependency makes its packaged manifest
+visible to Pixa's Native Assets hook automatically; apps only register
+`PixaMjpegVideoFramePlugin()` in `PixaConfig`.
 
 Plugin authors should start with
 [packages/pixa/PLUGIN_AUTHORING.md](packages/pixa/PLUGIN_AUTHORING.md). It
 explains package layout, consumer setup, Pure Dart mode, platform channel mode,
-Standalone FFI mode, and app-selected Host-merge mode. A pub.dev package cannot auto-link runtime host code into Pixa's shared runtime just by being added as a transitive dependency.
+Standalone FFI mode, and discovery from the resolved package graph for
+host-linked modules.
 
 Advanced plugins can use
 `PixaPluginExecutionPolicy.runtimeFirstWithPlatform()` for explicit platform

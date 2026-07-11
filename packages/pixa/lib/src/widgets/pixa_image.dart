@@ -767,6 +767,7 @@ final class _PixaImageState extends State<PixaImage> {
   late PixaController _controller;
   late PixaLoadState _lastObservedState;
   late int _lastObservedGeneration;
+  late bool _lastObservedVisibility;
   ScrollPosition? _scrollPosition;
   PixaLoadState? _pendingControllerState;
   PixaController? _pendingControllerTarget;
@@ -842,6 +843,9 @@ final class _PixaImageState extends State<PixaImage> {
   }
 
   Widget _buildImage(BuildContext context, PixaRequest request) {
+    if (!_ownsController && !_controllerAllowsActiveWork) {
+      return _buildInactiveSurface(context);
+    }
     final PixaProvider provider = _providerFor(request);
     Widget image = Image(
       image: provider,
@@ -914,6 +918,33 @@ final class _PixaImageState extends State<PixaImage> {
     );
   }
 
+  Widget _buildInactiveSurface(BuildContext context) {
+    Widget surface = SizedBox(
+      width: widget.width,
+      height: widget.height,
+      child: widget.placeholder?.build(context) ?? const SizedBox.expand(),
+    );
+    if (widget.background != null || widget.overlay != null) {
+      surface = Stack(
+        fit: StackFit.passthrough,
+        children: <Widget>[
+          if (widget.background != null)
+            Positioned.fill(child: widget.background!),
+          surface,
+          if (widget.overlay != null) Positioned.fill(child: widget.overlay!),
+        ],
+      );
+    }
+    if (widget.circle) {
+      return ClipOval(child: surface);
+    }
+    final BorderRadius? borderRadius = widget.borderRadius;
+    if (borderRadius != null) {
+      return ClipRRect(borderRadius: borderRadius, child: surface);
+    }
+    return surface;
+  }
+
   PixaProvider _providerFor(PixaRequest request) {
     final bool needsProgress = _needsProgressCallback;
     final int generation = _controller.generation;
@@ -977,9 +1008,16 @@ final class _PixaImageState extends State<PixaImage> {
     if (wasSynchronouslyLoaded || widget.transitionDuration == Duration.zero) {
       return child;
     }
-    return AnimatedOpacity(
-      opacity: 1,
+    return TweenAnimationBuilder<double>(
+      key: ValueKey<String>(
+        '${request.cacheKey.value}:${_controller.generation}',
+      ),
+      tween: Tween<double>(begin: 0, end: 1),
       duration: widget.transitionDuration,
+      curve: Curves.easeOut,
+      builder: (BuildContext context, double opacity, Widget? child) {
+        return Opacity(opacity: opacity, child: child);
+      },
       child: child,
     );
   }
@@ -1183,6 +1221,7 @@ final class _PixaImageState extends State<PixaImage> {
     _controller = controller ?? PixaController();
     _lastObservedState = _controller.state;
     _lastObservedGeneration = _controller.generation;
+    _lastObservedVisibility = _controller.isVisible;
     _controller.addListener(_onControllerChanged);
     _controller.attach();
   }
@@ -1198,14 +1237,36 @@ final class _PixaImageState extends State<PixaImage> {
   void _onControllerChanged() {
     final PixaLoadState nextState = _controller.state;
     final int nextGeneration = _controller.generation;
+    final bool nextVisibility = _controller.isVisible;
+    final bool wasActive = _allowsActiveWork(
+      _lastObservedState,
+      _lastObservedVisibility,
+    );
+    final bool isActive = _allowsActiveWork(nextState, nextVisibility);
+    if (wasActive && !isActive) {
+      final PixaProvider? provider = _cachedProvider;
+      if (provider != null) {
+        PaintingBinding.instance.imageCache.evict(provider);
+      }
+    }
     final bool affectsBuild =
         nextGeneration != _lastObservedGeneration ||
+        nextVisibility != _lastObservedVisibility ||
         !_isSameLoadState(_lastObservedState, nextState);
     _lastObservedState = nextState;
     _lastObservedGeneration = nextGeneration;
+    _lastObservedVisibility = nextVisibility;
     if (affectsBuild && mounted) {
       setState(() {});
     }
+  }
+
+  bool get _controllerAllowsActiveWork {
+    return _allowsActiveWork(_controller.state, _controller.isVisible);
+  }
+
+  bool _allowsActiveWork(PixaLoadState state, bool isVisible) {
+    return isVisible && state is! PixaCancelled;
   }
 
   void _setControllerState(PixaLoadState state) {

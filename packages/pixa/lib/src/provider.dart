@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'animation.dart';
 import 'cache/decoded_cache_registry.dart';
+import 'cache/decoded_progress_registry.dart';
 import 'display_decoder.dart';
 import 'pixa.dart';
 import 'pipeline.dart';
@@ -17,13 +18,18 @@ import 'source.dart';
 @immutable
 final class PixaProvider extends ImageProvider<PixaProvider> {
   /// Creates a provider from a request.
-  const PixaProvider({
+  PixaProvider({
     required this.request,
     this.generation = 0,
     this.onProgress,
     this.animationController,
     this.animationOptions = const PixaAnimationOptions(),
-  });
+  }) : _decodedCacheBypassIdentity = _bypassesDecodedCache(request)
+           ? Object()
+           : null,
+       _progressListener = onProgress == null
+           ? null
+           : PixaDecodedProgressListener(onProgress);
 
   /// Creates a network provider.
   factory PixaProvider.network(
@@ -318,9 +324,29 @@ final class PixaProvider extends ImageProvider<PixaProvider> {
   /// Animated image playback options.
   final PixaAnimationOptions animationOptions;
 
+  final Object? _decodedCacheBypassIdentity;
+  final PixaDecodedProgressListener? _progressListener;
+
   @override
   Future<PixaProvider> obtainKey(ImageConfiguration configuration) {
     return SynchronousFuture<PixaProvider>(this);
+  }
+
+  @override
+  void resolveStreamForKey(
+    ImageConfiguration configuration,
+    ImageStream stream,
+    PixaProvider key,
+    ImageErrorListener handleError,
+  ) {
+    final PixaDecodedProgressListener? listener = key._progressListener;
+    if (listener != null) {
+      pixaDecodedProgressRegistry.track(
+        key: key._progressIdentity,
+        listener: listener,
+      );
+    }
+    super.resolveStreamForKey(configuration, stream, key, handleError);
   }
 
   @override
@@ -364,7 +390,9 @@ final class PixaProvider extends ImageProvider<PixaProvider> {
     final PixaPipeline pipeline = Pixa.pipeline;
     final PixaPipelineHandle handle = pipeline.startLoad(
       key.request,
-      onProgress: key.onProgress,
+      onProgress: (PixaProgress progress) {
+        pixaDecodedProgressRegistry.emit(key._progressIdentity, progress);
+      },
     );
     ticket.attach(handle);
     final PixaPipelineLoad load = await handle.future;
@@ -376,11 +404,17 @@ final class PixaProvider extends ImageProvider<PixaProvider> {
     return other is PixaProvider &&
         other.request.cacheKey == request.cacheKey &&
         other.generation == generation &&
+        other._decodedCacheBypassIdentity == _decodedCacheBypassIdentity &&
         other._animationKey == _animationKey;
   }
 
   @override
-  int get hashCode => Object.hash(request.cacheKey, generation, _animationKey);
+  int get hashCode => Object.hash(
+    request.cacheKey,
+    generation,
+    _decodedCacheBypassIdentity,
+    _animationKey,
+  );
 
   Object? get _animationKey {
     final PixaAnimationController? controller = animationController;
@@ -390,8 +424,53 @@ final class PixaProvider extends ImageProvider<PixaProvider> {
     return Object.hash(identityHashCode(controller), animationOptions);
   }
 
+  Object get _progressIdentity => _PixaProviderProgressIdentity(
+    request.cacheKey.value,
+    generation,
+    _decodedCacheBypassIdentity,
+    _animationKey,
+  );
+
   @override
   String toString() => 'PixaProvider(${request.source.safeLabel})';
+}
+
+final class _PixaProviderProgressIdentity {
+  const _PixaProviderProgressIdentity(
+    this.cacheKey,
+    this.generation,
+    this.decodedCacheBypassIdentity,
+    this.animationKey,
+  );
+
+  final String cacheKey;
+  final int generation;
+  final Object? decodedCacheBypassIdentity;
+  final Object? animationKey;
+
+  @override
+  bool operator ==(Object other) {
+    return other is _PixaProviderProgressIdentity &&
+        other.cacheKey == cacheKey &&
+        other.generation == generation &&
+        other.decodedCacheBypassIdentity == decodedCacheBypassIdentity &&
+        other.animationKey == animationKey;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    cacheKey,
+    generation,
+    decodedCacheBypassIdentity,
+    animationKey,
+  );
+}
+
+bool _bypassesDecodedCache(PixaRequest request) {
+  return switch (request.cachePolicy.mode) {
+    PixaCacheMode.networkOnly || PixaCacheMode.refresh => true,
+    _ => false,
+  };
 }
 
 final class _ProviderLoadTicket {

@@ -1,5 +1,6 @@
+import 'package:flutter/foundation.dart';
+
 import 'failure.dart';
-import 'dart:typed_data';
 
 /// Pipeline stage for progress, failures, and observer events.
 enum PixaStage {
@@ -72,13 +73,39 @@ final class PixaProgress {
 /// Encoded progressive preview bytes emitted during network loading.
 final class PixaProgressivePreview {
   /// Creates a progressive preview.
-  PixaProgressivePreview({
+  factory PixaProgressivePreview({
     required Uint8List bytes,
+    required String mimeType,
+    required int sequence,
+  }) {
+    return PixaProgressivePreview._(
+      bytes: Uint8List.fromList(bytes).asUnmodifiableView(),
+      mimeType: mimeType,
+      sequence: sequence,
+      retainedOwner: null,
+    );
+  }
+
+  /// Creates a zero-copy preview whose owner defines the byte-view lifetime.
+  @internal
+  PixaProgressivePreview.borrowed({
+    required Uint8List bytes,
+    required String mimeType,
+    required int sequence,
+    required Object retainedOwner,
+  }) : this._(
+         bytes: bytes.asUnmodifiableView(),
+         mimeType: mimeType,
+         sequence: sequence,
+         retainedOwner: retainedOwner,
+       );
+
+  PixaProgressivePreview._({
+    required this.bytes,
     required this.mimeType,
     required this.sequence,
-    Object? retainedOwner,
-  }) : bytes = bytes.asUnmodifiableView(),
-       _retainedOwner = retainedOwner;
+    required Object? retainedOwner,
+  }) : _retainedOwner = retainedOwner;
 
   /// Encoded preview bytes.
   final Uint8List bytes;

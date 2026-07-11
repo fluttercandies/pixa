@@ -122,14 +122,19 @@ final class PixaDisplayDecoder {
       final PixaImageFormatCatalog formatCatalog = PixaImageFormatCatalog(
         registry: pipeline.registry,
       );
-      decodeBackend = _effectiveBackendForPayload(
-        backend,
-        request,
-        load.bytes,
-        outputMimeType: load.mimeType,
-        requestId: load.requestId,
-        formatCatalog: formatCatalog,
-      );
+      final PixaPipelineBytesLease formatBytes = load.retainBorrowedBytes();
+      try {
+        decodeBackend = _effectiveBackendForPayload(
+          backend,
+          request,
+          formatBytes.bytes,
+          outputMimeType: load.mimeType,
+          requestId: load.requestId,
+          formatCatalog: formatCatalog,
+        );
+      } finally {
+        formatBytes.dispose();
+      }
       _emit(
         pipeline,
         PixaEvent(
@@ -190,7 +195,15 @@ final class PixaDisplayDecoder {
       );
       permit.release();
       permit = null;
-      await _completionGate.wait(maxPerFrame: maxCompletionsPerFrame);
+      final bool shouldDeliver = await _completionGate.wait(
+        maxPerFrame: maxCompletionsPerFrame,
+        cancelled: cancelled,
+        isCancelled: isCancelled,
+      );
+      if (!shouldDeliver || isCancelled()) {
+        codec.dispose();
+        throw const _DecodeCancelled();
+      }
       return codec;
     } on _DecodeCancelled {
       final PixaPipeline? currentPipeline = pipeline;
@@ -554,7 +567,7 @@ final class _RuntimeDisplayDecoderBackend implements _DisplayDecoderBackend {
     required PixaAnimationController? animationController,
     required PixaAnimationOptions animationOptions,
   }) {
-    return MultiFrameImageStreamCompleter(
+    return _PixaMultiFrameImageStreamCompleter(
       codec: decoder._loadCodec(
         backend: this,
         request: request,
@@ -780,25 +793,30 @@ final class _EngineDisplayDecoderBackend implements _DisplayDecoderBackend {
     required PixaPipelineLoad load,
     required ImageDecoderCallback engineDecode,
   }) async {
-    final ui.ImmutableBuffer buffer = await ui.ImmutableBuffer.fromUint8List(
-      load.bytes,
-    );
-    return engineDecode(
-      buffer,
-      getTargetSize: (int intrinsicWidth, int intrinsicHeight) {
-        _validateDecodedPixels(
-          requestId: load.requestId,
-          intrinsicWidth: intrinsicWidth,
-          intrinsicHeight: intrinsicHeight,
-          target: request.targetSize,
-          maxDecodedPixels: request.limits.maxDecodedPixels,
-        );
-        return ui.TargetImageSize(
-          width: request.targetSize?.width,
-          height: request.targetSize?.height,
-        );
-      },
-    );
+    final PixaPipelineBytesLease encodedBytes = load.retainBorrowedBytes();
+    try {
+      final ui.ImmutableBuffer buffer = await ui.ImmutableBuffer.fromUint8List(
+        encodedBytes.bytes,
+      );
+      return engineDecode(
+        buffer,
+        getTargetSize: (int intrinsicWidth, int intrinsicHeight) {
+          _validateDecodedPixels(
+            requestId: load.requestId,
+            intrinsicWidth: intrinsicWidth,
+            intrinsicHeight: intrinsicHeight,
+            target: request.targetSize,
+            maxDecodedPixels: request.limits.maxDecodedPixels,
+          );
+          return ui.TargetImageSize(
+            width: request.targetSize?.width,
+            height: request.targetSize?.height,
+          );
+        },
+      );
+    } finally {
+      encodedBytes.dispose();
+    }
   }
 }
 
@@ -819,7 +837,7 @@ final class _PixaMultiFrameImageStreamCompleter
     InformationCollector? informationCollector,
     bool silent = false,
   }) {
-    if (!hasListeners && _isPixaCancellation(exception)) {
+    if (_isPixaCancellation(exception)) {
       return;
     }
     super.reportError(
@@ -910,7 +928,7 @@ final class PixaControlledAnimatedImageStreamCompleter
     InformationCollector? informationCollector,
     bool silent = false,
   }) {
-    if (!hasListeners && _isPixaCancellation(exception)) {
+    if (_isPixaCancellation(exception)) {
       return;
     }
     super.reportError(
@@ -954,10 +972,14 @@ final class PixaControlledAnimatedImageStreamCompleter
   }
 
   void _startPlaybackIfNeeded() {
-    if (!_canScheduleFrames) {
+    if (!_canScheduleFrames && !_canEmitInitialPausedFrame) {
       return;
     }
     if (_nextFrame != null) {
+      if (_canEmitInitialPausedFrame) {
+        _scheduleAppFrame(allowInitialPaused: true);
+        return;
+      }
       _scheduleAppFrame();
       return;
     }
@@ -991,6 +1013,10 @@ final class PixaControlledAnimatedImageStreamCompleter
       _disposeNextFrame();
       return;
     }
+    if (_canEmitInitialPausedFrame) {
+      _scheduleAppFrame(allowInitialPaused: true);
+      return;
+    }
     if (!_canScheduleFrames) {
       if (_shouldDisposePendingFrame(_controller.state)) {
         _disposeNextFrame();
@@ -1008,6 +1034,15 @@ final class PixaControlledAnimatedImageStreamCompleter
 
   void _handleAppFrame(Duration timestamp) {
     _frameCallbackScheduled = false;
+    if (_canEmitInitialPausedFrame && _nextFrame != null) {
+      final bool singleFrame = _codec?.frameCount == 1;
+      _emitNextFrame();
+      if (singleFrame) {
+        _codec?.dispose();
+        _codec = null;
+      }
+      return;
+    }
     if (!_canScheduleFrames) {
       return;
     }
@@ -1054,8 +1089,10 @@ final class PixaControlledAnimatedImageStreamCompleter
     _disposeNextFrame();
   }
 
-  void _scheduleAppFrame() {
-    if (_frameCallbackScheduled || !_canScheduleFrames) {
+  void _scheduleAppFrame({bool allowInitialPaused = false}) {
+    if (_frameCallbackScheduled ||
+        !_canScheduleFrames &&
+            !(allowInitialPaused && _canEmitInitialPausedFrame)) {
       return;
     }
     _frameCallbackScheduled = true;
@@ -1066,6 +1103,13 @@ final class PixaControlledAnimatedImageStreamCompleter
     return !_isDisposed &&
         hasListeners &&
         _controller.state == PixaAnimationPlaybackState.playing;
+  }
+
+  bool get _canEmitInitialPausedFrame {
+    return !_isDisposed &&
+        hasListeners &&
+        _framesEmitted == 0 &&
+        _controller.state == PixaAnimationPlaybackState.paused;
   }
 
   bool _shouldDisposePendingFrame(PixaAnimationPlaybackState state) {
@@ -1191,8 +1235,8 @@ final _DecodeLimiter _decodeLimiter = _DecodeLimiter();
 final _ImageCompletionGate _completionGate = _ImageCompletionGate();
 
 final class _ImageCompletionGate {
-  final ListQueue<_QueuedImageCompletion> _queue =
-      ListQueue<_QueuedImageCompletion>();
+  final LinkedHashSet<_QueuedImageCompletion> _queue =
+      LinkedHashSet<_QueuedImageCompletion>();
   Timer? _frameFallbackTimer;
   int? _frameCallbackId;
   var _releasedThisFrame = 0;
@@ -1206,17 +1250,31 @@ final class _ImageCompletionGate {
     );
   }
 
-  Future<void> wait({required int maxPerFrame}) {
+  Future<bool> wait({
+    required int maxPerFrame,
+    required Future<void> cancelled,
+    required bool Function() isCancelled,
+  }) {
+    if (isCancelled()) {
+      return SynchronousFuture<bool>(false);
+    }
     final int frameBudget = maxPerFrame.clamp(1, 256).toInt();
     _scheduleFrameReset();
     if (_queue.isEmpty && _releasedThisFrame < frameBudget) {
       _releasedThisFrame++;
-      return SynchronousFuture<void>(null);
+      return SynchronousFuture<bool>(true);
     }
     final _QueuedImageCompletion queued = _QueuedImageCompletion(
       maxPerFrame: frameBudget,
     );
     _queue.add(queued);
+    unawaited(
+      cancelled.then((_) {
+        if (_queue.remove(queued)) {
+          queued.complete(false);
+        }
+      }),
+    );
     return queued.future;
   }
 
@@ -1266,9 +1324,9 @@ final class _ImageCompletionGate {
       if (_releasedThisFrame >= queued.maxPerFrame) {
         return;
       }
-      _queue.removeFirst();
+      _queue.remove(queued);
       _releasedThisFrame++;
-      queued.complete();
+      queued.complete(true);
     }
   }
 }
@@ -1289,13 +1347,13 @@ final class _QueuedImageCompletion {
   _QueuedImageCompletion({required this.maxPerFrame});
 
   final int maxPerFrame;
-  final Completer<void> _completer = Completer<void>.sync();
+  final Completer<bool> _completer = Completer<bool>.sync();
 
-  Future<void> get future => _completer.future;
+  Future<bool> get future => _completer.future;
 
-  void complete() {
+  void complete(bool shouldDeliver) {
     if (!_completer.isCompleted) {
-      _completer.complete();
+      _completer.complete(shouldDeliver);
     }
   }
 }

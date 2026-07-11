@@ -1,9 +1,22 @@
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 
 import 'plugin_plan.dart';
+
+/// Rust toolchain pinned by Pixa's published Native Assets source package.
+const String pixaRustToolchainVersion = '1.89.0';
+
+/// Process boundary used to validate the Rust toolchain before a native build.
+typedef PixaHookProcessRunner =
+    Future<ProcessResult> Function(
+      String executable,
+      List<String> arguments, {
+      String? workingDirectory,
+      Map<String, String>? environment,
+    });
 
 Future<void> main(List<String> args) async {
   await build(args, (BuildInput input, BuildOutputBuilder output) async {
@@ -19,13 +32,20 @@ Future<void> main(List<String> args) async {
     final Uri coreManifest = input.packageRoot.resolve(
       'plugins/pixa_plugins.json',
     );
+    final Uri? resolvedPackageConfig = await Isolate.packageConfig;
+    final List<Uri> resolvedPluginManifests = resolvedPackageConfig == null
+        ? const <Uri>[]
+        : pixaDiscoverResolvedPluginManifests(resolvedPackageConfig);
     final List<Uri> officialOptionalManifests = _officialOptionalManifests(
       input,
     );
     final PixaRuntimePluginBuildPlan pluginPlan =
         PixaRuntimePluginBuildPlan.load(
           coreManifest: coreManifest,
-          additionalManifests: officialOptionalManifests,
+          additionalManifests: <Uri>[
+            ...officialOptionalManifests,
+            ...resolvedPluginManifests,
+          ],
           userManifest: input.userDefines.path('plugin_manifest'),
           userManifestDirectory: input.userDefines.path(
             'plugin_manifest_directory',
@@ -61,12 +81,7 @@ Future<void> main(List<String> args) async {
     environment['PIXA_PLUGIN_PLAN'] = pluginPlanOutput.toFilePath();
     environment['CARGO_TARGET_DIR'] = cargoTargetDirectory.toFilePath();
     _configureRustToolchainEnvironment(environment);
-    _configureNativeRoiEnvironment(
-      environment,
-      pluginPlan,
-      targetTriple: targetTriple,
-      outputDirectory: input.outputDirectory,
-    );
+    _configureNativeRoiEnvironment(environment, pluginPlan);
     _configureAppleCompileEnvironment(
       environment,
       input.config.code,
@@ -80,6 +95,14 @@ Future<void> main(List<String> args) async {
       cargoFeatures,
     );
     final String cargo = _cargoExecutable(environment);
+    final String rustc = _rustcExecutable(environment);
+    await pixaValidateRustToolchain(
+      cargo: cargo,
+      rustc: rustc,
+      rustWorkspace: rustWorkspace,
+      environment: environment,
+      targetTriple: targetTriple,
+    );
 
     final ProcessResult result = await Process.run(
       cargo,
@@ -94,6 +117,7 @@ Future<void> main(List<String> args) async {
         rustWorkspace: rustWorkspace,
         outputDirectory: input.outputDirectory,
         environment: environment,
+        targetTriple: targetTriple,
         result: result,
       );
     }
@@ -115,6 +139,7 @@ Future<void> main(List<String> args) async {
     await builtFile.copy(bundledLibrary.toFilePath());
 
     output.dependencies.addAll(<Uri>[
+      ?resolvedPackageConfig,
       ...pluginPlan.dependencies,
       input.packageRoot.resolve('hook/plugin_link_plan.dart'),
       input.packageRoot.resolve('hook/plugin_plan_helpers.dart'),
@@ -137,6 +162,7 @@ Never _throwRustBuildFailure({
   required Uri rustWorkspace,
   required Uri outputDirectory,
   required Map<String, String> environment,
+  required String? targetTriple,
   required ProcessResult result,
 }) {
   final File logFile = File.fromUri(
@@ -159,6 +185,8 @@ stdout:
 ${result.stdout}
 stderr:
 ${result.stderr}
+
+${pixaRustPrerequisiteMessage(targetTriple: targetTriple)}
 ''';
   logFile.writeAsStringSync(diagnostic);
   stderr.writeln('Pixa Rust build failed. Full log: ${logFile.path}');
@@ -195,61 +223,14 @@ Set<String> _cargoFeatures(PixaRuntimePluginBuildPlan pluginPlan) {
 
 void _configureNativeRoiEnvironment(
   Map<String, String> environment,
-  PixaRuntimePluginBuildPlan pluginPlan, {
-  required String? targetTriple,
-  required Uri outputDirectory,
-}) {
+  PixaRuntimePluginBuildPlan pluginPlan,
+) {
   final Set<String> features = _cargoFeatures(pluginPlan);
   if (features.contains('jpeg-turbo-roi')) {
     environment['TURBOJPEG_SOURCE'] = 'vendor';
     environment['TURBOJPEG_STATIC'] = '1';
     _configureWindowsNasmEnvironment(environment);
-    _configureWindowsTurboJpegCmakeEnvironment(
-      environment,
-      targetTriple,
-      outputDirectory,
-    );
   }
-}
-
-void _configureWindowsTurboJpegCmakeEnvironment(
-  Map<String, String> environment,
-  String? targetTriple,
-  Uri outputDirectory,
-) {
-  final String? processor = pixaWindowsTurboJpegCmakeSystemProcessor(
-    targetTriple,
-  );
-  if (processor == null || targetTriple == null) {
-    return;
-  }
-  final File toolchain = File.fromUri(
-    outputDirectory.resolve('pixa_windows_turbojpeg_toolchain.cmake'),
-  );
-  toolchain.parent.createSync(recursive: true);
-  toolchain.writeAsStringSync(pixaWindowsTurboJpegCmakeToolchain(processor));
-  _setTargetCmakeEnvironment(
-    environment,
-    targetTriple,
-    'CMAKE_TOOLCHAIN_FILE',
-    toolchain.path,
-  );
-}
-
-String? pixaWindowsTurboJpegCmakeSystemProcessor(String? targetTriple) {
-  return switch (targetTriple) {
-    'x86_64-pc-windows-msvc' => 'AMD64',
-    'i686-pc-windows-msvc' => 'X86',
-    'aarch64-pc-windows-msvc' => 'ARM64',
-    _ => null,
-  };
-}
-
-String pixaWindowsTurboJpegCmakeToolchain(String processor) {
-  return '''
-set(CMAKE_SYSTEM_NAME Windows)
-set(CMAKE_SYSTEM_PROCESSOR "$processor" CACHE STRING "Pixa target processor for libjpeg-turbo" FORCE)
-''';
 }
 
 void _configureWindowsNasmEnvironment(Map<String, String> environment) {
@@ -311,7 +292,13 @@ void _clearStaleTurboJpegCmakeCaches(
       }
       cmakeBuild.deleteSync(recursive: true);
     } else if (targetTriple.contains('windows-msvc')) {
-      if (cacheText.contains('pixa_windows_turbojpeg_toolchain.cmake')) {
+      final bool usedObsoleteToolchain = cacheText.contains(
+        'pixa_windows_turbojpeg_toolchain.cmake',
+      );
+      final bool compilerDiscoveryFailed = RegExp(
+        r'CMAKE_C_COMPILER(?::FILEPATH)?=.*(?:NOTFOUND|NOT-FOUND)',
+      ).hasMatch(cacheText);
+      if (!usedObsoleteToolchain && !compilerDiscoveryFailed) {
         continue;
       }
       cmakeBuild.deleteSync(recursive: true);
@@ -382,6 +369,146 @@ String _cargoExecutable(Map<String, String> environment) {
   return 'cargo';
 }
 
+String _rustcExecutable(Map<String, String> environment) {
+  final String? configured = environment['RUSTC'];
+  if (configured != null && configured.trim().isNotEmpty) {
+    return configured;
+  }
+  final String? home = environment['HOME'];
+  if (home != null && home.isNotEmpty) {
+    final File rustupRustc = File('$home/.cargo/bin/rustc');
+    if (rustupRustc.existsSync()) {
+      return rustupRustc.path;
+    }
+  }
+  return 'rustc';
+}
+
+/// Validates Cargo and the minimum supported Rust compiler before building.
+Future<void> pixaValidateRustToolchain({
+  required String cargo,
+  required String rustc,
+  required Uri rustWorkspace,
+  required Map<String, String> environment,
+  required String? targetTriple,
+  PixaHookProcessRunner? runProcess,
+}) async {
+  final PixaHookProcessRunner runner = runProcess ?? _runHookProcess;
+  final ProcessResult cargoResult = await _probeRustTool(
+    runner,
+    cargo,
+    const <String>['--version'],
+    rustWorkspace: rustWorkspace,
+    environment: environment,
+    targetTriple: targetTriple,
+  );
+  if (cargoResult.stdout.toString().trim().isEmpty) {
+    throw StateError(
+      '${pixaRustPrerequisiteMessage(targetTriple: targetTriple)}\n'
+      'Cargo returned no version information.',
+    );
+  }
+
+  final ProcessResult rustcResult = await _probeRustTool(
+    runner,
+    rustc,
+    const <String>['--version'],
+    rustWorkspace: rustWorkspace,
+    environment: environment,
+    targetTriple: targetTriple,
+  );
+  final String rustcVersion = rustcResult.stdout.toString().trim();
+  final RegExpMatch? match = RegExp(
+    r'^rustc\s+(\d+)\.(\d+)\.(\d+)',
+  ).firstMatch(rustcVersion);
+  final int? major = match == null ? null : int.tryParse(match.group(1)!);
+  final int? minor = match == null ? null : int.tryParse(match.group(2)!);
+  if (major == null ||
+      minor == null ||
+      major < 1 ||
+      (major == 1 && minor < 89)) {
+    throw StateError(
+      '${pixaRustPrerequisiteMessage(targetTriple: targetTriple)}\n'
+      'Detected compiler: ${rustcVersion.isEmpty ? 'unknown' : rustcVersion}',
+    );
+  }
+}
+
+Future<ProcessResult> _probeRustTool(
+  PixaHookProcessRunner runner,
+  String executable,
+  List<String> arguments, {
+  required Uri rustWorkspace,
+  required Map<String, String> environment,
+  required String? targetTriple,
+}) async {
+  ProcessResult result;
+  try {
+    result = await runner(
+      executable,
+      arguments,
+      workingDirectory: rustWorkspace.toFilePath(),
+      environment: environment,
+    );
+  } on ProcessException catch (error) {
+    throw StateError(
+      '${pixaRustPrerequisiteMessage(targetTriple: targetTriple)}\n$error',
+    );
+  }
+  if (result.exitCode != 0) {
+    final String detail = <String>[
+      result.stderr.toString().trim(),
+      result.stdout.toString().trim(),
+    ].where((String value) => value.isNotEmpty).join('\n');
+    throw StateError(
+      '${pixaRustPrerequisiteMessage(targetTriple: targetTriple)}'
+      '${detail.isEmpty ? '' : '\n$detail'}',
+    );
+  }
+  return result;
+}
+
+Future<ProcessResult> _runHookProcess(
+  String executable,
+  List<String> arguments, {
+  String? workingDirectory,
+  Map<String, String>? environment,
+}) {
+  return Process.run(
+    executable,
+    arguments,
+    workingDirectory: workingDirectory,
+    environment: environment,
+  );
+}
+
+/// Actionable install instructions emitted by Native Assets build failures.
+String pixaRustPrerequisiteMessage({required String? targetTriple}) {
+  final String platformPrerequisites = switch (targetTriple) {
+    final String target when target.contains('windows-msvc') =>
+      '''
+Install Visual Studio with the Desktop development with C++ workload and CMake tools.
+JPEG Turbo ROI builds also require NASM on PATH.''',
+    final String target when target.contains('android') =>
+      '''
+Install the Android NDK plus SDK CMake and Ninja, then set ANDROID_NDK_HOME.''',
+    final String target when target.contains('apple') =>
+      'Install Xcode and select its command-line tools with xcode-select.',
+    final String target when target.contains('linux') =>
+      '''
+Install a C/C++ compiler, CMake, Ninja, pkg-config, and NASM for native ROI builds.''',
+    _ => '',
+  };
+  return '''
+Pixa Native Assets requires Rust 1.89 or newer and pins toolchain $pixaRustToolchainVersion.
+Install Rust with rustup, then run:
+  rustup toolchain install $pixaRustToolchainVersion --profile minimal
+${targetTriple == null ? '' : '  rustup target add $targetTriple --toolchain $pixaRustToolchainVersion\n'}Ensure cargo and rustc from rustup are available on PATH.
+$platformPrerequisites
+'''
+      .trimRight();
+}
+
 void _configureRustToolchainEnvironment(Map<String, String> environment) {
   final String? home = environment['HOME'];
   if (home == null || home.isEmpty) {
@@ -442,6 +569,7 @@ Uri pixaCargoTargetDirectory(Uri outputDirectory) {
 
 List<Uri> _rustBuildInputs(Uri rustWorkspace) {
   final Set<Uri> inputs = <Uri>{
+    rustWorkspace.resolve('rust-toolchain.toml'),
     rustWorkspace.resolve('Cargo.toml'),
     rustWorkspace.resolve('Cargo.lock'),
     rustWorkspace.resolve('pixa_core/Cargo.toml'),

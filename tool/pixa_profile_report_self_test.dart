@@ -46,6 +46,32 @@ Future<void> main() async {
     accepted.supplementalFailures.isEmpty,
     'complete live-network evidence should pass its supplemental checks',
   );
+  final profile.PixaProfileEvaluation missingRequiredLive = profile
+      .evaluateProfileRun(
+        _run(
+          refreshRateHz: 120,
+          buildP99Micros: 7200,
+          rasterP99Micros: 7600,
+          overBudgetFrames: 1,
+          rssSamples: <int>[
+            208 * _mib,
+            218 * _mib,
+            225 * _mib,
+            228 * _mib,
+            229 * _mib,
+            229 * _mib,
+          ],
+        ),
+        baseline: baseline,
+        requireLiveNetwork: true,
+      );
+  _expect(
+    !missingRequiredLive.releasePassed &&
+        missingRequiredLive.supplementalFailures.any(
+          (String failure) => failure.contains('required'),
+        ),
+    'the release gate must reject missing Picsum evidence when required',
+  );
   _expect(
     accepted.markdown.contains('120.00 Hz'),
     'report should identify the measured refresh rate',
@@ -89,6 +115,10 @@ Future<void> main() async {
   _expect(
     accepted.markdown.contains('loopback-mixed-v1'),
     'report should identify the deterministic mixed corpus',
+  );
+  _expect(
+    accepted.markdown.contains('Peak processed memory'),
+    'report should expose processed variant retention separately',
   );
   _expect(
     accepted.markdown.contains('image/bmp'),
@@ -259,6 +289,38 @@ Future<void> main() async {
   _expect(
     invalidLive.supplementalFailures.length >= 3,
     'live evidence must validate indices, timed bytes, latency, and digest',
+  );
+
+  final Map<String, Object?> repeatedDimensionsLive = _liveNetworkEvidence();
+  final List<Object?> repeatedDimensionSamples =
+      repeatedDimensionsLive['samples']! as List<Object?>;
+  for (var index = 0; index < repeatedDimensionSamples.length; index += 1) {
+    final Map<String, Object?> sample =
+        repeatedDimensionSamples[index]! as Map<String, Object?>;
+    final ({int width, int height}) size =
+        _legacyLiveSizes[index % _legacyLiveSizes.length];
+    sample
+      ..['width'] = size.width
+      ..['height'] = size.height;
+  }
+  final profile.PixaProfileEvaluation repeatedDimensions = profile
+      .evaluateProfileRun(
+        _run(
+          refreshRateHz: 120,
+          buildP99Micros: 7000,
+          rasterP99Micros: 7000,
+          overBudgetFrames: 0,
+          rssSamples: <int>[220 * _mib, 221 * _mib, 221 * _mib, 221 * _mib],
+          liveNetwork: repeatedDimensionsLive,
+        ),
+        baseline: baseline,
+      );
+  _expect(
+    !repeatedDimensions.releasePassed &&
+        repeatedDimensions.supplementalFailures.any(
+          (String value) => value.contains('240 unique dimensions'),
+        ),
+    'live evidence must reject a small repeated dimension table',
   );
 
   final Map<String, Object?> fixedPayloadLive = _liveNetworkEvidence();
@@ -487,6 +549,26 @@ Future<void> main() async {
           (String value) => value.contains('sample 1'),
         ),
     'every plateau sample must be captured after pipeline work drains',
+  );
+
+  final Map<String, Object?> inconsistentMemoryAccounting = _run(
+    refreshRateHz: 120,
+    buildP99Micros: 7000,
+    rasterP99Micros: 7000,
+    overBudgetFrames: 0,
+    rssSamples: <int>[220 * _mib, 221 * _mib, 221 * _mib, 221 * _mib],
+  );
+  ((inconsistentMemoryAccounting['memorySamples']! as List<Object?>).first!
+          as Map<String, Object?>)['processedMemoryBytes'] =
+      9 * _mib;
+  final profile.PixaProfileEvaluation inconsistentMemoryEvaluation = profile
+      .evaluateProfileRun(inconsistentMemoryAccounting, baseline: baseline);
+  _expect(
+    !inconsistentMemoryEvaluation.passed &&
+        inconsistentMemoryEvaluation.failures.any(
+          (String value) => value.contains('memory accounting'),
+        ),
+    'the verifier must reject incomplete Rust cache byte accounting',
   );
 
   final Map<String, Object?> growingRegistry = _run(
@@ -760,7 +842,11 @@ Map<String, Object?> _run({
         for (var index = 0; index < 4; index += 1)
           <String, Object?>{
             'cycle': index,
-            'encodedMemoryBytes': 40 * _mib,
+            'runtimeMemoryBytes': 40 * _mib,
+            'encodedMemoryBytes': 32 * _mib,
+            'processedMemoryBytes': 8 * _mib,
+            'encodedMemoryEntries': 192,
+            'processedMemoryEntries': 64,
             'decodedCacheEntries': 256,
             'decodedRegistryEntries': 256,
             'queueDepth': 0,
@@ -834,7 +920,11 @@ Map<String, Object?> _run({
         <String, Object?>{
           'cycle': index,
           'rssBytes': rssSamples[index],
-          'encodedMemoryBytes': 40 * _mib,
+          'runtimeMemoryBytes': 40 * _mib,
+          'encodedMemoryBytes': 32 * _mib,
+          'processedMemoryBytes': 8 * _mib,
+          'encodedMemoryEntries': 192,
+          'processedMemoryEntries': 64,
           'decodedCacheBytes': 56 * _mib,
           'decodedCacheEntries': 256,
           'decodedLiveEntries': 12,
@@ -900,8 +990,8 @@ Map<String, Object?> _liveNetworkEvidence({int sampleCount = 240}) {
         <String, Object?>{
           'index': index,
           'contentSeed': 20260710000 + index,
-          'width': _liveSizes[index % _liveSizes.length].width,
-          'height': _liveSizes[index % _liveSizes.length].height,
+          'width': _liveSizeAt(index).width,
+          'height': _liveSizeAt(index).height,
           'requested': true,
           'observed': true,
           'timedPixaBytes': (64 + index) * 1024,
@@ -928,18 +1018,26 @@ Map<String, Object?> _liveNetworkEvidence({int sampleCount = 240}) {
   };
 }
 
-const List<({int width, int height})> _liveSizes = <({int width, int height})>[
-  (width: 96, height: 96),
-  (width: 128, height: 192),
-  (width: 192, height: 128),
-  (width: 240, height: 320),
-  (width: 320, height: 240),
-  (width: 320, height: 320),
-  (width: 480, height: 270),
-  (width: 270, height: 480),
-  (width: 640, height: 480),
-  (width: 1024, height: 576),
-];
+({int width, int height}) _liveSizeAt(int index) {
+  if (index.isEven) {
+    return (width: 96 + index, height: 1024 - index);
+  }
+  return (width: 1024 - index, height: 96 + index);
+}
+
+const List<({int width, int height})> _legacyLiveSizes =
+    <({int width, int height})>[
+      (width: 96, height: 96),
+      (width: 128, height: 192),
+      (width: 192, height: 128),
+      (width: 240, height: 320),
+      (width: 320, height: 240),
+      (width: 320, height: 320),
+      (width: 480, height: 270),
+      (width: 270, height: 480),
+      (width: 640, height: 480),
+      (width: 1024, height: 576),
+    ];
 
 void _expect(bool condition, String message) {
   if (!condition) {

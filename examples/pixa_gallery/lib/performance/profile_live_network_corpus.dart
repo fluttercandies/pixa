@@ -33,7 +33,7 @@ final class ProfileLiveNetworkSample {
 /// Reproducible, size-varied Picsum corpus for supplemental live-network runs.
 final class ProfileLiveNetworkCorpus {
   const ProfileLiveNetworkCorpus({required this.seed, required this.itemCount})
-    : assert(itemCount > 0);
+    : assert(itemCount > 0 && itemCount <= _dimensionDomain);
 
   final int seed;
   final int itemCount;
@@ -48,33 +48,33 @@ final class ProfileLiveNetworkCorpus {
     if (index < 0 || index >= itemCount) {
       throw RangeError.index(index, this, 'index', null, itemCount);
     }
-    final int sizeIndex = (index * 7 + seed.abs()) % _sizes.length;
-    final ({int width, int height}) size = _sizes[sizeIndex];
+    final int dimensionIndex =
+        (_seedOffset(seed) + index * _dimensionPermutationStep) %
+        _dimensionDomain;
+    final int width = _minimumDimension + dimensionIndex % _dimensionSpan;
+    final int height = _minimumDimension + dimensionIndex ~/ _dimensionSpan;
     final int contentSeed = seed * 1000000 + index;
     final Uri uri = Uri.https(
       'picsum.photos',
       '/seed/pixa-$seed-${contentSeed.toRadixString(16)}'
-          '/${size.width}/${size.height}',
+          '/$width/$height',
     );
     return ProfileLiveNetworkSample(
       index: index,
       contentSeed: contentSeed,
-      width: size.width,
-      height: size.height,
+      width: width,
+      height: height,
       uri: uri,
     );
   }
 }
 
-const List<({int width, int height})> _sizes = <({int width, int height})>[
-  (width: 96, height: 96),
-  (width: 128, height: 192),
-  (width: 192, height: 128),
-  (width: 240, height: 320),
-  (width: 320, height: 240),
-  (width: 320, height: 320),
-  (width: 480, height: 270),
-  (width: 270, height: 480),
-  (width: 640, height: 480),
-  (width: 1024, height: 576),
-];
+const int _minimumDimension = 96;
+const int _maximumDimension = 1024;
+const int _dimensionSpan = _maximumDimension - _minimumDimension + 1;
+const int _dimensionDomain = _dimensionSpan * _dimensionSpan;
+const int _dimensionPermutationStep = 48271;
+
+int _seedOffset(int seed) {
+  return (seed * 1103515245 + 12345) % _dimensionDomain;
+}

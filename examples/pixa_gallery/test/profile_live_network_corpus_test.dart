@@ -25,7 +25,7 @@ void main() {
       firstSamples
           .map((ProfileLiveNetworkSample sample) => sample.size)
           .toSet(),
-      hasLength(greaterThanOrEqualTo(8)),
+      hasLength(240),
     );
     expect(
       firstSamples.any(
@@ -48,27 +48,26 @@ void main() {
     }
   });
 
-  test(
-    'changing the seed changes content identity without changing coverage',
-    () {
-      const ProfileLiveNetworkCorpus first = ProfileLiveNetworkCorpus(
-        seed: 20260710,
-        itemCount: 240,
-      );
-      const ProfileLiveNetworkCorpus second = ProfileLiveNetworkCorpus(
-        seed: 20260711,
-        itemCount: 240,
-      );
+  test('changing the seed changes content and dimension sequences', () {
+    const ProfileLiveNetworkCorpus first = ProfileLiveNetworkCorpus(
+      seed: 20260710,
+      itemCount: 240,
+    );
+    const ProfileLiveNetworkCorpus second = ProfileLiveNetworkCorpus(
+      seed: 20260711,
+      itemCount: 240,
+    );
 
-      expect(first.samples.first.uri, isNot(second.samples.first.uri));
-      expect(
-        first.samples
-            .map((ProfileLiveNetworkSample sample) => sample.size)
-            .toSet(),
+    expect(first.samples.first.uri, isNot(second.samples.first.uri));
+    expect(
+      first.samples
+          .map((ProfileLiveNetworkSample sample) => sample.size)
+          .toSet(),
+      isNot(
         second.samples
             .map((ProfileLiveNetworkSample sample) => sample.size)
             .toSet(),
-      );
-    },
-  );
+      ),
+    );
+  });
 }

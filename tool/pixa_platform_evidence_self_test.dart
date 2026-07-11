@@ -12,6 +12,7 @@ Future<void> main() async {
     await _acceptsNativeModuleEvidence(root, temp);
     await _acceptsDesktopNativeModuleEvidence(root, temp);
     await _acceptsHostedCiNativeModuleEvidence(root, temp);
+    await _rejectsMismatchedGitCommit(root, temp);
     await _rejectsMissingRequiredChecks(root, temp);
     await _rejectsMissingNativeModuleCheck(root, temp);
     stdout.writeln('Pixa platform evidence self-test passed.');
@@ -19,6 +20,28 @@ Future<void> main() async {
     if (temp.existsSync()) {
       temp.deleteSync(recursive: true);
     }
+  }
+}
+
+Future<void> _rejectsMismatchedGitCommit(Directory root, Directory temp) async {
+  final Directory reports = Directory('${temp.path}/git-commit')..createSync();
+  _writeReport(
+    reports,
+    'macos.json',
+    platform: 'macos',
+    deviceKind: 'desktop',
+    connection: 'local',
+    signing: 'not-applicable',
+    gitCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  );
+  final ProcessResult result = await _runVerifier(root, reports, <String>[
+    '--require-platforms=macos',
+    '--require-git-commit=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  ]);
+  _expectExit(result, 1, 'evidence from another commit should fail');
+  final String output = '${result.stdout}\n${result.stderr}';
+  if (!output.contains('git commit')) {
+    throw StateError('Expected git commit mismatch, got:\n$output');
   }
 }
 
@@ -289,6 +312,7 @@ void _writeReport(
   required String connection,
   required String signing,
   String runMode = 'self-test',
+  String gitCommit = '0123456789abcdef0123456789abcdef01234567',
   Iterable<String> checks = _requiredChecks,
   List<Map<String, Object?>> nativeModules = const <Map<String, Object?>>[],
 }) {
@@ -299,6 +323,7 @@ void _writeReport(
         'platform': platform,
         'runnerOs': Platform.operatingSystem,
         'runMode': runMode,
+        'gitCommit': gitCommit,
         'deviceKind': deviceKind,
         'connection': connection,
         'signing': signing,

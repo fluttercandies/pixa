@@ -18,17 +18,27 @@ dependencies:
   pixa: ^1.0.0
 ```
 
-```yaml
-dependencies:
-  pixa:
-    path: ../pixa
+### Native 构建前置条件
+
+Pixa 使用 Flutter Native Assets 编译包内 Rust runtime。构建依赖 Pixa 的应用前先安装
+固定 toolchain：
+
+```bash
+rustup toolchain install 1.89.0 --profile minimal
 ```
+
+跨平台 target 还需要执行 `rustup target add <target> --toolchain 1.89.0` 并安装对应
+platform compiler。Rust、Cargo 或 target 缺失时，Native Assets hook 会输出可直接执行
+的修复命令。Windows JPEG Turbo ROI 构建需要 Visual Studio 的 Desktop development
+with C++ workload 和 NASM。Android 构建需要 Android NDK、SDK CMake 和 Ninja。
 
 ## 快速开始
 
 加载图片前先配置一次：
 
 ```dart
+import 'package:pixa/pixa.dart';
+
 await Pixa.configure(const PixaConfig(
   memoryCacheBytes: 96 * 1024 * 1024,
   diskCacheBytes: 512 * 1024 * 1024,
@@ -40,6 +50,9 @@ await Pixa.configure(const PixaConfig(
 普通图片 widget 使用 `PixaImage.network`：
 
 ```dart
+import 'package:flutter/material.dart';
+import 'package:pixa/pixa.dart';
+
 PixaImage.network(
   imageUrl,
   width: 96,
@@ -58,6 +71,9 @@ PixaImage.network(
 当 Flutter API 需要 `ImageProvider` 时使用 `PixaProvider`：
 
 ```dart
+import 'package:flutter/material.dart';
+import 'package:pixa/pixa.dart';
+
 Image(
   image: PixaProvider.network(imageUrl, targetWidth: 300),
   fit: BoxFit.cover,
@@ -69,6 +85,8 @@ Image(
 `PixaRequest` 是 widget、provider、prefetch 和底层 pipeline 共用的稳定模型：
 
 ```dart
+import 'package:pixa/pixa.dart';
+
 final request = PixaRequest.network(
   imageUrl,
   headers: const {'Accept': 'image/webp,image/*,*/*'},
@@ -104,6 +122,8 @@ dominant color 和小型 palette，用于 placeholder、surface 或诊断。
 图库类应用建议显式配置预算：
 
 ```dart
+import 'package:pixa/pixa.dart';
+
 await Pixa.configure(const PixaConfig(
   memoryCacheBytes: 160 * 1024 * 1024,
   diskCacheBytes: 1024 * 1024 * 1024,
@@ -154,6 +174,32 @@ grayscale、invert、brighten、contrast 和 hue rotate。处理结果写入 pro
 variant cache，并复用同一个 origin cache、scheduler、resource limits 和 display
 selector。
 
+大图 ROI 支持范围会刻意小于通用解码格式矩阵：
+
+- 静态、非交错 PNG 采用顺序逐行解码，同时限制完整 decoded row 和请求区域；APNG
+  与交错 PNG 的 tile 请求返回 typed unsupported error。
+- Farbfeld 与 WBMP 只读取请求覆盖的 byte/bit rows。
+- 可选 Native Assets processor 为 single-scan lossy JPEG 和不透明 lossy VP8 WebP
+  提供 decoder-native crop + scaling；JPEG 会在 native crop 前映射 EXIF orientation。
+  progressive JPEG、VP8L 和带 alpha 的 WebP 只有在完整 source 隐藏工作集也满足
+  request limits 时才允许处理；lossless JPEG 与 animated WebP 不声明 ROI。
+- BMP、TIFF、GIF、ICO、PNM、QOI、TGA、DDS、HDR、PCX、SGI、XBM 和 XPM 不声明
+  ROI。tile 请求只能走保守预算约束的 full-decode fallback，否则在分配前失败。
+
+只添加版本依赖即可使用 Pixa，不要求 hook 配置。需要可选 JPEG/WebP native ROI
+processor 的应用，可以在应用或 workspace root 的 `pubspec.yaml` 中同时启用：
+
+```yaml
+hooks:
+  user_defines:
+    pixa:
+      enable_native_roi: true
+```
+
+只需要单个 processor 时可分别使用 `enable_jpeg_turbo_roi` 或
+`enable_webp_roi`。实际可用性会出现在 runtime plugin capabilities 中，应用无需根据
+平台猜测 native support。
+
 ## 隐私与资源限制
 
 Pixa 会脱敏敏感 URL query、authorization header、cookie、signed URL material、文件
@@ -184,6 +230,8 @@ cancellation、progress 和 observer 模型。
 纯 Dart 插件只在 request 显式 opt-in 时启用：
 
 ```dart
+import 'package:pixa/pixa.dart';
+
 final request = PixaRequest.network(
   imageUrl,
   pluginExecutionPolicy: const PixaPluginExecutionPolicy.runtimeFirstWithDart(),
@@ -202,7 +250,9 @@ processor route、cache namespace、execution lane 和 platform capability matri
 Pixa 会在 `Pixa.configure` 期间只选择一个可用 candidate，在
 `adaptivePluginIntegrations` 中记录结果，并让未选 route 保持不可见。
 
-插件作者请参考 [PLUGIN_AUTHORING.md](PLUGIN_AUTHORING.md)。pub.dev package cannot auto-link runtime host code into Pixa's shared runtime just by being added as a transitive dependency.
+插件作者请参考 [PLUGIN_AUTHORING.md](PLUGIN_AUTHORING.md)。Pixa Native Assets hook
+会从已解析 package graph 自动发现并验证 `pixa_plugin.json`，再把 host module
+链接到唯一的 shared runtime。
 
 ## 官方插件包
 
@@ -210,13 +260,17 @@ Pixa 会在 `Pixa.configure` 期间只选择一个可用 candidate，在
 runtime-only fetcher 路径进入 Pixa，凭据不会写入 locator 或 cache label。
 
 Video-frame 抽帧也走同一套插件边界。Pixa core 只暴露 `PixaRequest.videoFrame`、
-`PixaImage.videoFrame`、backend descriptor 和 typed unsupported failure，但不内置默认 video-frame backend。官方 MJPEG backend 位于 `pixa_video_frame_mjpeg`；应用必须先通过 `plugin_manifest` 或 `plugin_manifest_directory` 显式启用该包的 `pixa_plugin.json`，再注册 `PixaMjpegVideoFramePlugin(hostRuntimeAvailable: true)`。
+`PixaImage.videoFrame`、backend descriptor 和 typed unsupported failure，但不内置默认 video-frame backend。官方 MJPEG backend 位于 `pixa_video_frame_mjpeg`；添加依赖后 Native Assets hook 会自动发现该包的 `pixa_plugin.json`，应用只需注册 `PixaMjpegVideoFramePlugin()`。
 
 ## 诊断
 
 提交 issue 或排查用户问题时，使用脱敏诊断：
 
 ```dart
+import 'package:flutter/foundation.dart';
+import 'package:pixa/pixa.dart';
+import 'package:pixa/pixa_debug.dart';
+
 final snapshot = PixaDebugInspector.snapshot();
 debugPrint(snapshot.toDiagnosticString());
 

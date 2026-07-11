@@ -48,6 +48,21 @@ final class PixaRedactor {
         lower.contains('signature');
   }
 
+  /// Returns true when a structured field name conventionally carries secrets.
+  static bool isSensitiveFieldName(String name) {
+    final String normalized = name.trim().toLowerCase().replaceAll(
+      RegExp('[^a-z0-9]'),
+      '',
+    );
+    return isSensitiveHeader(name) ||
+        isSensitiveQuery(name) ||
+        normalized == 'password' ||
+        normalized == 'passwd' ||
+        normalized == 'apikey' ||
+        normalized.contains('credential') ||
+        normalized.contains('secret');
+  }
+
   /// Returns query material safe to include in raw cache-key input.
   static Map<String, Object?> redactedQueryMaterial(Uri uri) {
     if (!uri.hasQuery) {
@@ -149,38 +164,47 @@ final class PixaRedactor {
           ? '<redacted>'
           : entry.value;
     }
-    return redacted;
+    return Map<String, String>.unmodifiable(redacted);
   }
 
   /// Redacts sensitive query parameters from a URI.
   static Uri redactUri(Uri uri) {
-    final Uri redactedUserInfo = uri.userInfo.isEmpty
+    Uri redacted = uri.userInfo.isEmpty
         ? uri
         : uri.replace(userInfo: '<redacted>');
-    if (!redactedUserInfo.hasQuery) {
-      return redactedUserInfo;
+    if (redacted.hasQuery) {
+      final Map<String, List<String>> query = <String, List<String>>{};
+      for (final MapEntry<String, List<String>> entry
+          in redacted.queryParametersAll.entries) {
+        query[entry.key] = isSensitiveQuery(entry.key)
+            ? <String>['<redacted>']
+            : entry.value;
+      }
+      redacted = redacted.replace(
+        queryParameters: query.map((String key, List<String> values) {
+          return MapEntry<String, String>(key, values.join(','));
+        }),
+      );
     }
-
-    final Map<String, List<String>> query = <String, List<String>>{};
-    for (final MapEntry<String, List<String>> entry
-        in redactedUserInfo.queryParametersAll.entries) {
-      query[entry.key] = isSensitiveQuery(entry.key)
-          ? <String>['<redacted>']
-          : entry.value;
+    if (redacted.fragment.isNotEmpty) {
+      redacted = redacted.replace(fragment: '<redacted>');
     }
-
-    return redactedUserInfo.replace(
-      queryParameters: query.map((String key, List<String> values) {
-        return MapEntry<String, String>(key, values.join(','));
-      }),
-    );
+    return redacted;
   }
 
   /// Removes common secret material from arbitrary text.
   static String redactText(String text) {
-    final String keyValueRedacted = text.replaceAllMapped(
+    final String uriRedacted = text.replaceAllMapped(
+      RegExp(r'https?://[^\s<>()]+', caseSensitive: false),
+      (Match match) {
+        final String value = match.group(0)!;
+        final Uri? uri = Uri.tryParse(value);
+        return uri == null ? value : redactUri(uri).toString();
+      },
+    );
+    final String keyValueRedacted = uriRedacted.replaceAllMapped(
       RegExp(
-        r'\b(authorization|cookie|secret|token|signature|x-pixa-s3-secret-access-key|x-amz-security-token)=((?:bearer\s+)?[^&\s]+)',
+        r'\b(authorization|cookie|password|passwd|secret|token|access[_-]?token|signature|x-amz-signature|x-pixa-s3-secret-access-key|x-amz-security-token)\b\s*[:=]\s*((?:bearer\s+)?[^&\s,;}\]]+)',
         caseSensitive: false,
       ),
       (Match match) => '${match.group(1)}=<redacted>',

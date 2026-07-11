@@ -49,9 +49,12 @@ final class PixaRuntimeBinaryReader {
     return ByteData.sublistView(bytes).getInt64(0, Endian.little);
   }
 
-  /// Reads a length-prefixed UTF-8 string.
-  String readString() {
+  /// Reads a length-prefixed UTF-8 string with an optional byte bound.
+  String readString({int? maxByteLength}) {
     final int length = readUint32();
+    if (maxByteLength != null && length > maxByteLength) {
+      throw const FormatException('Runtime binary string exceeds byte limit.');
+    }
     final Uint8List bytes = _take(length);
     return utf8.decode(bytes);
   }

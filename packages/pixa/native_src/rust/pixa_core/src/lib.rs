@@ -3,6 +3,7 @@
 use sha2::{Digest, Sha256};
 
 pub mod analysis;
+mod bounded_writer;
 pub mod cache;
 pub mod cancel;
 pub mod error;
@@ -17,6 +18,7 @@ mod http_transport;
 mod s3_fetcher;
 
 pub use analysis::{image_analysis, ImageAnalysis};
+pub use bounded_writer::BoundedBytesWriter;
 pub use error::{RuntimeError, RuntimeResult};
 pub use image_format::{
     runtime_image_format_capabilities, RuntimeImageFormat, RuntimeImageFormatCapability,
@@ -34,7 +36,7 @@ pub use pipeline::{
     memory_unpin, LoadOutcome, RuntimeCacheStats, RuntimePipelineConfig, RuntimeRgbaImage,
 };
 pub use plugin_host::{
-    plugin_modules, plugin_registry_stats, register_plugin_module,
+    plugin_modules, plugin_registry_diagnostics, plugin_registry_stats, register_plugin_module,
     register_plugin_module_with_executor, runtime_cache_store_clear_namespace,
     runtime_cache_store_executor_for_namespace, runtime_cache_store_for_namespace,
     runtime_cache_store_read, runtime_cache_store_remove, runtime_cache_store_write,
@@ -111,6 +113,7 @@ impl RuntimeCapabilities {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn fnv_hash_is_stable() {
@@ -165,6 +168,19 @@ mod tests {
         assert_eq!(analysis.dominant_argb, 0xffff0000);
         assert!(analysis.palette_argb.contains(&0xffff0000));
         assert!(analysis.palette_argb.contains(&0xff0000ff));
+    }
+
+    #[test]
+    fn bounded_bytes_writer_rejects_growth_past_limit() {
+        let mut writer = BoundedBytesWriter::new(4);
+        writer.write_all(&[1, 2, 3, 4]).expect("limit should fit");
+
+        let error = writer
+            .write_all(&[5])
+            .expect_err("writer must reject bytes beyond its limit");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::StorageFull);
+        assert_eq!(writer.as_slice(), [1, 2, 3, 4]);
     }
 
     fn pseudo_random_bytes(seed: &mut u64, length: usize) -> Vec<u8> {
