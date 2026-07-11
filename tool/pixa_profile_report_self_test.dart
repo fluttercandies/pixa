@@ -3,6 +3,25 @@ import 'dart:io';
 import 'pixa_profile_report.dart' as profile;
 
 Future<void> main() async {
+  _expect(
+    profile.profileGitTreeStateFromPorcelain('''
+?? .third/
+?? AGENTS.md
+?? GOALS.md
+?? docs/
+?? REF.md
+''') ==
+        'clean',
+    'policy-local planning files must not block profile reports',
+  );
+  _expect(
+    profile.profileGitTreeStateFromPorcelain('''
+?? GOALS.md
+?? packages/pixa/lib/untracked.dart
+''') ==
+        'dirty',
+    'untracked source files must keep profile reports dirty',
+  );
   final Map<String, Object?> baseline = _run(
     refreshRateHz: 120,
     buildP99Micros: 7800,

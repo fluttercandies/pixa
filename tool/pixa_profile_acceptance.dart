@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 
 import 'pixa_native_assets_log_check.dart' show nativeAssetsEvidencePrefix;
+import 'src/pixa_profile_git_state.dart';
 
 const String _profileRustToolchainVersion = '1.89.0';
 const String _macOSProfileHostProbePath =
@@ -532,27 +533,7 @@ Future<({String commit, String treeState})> _gitIdentity(Directory root) async {
 
 /// Classifies Git porcelain output while honoring repository-local planning files.
 String profileGitTreeStateFromPorcelain(String porcelain) {
-  final Iterable<String> relevant = const LineSplitter()
-      .convert(porcelain)
-      .where((String line) => line.isNotEmpty)
-      .where((String line) => !_isPolicyLocalUntrackedPath(line));
-  return relevant.isEmpty ? 'clean' : 'dirty';
-}
-
-bool _isPolicyLocalUntrackedPath(String line) {
-  if (!line.startsWith('?? ')) {
-    return false;
-  }
-  final String path = line.substring(3);
-  return path == 'AGENTS.md' ||
-      path == 'GOALS.md' ||
-      path == 'REF.md' ||
-      path == '.third/' ||
-      path.startsWith('.third/') ||
-      path == '.thirdd/' ||
-      path.startsWith('.thirdd/') ||
-      path == 'docs/' ||
-      path.startsWith('docs/');
+  return classifyPixaProfileGitTreeState(porcelain);
 }
 
 /// Removes stale raw and report artifacts before a new acceptance run.

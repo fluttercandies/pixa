@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'src/pixa_profile_git_state.dart';
+
 part 'src/pixa_profile_report_markdown.dart';
 part 'src/pixa_profile_report_support.dart';
 
@@ -1047,7 +1049,15 @@ Future<({String commit, bool clean})> _currentGitState() async {
     'status',
     '--porcelain',
   ]);
-  return (commit: commit, clean: status.isEmpty);
+  return (
+    commit: commit,
+    clean: profileGitTreeStateFromPorcelain(status) == 'clean',
+  );
+}
+
+/// Classifies Git porcelain output while honoring repository-local policy.
+String profileGitTreeStateFromPorcelain(String porcelain) {
+  return classifyPixaProfileGitTreeState(porcelain);
 }
 
 Future<String> _gitOutput(List<String> arguments) async {
