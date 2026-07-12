@@ -69,7 +69,7 @@ jobs:
         shell: bash
         run: cargo install cargo-audit --version 0.22.2 --locked
       - name: Install Melos
-        run: dart pub global activate melos 8.2.0
+        run: dart pub global activate melos 8.2.1
       - name: Add Pub cache bin
         shell: bash
         run: |
