@@ -653,19 +653,22 @@ void _configureAppleCompileEnvironment(
   } else {
     return;
   }
+  final String hostSdkRoot = _xcrun(<String>[
+    '--sdk',
+    'macosx',
+    '--show-sdk-path',
+  ]);
   final String sdkRoot = _xcrun(<String>['--sdk', sdk, '--show-sdk-path']);
   final String clang = _xcrun(<String>['--sdk', sdk, '--find', 'clang']);
   final String ar = _xcrun(<String>['--sdk', sdk, '--find', 'ar']);
-  final String targetEnv = targetTriple.toUpperCase().replaceAll('-', '_');
-  environment['SDKROOT'] = sdkRoot;
-  environment['CARGO_TARGET_${targetEnv}_LINKER'] = clang;
-  environment['CARGO_TARGET_${targetEnv}_AR'] = ar;
-  _setTargetToolEnvironment(environment, 'CC', targetTriple, clang);
-  _setTargetToolEnvironment(environment, 'AR', targetTriple, ar);
-  _setTargetFlagsEnvironment(environment, 'CFLAGS', targetTriple, <String>[
-    '-isysroot',
-    sdkRoot,
-  ]);
+  pixaConfigureAppleCrossCompileEnvironment(
+    environment,
+    targetTriple: targetTriple,
+    hostSdkRoot: hostSdkRoot,
+    sdkRoot: sdkRoot,
+    clang: clang,
+    ar: ar,
+  );
   if (codeConfig.targetOS == OS.macOS) {
     environment.putIfAbsent(
       'MACOSX_DEPLOYMENT_TARGET',
@@ -677,6 +680,31 @@ void _configureAppleCompileEnvironment(
       () => '${codeConfig.iOS.targetVersion}.0',
     );
   }
+}
+
+/// Configures Apple target tools without leaking its SDK into host builds.
+void pixaConfigureAppleCrossCompileEnvironment(
+  Map<String, String> environment, {
+  required String targetTriple,
+  required String hostSdkRoot,
+  required String sdkRoot,
+  required String clang,
+  required String ar,
+}) {
+  final String targetEnv = targetTriple.toUpperCase().replaceAll('-', '_');
+  environment['SDKROOT'] = hostSdkRoot;
+  environment['CARGO_TARGET_${targetEnv}_LINKER'] = clang;
+  environment['CARGO_TARGET_${targetEnv}_AR'] = ar;
+  _setTargetToolEnvironment(environment, 'CC', targetTriple, clang);
+  _setTargetToolEnvironment(environment, 'AR', targetTriple, ar);
+  _setTargetFlagsEnvironment(environment, 'CFLAGS', targetTriple, <String>[
+    '-isysroot',
+    sdkRoot,
+  ]);
+  _appendTargetRustCodegenOptions(environment, targetTriple, <String>[
+    'link-arg=-isysroot',
+    'link-arg=$sdkRoot',
+  ]);
 }
 
 void _configureCrossCompileEnvironment(

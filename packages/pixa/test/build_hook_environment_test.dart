@@ -23,6 +23,36 @@ void main() {
     );
   });
 
+  test('iOS Cargo environment isolates host build scripts from target SDK', () {
+    final Map<String, String> environment = <String, String>{
+      'SDKROOT': '/Xcode/Platforms/iPhoneSimulator.sdk',
+    };
+
+    pixaConfigureAppleCrossCompileEnvironment(
+      environment,
+      targetTriple: 'aarch64-apple-ios-sim',
+      hostSdkRoot: '/Xcode/Platforms/MacOSX.sdk',
+      sdkRoot: '/Xcode/Platforms/iPhoneSimulator.sdk',
+      clang: '/Xcode/usr/bin/clang',
+      ar: '/Xcode/usr/bin/ar',
+    );
+
+    expect(environment['SDKROOT'], '/Xcode/Platforms/MacOSX.sdk');
+    expect(
+      environment['CARGO_TARGET_AARCH64_APPLE_IOS_SIM_LINKER'],
+      '/Xcode/usr/bin/clang',
+    );
+    expect(
+      environment['CFLAGS_AARCH64_APPLE_IOS_SIM'],
+      '-isysroot /Xcode/Platforms/iPhoneSimulator.sdk',
+    );
+    expect(
+      environment['CARGO_TARGET_AARCH64_APPLE_IOS_SIM_RUSTFLAGS'],
+      '-C link-arg=-isysroot '
+      '-C link-arg=/Xcode/Platforms/iPhoneSimulator.sdk',
+    );
+  });
+
   test('Windows TurboJPEG delegates native compiler discovery to cmake-rs', () {
     final String hook = File('hook/build.dart').readAsStringSync();
 
