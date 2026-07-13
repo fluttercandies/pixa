@@ -30,13 +30,12 @@ List<String> profileRustVersionCommand() => const <String>[
 /// Builds the checked-in macOS session/window probe command.
 List<String> profileMacOSHostProbeArguments({
   required String? targetBundleIdentifier,
-  required bool activateTarget,
   bool monitorTargetVisible = false,
 }) {
-  if ((activateTarget || monitorTargetVisible) &&
+  if (monitorTargetVisible &&
       (targetBundleIdentifier == null || targetBundleIdentifier.isEmpty)) {
     throw ArgumentError(
-      'A target bundle identifier is required for activation or monitoring.',
+      'A target bundle identifier is required for visibility monitoring.',
     );
   }
   return <String>[
@@ -44,12 +43,11 @@ List<String> profileMacOSHostProbeArguments({
     _macOSProfileHostProbePath,
     if (targetBundleIdentifier != null)
       '--target-bundle-id=$targetBundleIdentifier',
-    if (activateTarget) '--activate-target',
     if (monitorTargetVisible) '--monitor-target-visible',
   ];
 }
 
-/// Races a profile process against its foreground watchdog.
+/// Races a profile process against its host-state watchdog.
 Future<int> awaitProfileProcessWithWatchdog({
   required Future<int> profileExit,
   required void Function() terminateProfile,
@@ -74,16 +72,19 @@ Future<int> awaitProfileProcessWithWatchdog({
     terminateWatchdog?.call();
     return outcome.code!;
   }
+  if (outcome.code == 0) {
+    return profileExit;
+  }
   terminateProfile();
   final Object? error = outcome.error;
   if (error != null) {
     Error.throwWithStackTrace(
-      StateError('Profile foreground watchdog failed: $error'),
+      StateError('Profile host-state watchdog failed: $error'),
       outcome.stack!,
     );
   }
   throw StateError(
-    'Profile foreground watchdog exited before the profile process '
+    'Profile host-state watchdog exited before the profile process '
     '(exit code ${outcome.code}).',
   );
 }
@@ -154,7 +155,6 @@ String profilePlatformFromTarget(String targetPlatform) {
 final class MacOSProfileHostState {
   const MacOSProfileHostState({
     required this.screenLocked,
-    required this.frontmostBundleIdentifier,
     required this.target,
   });
 
@@ -162,7 +162,6 @@ final class MacOSProfileHostState {
     final Object? target = json['target'];
     return MacOSProfileHostState(
       screenLocked: _requiredBool(json, 'screenLocked'),
-      frontmostBundleIdentifier: json['frontmostBundleIdentifier']?.toString(),
       target: target == null
           ? null
           : MacOSProfileTargetState.fromJson(
@@ -172,7 +171,6 @@ final class MacOSProfileHostState {
   }
 
   final bool screenLocked;
-  final String? frontmostBundleIdentifier;
   final MacOSProfileTargetState? target;
 }
 
@@ -181,7 +179,6 @@ final class MacOSProfileTargetState {
   const MacOSProfileTargetState({
     required this.bundleIdentifier,
     required this.running,
-    required this.active,
     required this.hidden,
     required this.onScreenWindowCount,
   });
@@ -196,7 +193,6 @@ final class MacOSProfileTargetState {
     return MacOSProfileTargetState(
       bundleIdentifier: json['bundleIdentifier']?.toString() ?? '',
       running: _requiredBool(json, 'running'),
-      active: _requiredBool(json, 'active'),
       hidden: _requiredBool(json, 'hidden'),
       onScreenWindowCount: windowCount,
     );
@@ -204,7 +200,6 @@ final class MacOSProfileTargetState {
 
   final String bundleIdentifier;
   final bool running;
-  final bool active;
   final bool hidden;
   final int onScreenWindowCount;
 }
@@ -231,12 +226,9 @@ void validateMacOSProfileHostState(
       'macOS profile target $targetBundleIdentifier is not running.',
     );
   }
-  if (!target.active ||
-      target.hidden ||
-      target.onScreenWindowCount == 0 ||
-      state.frontmostBundleIdentifier != targetBundleIdentifier) {
+  if (target.hidden || target.onScreenWindowCount == 0) {
     throw StateError(
-      'macOS profile target $targetBundleIdentifier is not frontmost with an '
+      'macOS profile target $targetBundleIdentifier does not have a visible '
       'on-screen window.',
     );
   }
@@ -454,7 +446,7 @@ Future<void> main(List<String> arguments) async {
                   );
               macOSWatchdogCompleter!.complete(watchdog);
               stdout.writeln(
-                'Monitoring frontmost macOS profile window for '
+                'Monitoring visible macOS profile window for '
                 'dev.pixa.pixaGallery.',
               );
             } on Object catch (error, stack) {
@@ -640,13 +632,11 @@ Future<String> _runForOutput(
 Future<MacOSProfileHostState> _readMacOSProfileHostState(
   Directory root, {
   String? targetBundleIdentifier,
-  bool activateTarget = false,
 }) async {
   final String output = await _runForOutput(
     root,
     profileMacOSHostProbeArguments(
       targetBundleIdentifier: targetBundleIdentifier,
-      activateTarget: activateTarget,
     ),
   );
   return MacOSProfileHostState.fromJson(
@@ -662,7 +652,6 @@ Future<_ProfileProcessWatchdog> _startMacOSProfileForegroundWatchdog(
     'rtk',
     profileMacOSHostProbeArguments(
       targetBundleIdentifier: targetBundleIdentifier,
-      activateTarget: true,
       monitorTargetVisible: true,
     ),
     workingDirectory: root.path,
@@ -688,14 +677,14 @@ Future<_ProfileProcessWatchdog> _startMacOSProfileForegroundWatchdog(
       initialLine.future,
       process.exitCode.then<String>((int code) {
         throw StateError(
-          'macOS foreground watchdog exited before initialization '
+          'macOS visibility watchdog exited before initialization '
           '(exit code $code): $errorOutput',
         );
       }),
     ]).timeout(const Duration(seconds: 15));
     validateMacOSProfileHostState(
       MacOSProfileHostState.fromJson(
-        _jsonObject(jsonDecode(line), 'macOS profile foreground watchdog'),
+        _jsonObject(jsonDecode(line), 'macOS profile visibility watchdog'),
       ),
       requireTargetVisible: true,
       targetBundleIdentifier: targetBundleIdentifier,

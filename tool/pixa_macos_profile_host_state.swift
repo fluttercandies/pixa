@@ -7,15 +7,13 @@ let targetBundleIdentifier = CommandLine.arguments
   .dropFirst()
   .first(where: { $0.hasPrefix(targetPrefix) })?
   .dropFirst(targetPrefix.count)
-let activateTarget = CommandLine.arguments.contains("--activate-target")
 let monitorTargetVisible = CommandLine.arguments.contains(
   "--monitor-target-visible"
 )
 
-if (activateTarget || monitorTargetVisible) && targetBundleIdentifier == nil {
+if monitorTargetVisible && targetBundleIdentifier == nil {
   fputs(
-    "--activate-target and --monitor-target-visible require "
-      + "--target-bundle-id.\n",
+    "--monitor-target-visible requires --target-bundle-id.\n",
     stderr
   )
   exit(64)
@@ -57,23 +55,6 @@ func targetApplication() -> NSRunningApplication? {
   ).first
 }
 
-if activateTarget && !isScreenLocked() {
-  let deadline = Date().addingTimeInterval(5)
-  repeat {
-    if let target = targetApplication() {
-      _ = target.activate(options: [.activateAllWindows])
-      if target.isActive
-        && NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-          == target.bundleIdentifier
-        && onScreenWindowCount(for: target.processIdentifier) > 0
-      {
-        break
-      }
-    }
-    RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-  } while Date() < deadline
-}
-
 func currentState() -> [String: Any] {
   let target = targetApplication()
   let targetState: [String: Any]? = targetBundleIdentifier.map {
@@ -81,7 +62,6 @@ func currentState() -> [String: Any] {
     [
       "bundleIdentifier": String(bundleIdentifier),
       "running": target != nil,
-      "active": target?.isActive ?? false,
       "hidden": target?.isHidden ?? true,
       "onScreenWindowCount": target.map {
         onScreenWindowCount(for: $0.processIdentifier)
@@ -89,9 +69,7 @@ func currentState() -> [String: Any] {
     ]
   }
   var state: [String: Any] = [
-    "screenLocked": isScreenLocked(),
-    "frontmostBundleIdentifier":
-      NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? NSNull(),
+    "screenLocked": isScreenLocked()
   ]
   if let targetState {
     state["target"] = targetState
@@ -113,11 +91,8 @@ func targetIsContinuouslyVisible(_ state: [String: Any]) -> Bool {
     state["screenLocked"] as? Bool == false,
     let target = state["target"] as? [String: Any],
     target["running"] as? Bool == true,
-    target["active"] as? Bool == true,
     target["hidden"] as? Bool == false,
-    (target["onScreenWindowCount"] as? Int ?? 0) > 0,
-    state["frontmostBundleIdentifier"] as? String
-      == targetBundleIdentifier.map(String.init)
+    (target["onScreenWindowCount"] as? Int ?? 0) > 0
   else {
     return false
   }
@@ -135,6 +110,11 @@ if monitorTargetVisible {
   while true {
     RunLoop.current.run(until: Date().addingTimeInterval(0.25))
     let state = currentState()
+    if let target = state["target"] as? [String: Any],
+      target["running"] as? Bool == false
+    {
+      exit(0)
+    }
     if !targetIsContinuouslyVisible(state) {
       try writeState(state, to: FileHandle.standardError)
       exit(3)

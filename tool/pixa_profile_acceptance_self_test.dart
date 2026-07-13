@@ -8,11 +8,9 @@ Future<void> main() async {
   final acceptance.MacOSProfileHostState unlockedHost =
       acceptance.MacOSProfileHostState.fromJson(<String, Object?>{
         'screenLocked': false,
-        'frontmostBundleIdentifier': 'dev.pixa.pixaGallery',
         'target': <String, Object?>{
           'bundleIdentifier': 'dev.pixa.pixaGallery',
           'running': true,
-          'active': true,
           'hidden': false,
           'onScreenWindowCount': 1,
         },
@@ -26,37 +24,28 @@ Future<void> main() async {
     () => acceptance.validateMacOSProfileHostState(
       acceptance.MacOSProfileHostState.fromJson(<String, Object?>{
         'screenLocked': true,
-        'frontmostBundleIdentifier': 'com.apple.loginwindow',
       }),
       requireTargetVisible: false,
       targetBundleIdentifier: 'dev.pixa.pixaGallery',
     ),
     'locked macOS sessions must be rejected before profile capture',
   );
-  _expectThrowsStateError(
-    () => acceptance.validateMacOSProfileHostState(
-      acceptance.MacOSProfileHostState.fromJson(<String, Object?>{
-        'screenLocked': false,
-        'frontmostBundleIdentifier': 'com.apple.Terminal',
-        'target': <String, Object?>{
-          'bundleIdentifier': 'dev.pixa.pixaGallery',
-          'running': true,
-          'active': false,
-          'hidden': false,
-          'onScreenWindowCount': 1,
-        },
-      }),
-      requireTargetVisible: true,
-      targetBundleIdentifier: 'dev.pixa.pixaGallery',
-    ),
-    'non-focal profile windows must be rejected as performance evidence',
+  acceptance.validateMacOSProfileHostState(
+    acceptance.MacOSProfileHostState.fromJson(<String, Object?>{
+      'screenLocked': false,
+      'target': <String, Object?>{
+        'bundleIdentifier': 'dev.pixa.pixaGallery',
+        'running': true,
+        'hidden': false,
+        'onScreenWindowCount': 1,
+      },
+    }),
+    requireTargetVisible: true,
+    targetBundleIdentifier: 'dev.pixa.pixaGallery',
   );
   _expect(
     acceptance
-            .profileMacOSHostProbeArguments(
-              targetBundleIdentifier: null,
-              activateTarget: false,
-            )
+            .profileMacOSHostProbeArguments(targetBundleIdentifier: null)
             .join(' ') ==
         'swift tool/pixa_macos_profile_host_state.swift',
     'macOS preflight must use the checked-in host-state probe',
@@ -65,14 +54,13 @@ Future<void> main() async {
     acceptance
             .profileMacOSHostProbeArguments(
               targetBundleIdentifier: 'dev.pixa.pixaGallery',
-              activateTarget: true,
               monitorTargetVisible: true,
             )
             .join(' ') ==
         'swift tool/pixa_macos_profile_host_state.swift '
-            '--target-bundle-id=dev.pixa.pixaGallery --activate-target '
+            '--target-bundle-id=dev.pixa.pixaGallery '
             '--monitor-target-visible',
-    'macOS target verification must use one continuous foreground monitor',
+    'macOS target verification must not request application focus',
   );
   final Completer<int> blockedProfileExit = Completer<int>();
   final Completer<int> failedWatchdogExit = Completer<int>();
@@ -85,11 +73,11 @@ Future<void> main() async {
       terminateWatchdog: () {},
     ),
     trigger: () => failedWatchdogExit.complete(3),
-    message: 'foreground watchdog failure must reject profile evidence',
+    message: 'visibility watchdog failure must reject profile evidence',
   );
   _expect(
     profileTerminated,
-    'foreground watchdog failure must terminate the profile process',
+    'visibility watchdog failure must terminate the profile process',
   );
   final Completer<int> successfulProfileExit = Completer<int>();
   final Completer<int> blockedWatchdogExit = Completer<int>();
@@ -103,7 +91,24 @@ Future<void> main() async {
   successfulProfileExit.complete(0);
   _expect(
     await successfulRun == 0 && watchdogTerminated,
-    'a completed profile run must stop its foreground watchdog',
+    'a completed profile run must stop its visibility watchdog',
+  );
+  final Completer<int> profileAfterTargetExit = Completer<int>();
+  final Completer<int> targetExit = Completer<int>();
+  var profileTerminatedAfterTargetExit = false;
+  final Future<int> normalTargetExitRun = acceptance
+      .awaitProfileProcessWithWatchdog(
+        profileExit: profileAfterTargetExit.future,
+        terminateProfile: () => profileTerminatedAfterTargetExit = true,
+        watchdogExit: targetExit.future,
+        terminateWatchdog: () {},
+      );
+  targetExit.complete(0);
+  await Future<void>.delayed(Duration.zero);
+  profileAfterTargetExit.complete(0);
+  _expect(
+    await normalTargetExitRun == 0 && !profileTerminatedAfterTargetExit,
+    'normal target teardown must wait for the profile wrapper exit code',
   );
   var triggerCount = 0;
   final acceptance.ProfileOutputTrigger outputTrigger =
