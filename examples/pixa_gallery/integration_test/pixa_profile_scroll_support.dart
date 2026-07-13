@@ -376,7 +376,12 @@ Future<void> _waitForDrain(ProfileScrollHarnessState harness) async {
     }
     if (!drained && timeout.elapsed > const Duration(seconds: 20)) {
       throw StateError(
-        'Profile scheduler and prefetch work did not remain drained.',
+        'Profile scheduler and prefetch work did not remain drained: '
+        'scheduler(queue=${scheduler.queueDepth}, '
+        'inflight=${scheduler.inflightRequests}), '
+        'prefetch=${prefetch.toJson()}, '
+        'completion(queue=${decoder.completionQueueDepth}, '
+        'frameScheduled=${decoder.completionFrameScheduled}).',
       );
     }
     await Future<void>.delayed(const Duration(milliseconds: 100));
