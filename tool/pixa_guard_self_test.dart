@@ -6,6 +6,7 @@ void main() {
   _detectsDartCompatibleUpdates();
   _detectsCargoCompatibleUpdates();
   _enforcesDependencyOnlyReadmeInstall();
+  _enforcesAndroid16KbCiEvidence();
   stdout.writeln('Pixa guard self-test passed.');
 }
 
@@ -100,6 +101,34 @@ dependency_overrides:
   _expect(
     failures.any((String failure) => failure.contains('dependency_overrides')),
     'dependency override failure should be explicit',
+  );
+}
+
+void _enforcesAndroid16KbCiEvidence() {
+  const String complete = '''
+api-level: 35
+target: google_apis_ps16k
+adb -s emulator-5554 shell getconf PAGE_SIZE
+16384
+zipalign -c -P 16
+lib/x86_64/libpixa_runtime.so
+llvm-readelf -lW
+0x4000
+''';
+  _expect(
+    pixaAndroid16KbCiFailures(complete).isEmpty,
+    'complete Android 16 KB CI evidence should pass',
+  );
+
+  const String legacy = '''
+api-level: 30
+target: google_atd
+dart run tool/pixa_platform_build.dart --platform=android
+''';
+  final List<String> failures = pixaAndroid16KbCiFailures(legacy);
+  _expect(
+    failures.length == 8,
+    'legacy 4 KB Android CI should miss every 16 KB evidence gate',
   );
 }
 

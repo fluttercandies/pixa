@@ -59,6 +59,7 @@ void main() {
   _checkReleaseNeutralReadmeInstallCopy(root, failures);
   _checkPubReleaseReadiness(root, failures);
   _checkReleasePreflightHardening(root, failures);
+  _checkAndroid16KbCiEvidence(root, failures);
   _checkExplicitPluginVersionConstraints(root, failures);
   _checkSwiftPackageManagerSupport(root, failures);
   _checkPublicExports(root, failures);
@@ -1500,6 +1501,31 @@ void _checkPublishedRustSource(Directory root, List<String> failures) {
       failures.add('pub release readiness: $path is missing');
     }
   }
+}
+
+void _checkAndroid16KbCiEvidence(Directory root, List<String> failures) {
+  final String workflow = File(
+    '${root.path}/.github/workflows/ci.yml',
+  ).readAsStringSync();
+  failures.addAll(pixaAndroid16KbCiFailures(workflow));
+}
+
+List<String> pixaAndroid16KbCiFailures(String workflow) {
+  const Map<String, String> required = <String, String>{
+    'api-level: 35': 'API 35 emulator',
+    'google_apis_ps16k': '16 KB system image',
+    'getconf PAGE_SIZE': 'device page-size assertion',
+    '16384': '16 KB page-size value',
+    '-P 16': 'APK 16 KB ZIP alignment check',
+    'lib/x86_64/libpixa_runtime.so': 'x86_64 runtime ELF extraction',
+    'llvm-readelf': 'runtime ELF program-header inspection',
+    '0x4000': 'minimum 16 KB ELF LOAD alignment',
+  };
+  return <String>[
+    for (final MapEntry<String, String> entry in required.entries)
+      if (!workflow.contains(entry.key))
+        'Android 16 KB CI: missing ${entry.value} `${entry.key}`',
+  ];
 }
 
 void _checkSingleRustWorkspaceReferences(
