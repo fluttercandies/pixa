@@ -38,12 +38,45 @@ Future<void> main() async {
     _expectRuntimeScenario(temp, 'all_explicit', hasS3: true, hasMjpeg: true);
     _expectCommands(commands);
     await _expectHostedRequestTrackerDrains();
+    await _expectHostedProxyRetriesHandshakeFailure();
+    await _expectHostedProxyPreservesOtherFailures();
     stdout.writeln('Pixa pub dependency smoke self-test passed.');
   } finally {
     if (temp.existsSync()) {
       temp.deleteSync(recursive: true);
     }
   }
+}
+
+Future<void> _expectHostedProxyRetriesHandshakeFailure() async {
+  var attempts = 0;
+  final String result = await retryHostedProxyHandshake<String>(() async {
+    attempts += 1;
+    if (attempts == 1) {
+      throw const HandshakeException('transient handshake failure');
+    }
+    return 'connected';
+  }, retryDelay: Duration.zero);
+
+  _expect(result == 'connected', 'hosted proxy should return retry result');
+  _expect(attempts == 2, 'hosted proxy should retry one handshake failure');
+}
+
+Future<void> _expectHostedProxyPreservesOtherFailures() async {
+  var attempts = 0;
+  try {
+    await retryHostedProxyHandshake<void>(() async {
+      attempts += 1;
+      throw const HttpException('non-handshake failure');
+    }, retryDelay: Duration.zero);
+    throw StateError('hosted proxy should preserve non-handshake failures');
+  } on HttpException catch (error) {
+    _expect(
+      error.message == 'non-handshake failure',
+      'hosted proxy should preserve the original failure',
+    );
+  }
+  _expect(attempts == 1, 'hosted proxy must not retry unrelated failures');
 }
 
 Future<void> _expectHostedRequestTrackerDrains() async {

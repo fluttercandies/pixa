@@ -112,6 +112,21 @@ final class HostedRequestTracker {
   }
 }
 
+/// Retries one transient TLS handshake while proxying hosted pub metadata.
+Future<T> retryHostedProxyHandshake<T>(
+  Future<T> Function() operation, {
+  Duration retryDelay = const Duration(milliseconds: 100),
+}) async {
+  try {
+    return await operation();
+  } on HandshakeException {
+    if (retryDelay > Duration.zero) {
+      await Future<void>.delayed(retryDelay);
+    }
+    return operation();
+  }
+}
+
 /// Builds versioned hosted-layout copies and verifies real consumer apps.
 final class PubDependencySmoke {
   const PubDependencySmoke({
@@ -686,6 +701,33 @@ final class _LocalHostedRepository {
       path: request.uri.path,
       query: request.uri.hasQuery ? request.uri.query : null,
     );
+    final bool isIdempotent =
+        request.method == 'GET' || request.method == 'HEAD';
+    final HttpClientResponse response = isIdempotent
+        ? await retryHostedProxyHandshake<HttpClientResponse>(
+            () => _openPubDevResponse(request, target, forwardBody: false),
+          )
+        : await _openPubDevResponse(request, target, forwardBody: true);
+    request.response.statusCode = response.statusCode;
+    response.headers.forEach((String name, List<String> values) {
+      if (name != HttpHeaders.connectionHeader &&
+          name != HttpHeaders.contentLengthHeader &&
+          name != HttpHeaders.transferEncodingHeader) {
+        request.response.headers.set(name, values);
+      }
+    });
+    if (response.contentLength >= 0) {
+      request.response.contentLength = response.contentLength;
+    }
+    await request.response.addStream(response);
+    await request.response.close();
+  }
+
+  Future<HttpClientResponse> _openPubDevResponse(
+    HttpRequest request,
+    Uri target, {
+    required bool forwardBody,
+  }) async {
     final HttpClientRequest upstream = await _proxyClient.openUrl(
       request.method,
       target,
@@ -702,21 +744,10 @@ final class _LocalHostedRepository {
         upstream.headers.set(header, values);
       }
     }
-    await upstream.addStream(request);
-    final HttpClientResponse response = await upstream.close();
-    request.response.statusCode = response.statusCode;
-    response.headers.forEach((String name, List<String> values) {
-      if (name != HttpHeaders.connectionHeader &&
-          name != HttpHeaders.contentLengthHeader &&
-          name != HttpHeaders.transferEncodingHeader) {
-        request.response.headers.set(name, values);
-      }
-    });
-    if (response.contentLength >= 0) {
-      request.response.contentLength = response.contentLength;
+    if (forwardBody) {
+      await upstream.addStream(request);
     }
-    await request.response.addStream(response);
-    await request.response.close();
+    return upstream.close();
   }
 }
 
