@@ -25,6 +25,9 @@ Future<void> main(List<String> args) async {
     'dev.pixa',
     probe.path,
   ]);
+  if (platform == 'android') {
+    pixaConfigureAndroidBuildResources(probe);
+  }
   _configureProbePlatformPermissions(platform, probe);
   _writeProbeApp(root, probe, options, gitCommit);
   await _run(probe, flutter, <String>['pub', 'get']);
@@ -172,6 +175,44 @@ const Set<String> _supportedPlatforms = <String>{
   'macos',
   'windows',
 };
+
+const String _androidGradleJvmArgs =
+    'org.gradle.jvmargs=-Xmx2G -XX:MaxMetaspaceSize=1G '
+    '-XX:ReservedCodeCacheSize=256m -XX:+HeapDumpOnOutOfMemoryError';
+const String _androidKotlinDaemonJvmArgs =
+    'kotlin.daemon.jvmargs=-Xmx1G -XX:MaxMetaspaceSize=512m '
+    '-XX:ReservedCodeCacheSize=256m';
+
+/// Caps Android build daemons so the generated probe can coexist with an AVD.
+void pixaConfigureAndroidBuildResources(Directory project) {
+  final File properties = File('${project.path}/android/gradle.properties');
+  if (!properties.existsSync()) {
+    throw StateError(
+      'Generated Android Gradle properties are missing: ${properties.path}',
+    );
+  }
+  final List<String> configured = <String>[];
+  var hasGradleArgs = false;
+  var hasKotlinArgs = false;
+  for (final String line in properties.readAsLinesSync()) {
+    if (line.startsWith('org.gradle.jvmargs=')) {
+      configured.add(_androidGradleJvmArgs);
+      hasGradleArgs = true;
+    } else if (line.startsWith('kotlin.daemon.jvmargs=')) {
+      configured.add(_androidKotlinDaemonJvmArgs);
+      hasKotlinArgs = true;
+    } else {
+      configured.add(line);
+    }
+  }
+  if (!hasGradleArgs) {
+    configured.insert(0, _androidGradleJvmArgs);
+  }
+  if (!hasKotlinArgs) {
+    configured.add(_androidKotlinDaemonJvmArgs);
+  }
+  properties.writeAsStringSync('${configured.join('\n')}\n');
+}
 
 void _configureProbePlatformPermissions(String platform, Directory probe) {
   if (platform == 'macos') {

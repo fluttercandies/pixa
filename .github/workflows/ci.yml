@@ -258,6 +258,7 @@ jobs:
                 exit 1
               fi
             done
+            .dart_tool/pixa_platform_probe/android/android/gradlew --stop
             bash tool/pixa_android_cockpit_ci.sh
       - name: Boot iOS simulator
         if: matrix.platform == 'ios'

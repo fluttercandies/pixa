@@ -9,6 +9,7 @@ void main() {
   _mobilePlatformsUseCiSizedLaunchBudget();
   _androidCiEnablesHardwareAcceleration();
   _androidCiUsesOneEmulatorForPlatformAcceptance();
+  _androidCiReleasesProbeBuildResources();
   _androidCiUsesCiSizedEmulatorBootBudget();
   _androidCiCapturesCockpitDiagnosticsOnFailure();
   _androidCiCapturesLiveCockpitDiagnostics();
@@ -21,6 +22,36 @@ void main() {
   _nonWindowsFlutterRootResolvesBinary();
   _failedValidationResultKeepsEvidence();
   stdout.writeln('Pixa gallery cockpit acceptance self-test passed.');
+}
+
+void _androidCiReleasesProbeBuildResources() {
+  final String workflow = File('.github/workflows/ci.yml').readAsStringSync();
+  final String properties = File(
+    'examples/pixa_gallery/android/gradle.properties',
+  ).readAsStringSync();
+  final int probe = workflow.indexOf(
+    'pixa_platform_build.dart --platform=android',
+  );
+  final int stop = workflow.indexOf(
+    '.dart_tool/pixa_platform_probe/android/android/gradlew --stop',
+    probe,
+  );
+  final int cockpit = workflow.indexOf(
+    'bash tool/pixa_android_cockpit_ci.sh',
+    probe,
+  );
+
+  _expect(probe >= 0, 'Android platform probe should exist.');
+  _expect(
+    stop > probe && cockpit > stop,
+    'Android CI should stop the probe Gradle daemon before Cockpit.',
+  );
+  _expect(
+    properties.contains('org.gradle.jvmargs=-Xmx2G') &&
+        properties.contains('kotlin.daemon.jvmargs=-Xmx1G') &&
+        !properties.contains('-Xmx8G'),
+    'Android gallery builds should fit beside the CI emulator.',
+  );
 }
 
 void _mobilePlatformsUseCiSizedLaunchBudget() {

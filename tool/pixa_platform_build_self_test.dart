@@ -4,6 +4,7 @@ import 'dart:io';
 import 'pixa_platform_build.dart' as build;
 
 void main() {
+  _limitsAndroidBuildResources();
   _requiresOperationalNativeRoiEvidence();
   _requiresDecodableJpegRoiFixture();
   _requiresOpaqueLossyWebpRoiFixture();
@@ -76,6 +77,42 @@ void main() {
   );
 
   stdout.writeln('Pixa platform build self-test passed.');
+}
+
+void _limitsAndroidBuildResources() {
+  final Directory temp = Directory.systemTemp.createTempSync(
+    'pixa-android-build-resources-',
+  );
+  try {
+    final File properties = File('${temp.path}/android/gradle.properties');
+    properties.parent.createSync(recursive: true);
+    properties.writeAsStringSync('''
+org.gradle.jvmargs=-Xmx8G -XX:MaxMetaspaceSize=4G
+android.useAndroidX=true
+''');
+
+    build.pixaConfigureAndroidBuildResources(temp);
+
+    final String configured = properties.readAsStringSync();
+    _expect(
+      configured.contains('org.gradle.jvmargs=-Xmx2G'),
+      'Android probe should cap the Gradle daemon heap',
+    );
+    _expect(
+      configured.contains('kotlin.daemon.jvmargs=-Xmx1G'),
+      'Android probe should cap the Kotlin daemon heap',
+    );
+    _expect(
+      !configured.contains('-Xmx8G'),
+      'Android probe should remove the Flutter template 8 GB heap',
+    );
+    _expect(
+      configured.contains('android.useAndroidX=true'),
+      'Android resource limits should preserve unrelated properties',
+    );
+  } finally {
+    temp.deleteSync(recursive: true);
+  }
 }
 
 void _requiresDecodableJpegRoiFixture() {
