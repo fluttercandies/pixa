@@ -6,3 +6,4 @@
 - Includes `PixaImage`, `PixaProvider`, `PixaRequest`, controller APIs,
   cache/prefetch primitives, diagnostics, plugin contracts, and the packaged
   Rust-backed Native Assets runtime source.
+- Links 64-bit Android Native Assets for native 16 KB page-size support.

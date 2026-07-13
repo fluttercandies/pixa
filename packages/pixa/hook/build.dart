@@ -89,6 +89,7 @@ Future<void> main(List<String> args) async {
     );
     _configureCrossCompileEnvironment(environment, targetTriple);
     _configureReleaseLinkingEnvironment(environment, targetTriple);
+    pixaConfigureAndroidPageSizeEnvironment(environment, targetTriple);
     _clearStaleTurboJpegCmakeCaches(
       cargoTargetDirectory,
       targetTriple,
@@ -775,6 +776,20 @@ void _configureReleaseLinkingEnvironment(
     _ => const <String>[],
   };
   _appendTargetRustCodegenOptions(environment, targetTriple, codegenOptions);
+}
+
+/// Configures 64-bit Android runtime libraries for native 16 KB page sizes.
+void pixaConfigureAndroidPageSizeEnvironment(
+  Map<String, String> environment,
+  String? targetTriple,
+) {
+  if (targetTriple != 'aarch64-linux-android' &&
+      targetTriple != 'x86_64-linux-android') {
+    return;
+  }
+  _appendTargetRustCodegenOptions(environment, targetTriple!, const <String>[
+    'link-arg=-Wl,-z,max-page-size=16384',
+  ]);
 }
 
 void _setTargetToolEnvironment(

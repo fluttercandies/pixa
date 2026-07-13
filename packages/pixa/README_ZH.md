@@ -30,7 +30,8 @@ rustup toolchain install 1.89.0 --profile minimal
 跨平台 target 还需要执行 `rustup target add <target> --toolchain 1.89.0` 并安装对应
 platform compiler。Rust、Cargo 或 target 缺失时，Native Assets hook 会输出可直接执行
 的修复命令。Windows JPEG Turbo ROI 构建需要 Visual Studio 的 Desktop development
-with C++ workload 和 NASM。Android 构建需要 Android NDK、SDK CMake 和 Ninja。
+with C++ workload 和 NASM。Android 构建需要 Android NDK、SDK CMake 和 Ninja；
+Pixa 的 64 位 Android runtime 原生支持 16 KB page size。
 
 ## 快速开始
 

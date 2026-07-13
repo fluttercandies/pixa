@@ -31,7 +31,8 @@ Cross targets also require `rustup target add <target> --toolchain 1.89.0` and
 their platform compiler. The Native Assets hook emits an actionable command if
 Rust, Cargo, or the requested target is unavailable. Windows JPEG Turbo ROI
 builds require Visual Studio with the Desktop development with C++ workload and
-NASM. Android builds require the Android NDK, SDK CMake, and Ninja.
+NASM. Android builds require the Android NDK, SDK CMake, and Ninja; Pixa's
+64-bit Android runtime is linked for native 16 KB page-size support.
 
 ## Quick Start
 

@@ -53,6 +53,37 @@ void main() {
     );
   });
 
+  test('64-bit Android Cargo linking uses 16 KB ELF page alignment', () {
+    for (final String targetTriple in <String>[
+      'aarch64-linux-android',
+      'x86_64-linux-android',
+    ]) {
+      final Map<String, String> environment = <String, String>{};
+
+      pixaConfigureAndroidPageSizeEnvironment(environment, targetTriple);
+
+      final String target = targetTriple.toUpperCase().replaceAll('-', '_');
+      expect(
+        environment['CARGO_TARGET_${target}_RUSTFLAGS'],
+        '-C link-arg=-Wl,-z,max-page-size=16384',
+      );
+    }
+  });
+
+  test('32-bit Android Cargo linking keeps its platform page alignment', () {
+    final Map<String, String> environment = <String, String>{};
+
+    pixaConfigureAndroidPageSizeEnvironment(
+      environment,
+      'armv7-linux-androideabi',
+    );
+
+    expect(
+      environment['CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_RUSTFLAGS'],
+      isNull,
+    );
+  });
+
   test('Windows TurboJPEG delegates native compiler discovery to cmake-rs', () {
     final String hook = File('hook/build.dart').readAsStringSync();
 
