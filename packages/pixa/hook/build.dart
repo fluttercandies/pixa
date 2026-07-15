@@ -61,6 +61,7 @@ Future<void> main(List<String> args) async {
     final Uri rustWorkspace = pixaRustWorkspaceRoot(input.packageRoot);
     final Uri cargoTargetDirectory = pixaCargoTargetDirectory(
       input.outputDirectory,
+      windows: input.config.code.targetOS == OS.windows,
     );
     final String? targetTriple = _rustTarget(input.config.code);
     final Set<String> cargoFeatures = _cargoFeatures(pluginPlan);
@@ -684,8 +685,26 @@ Uri pixaRustWorkspaceRoot(Uri packageRoot) {
   return packageRoot.resolve('native_src/rust/');
 }
 
-Uri pixaCargoTargetDirectory(Uri outputDirectory) {
+Uri pixaCargoTargetDirectory(
+  Uri outputDirectory, {
+  bool windows = false,
+  Uri? systemTemp,
+}) {
+  if (windows) {
+    final Uri temporaryRoot = systemTemp ?? Directory.systemTemp.uri;
+    final String key = _pixaStablePathKey(outputDirectory.toString());
+    return temporaryRoot.resolve('pixa_$key/');
+  }
   return outputDirectory.resolve('cargo_target/');
+}
+
+String _pixaStablePathKey(String value) {
+  var hash = 0xcbf29ce484222325;
+  for (final int codeUnit in value.codeUnits) {
+    hash ^= codeUnit;
+    hash = (hash * 0x100000001b3) & 0xffffffffffffffff;
+  }
+  return hash.toRadixString(16).padLeft(16, '0');
 }
 
 List<Uri> _rustBuildInputs(Uri rustWorkspace) {

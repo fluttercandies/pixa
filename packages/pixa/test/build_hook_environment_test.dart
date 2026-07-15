@@ -24,6 +24,45 @@ void main() {
     );
   });
 
+  test('Windows Cargo target directory avoids the CMake object path limit', () {
+    final Uri systemTemp = Uri.directory(
+      r'C:\Users\runneradmin\AppData\Local\Temp',
+      windows: true,
+    );
+    final Uri firstOutput = Uri.directory(
+      r'D:\a\pixa\pixa\.dart_tool\pixa_platform_probe\windows\.dart_tool\hooks_runner\shared\pixa\build\de88d493ac',
+      windows: true,
+    );
+    final Uri secondOutput = Uri.directory(
+      r'D:\a\other\other\.dart_tool\hooks_runner\shared\pixa\build\de88d493ac',
+      windows: true,
+    );
+
+    final Uri first = pixaCargoTargetDirectory(
+      firstOutput,
+      windows: true,
+      systemTemp: systemTemp,
+    );
+    final Uri repeated = pixaCargoTargetDirectory(
+      firstOutput,
+      windows: true,
+      systemTemp: systemTemp,
+    );
+    final Uri second = pixaCargoTargetDirectory(
+      secondOutput,
+      windows: true,
+      systemTemp: systemTemp,
+    );
+
+    expect(first, repeated);
+    expect(first, isNot(second));
+    expect(
+      first.toFilePath(windows: true),
+      startsWith(r'C:\Users\runneradmin\AppData\Local\Temp\pixa_'),
+    );
+    expect(first.toFilePath(windows: true).length, lessThan(80));
+  });
+
   test('iOS Cargo environment isolates host build scripts from target SDK', () {
     final Map<String, String> environment = <String, String>{
       'SDKROOT': '/Xcode/Platforms/iPhoneSimulator.sdk',
