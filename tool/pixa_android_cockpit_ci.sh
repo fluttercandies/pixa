@@ -44,6 +44,22 @@ pixa_android_cockpit_monitor() {
 
 trap cleanup_live_diagnostics EXIT
 
+required_guest_ram_kib=3800000
+adb -s emulator-5554 shell cat /proc/meminfo \
+  > "$diagnostics_dir/guest-meminfo.txt" 2>&1
+guest_ram_kib="$(
+  awk '/^MemTotal:/ { print $2; exit }' \
+    "$diagnostics_dir/guest-meminfo.txt"
+)"
+if ! [[ "$guest_ram_kib" =~ ^[0-9]+$ ]]; then
+  echo "Unable to read Android guest memory from /proc/meminfo." >&2
+  exit 1
+fi
+if ((guest_ram_kib < required_guest_ram_kib)); then
+  echo "Android guest RAM is ${guest_ram_kib} KiB; expected at least ${required_guest_ram_kib} KiB." >&2
+  exit 1
+fi
+
 adb -s emulator-5554 logcat -c || true
 adb -s emulator-5554 logcat -v time > "$diagnostics_dir/live-logcat.txt" 2>&1 &
 logcat_pid=$!

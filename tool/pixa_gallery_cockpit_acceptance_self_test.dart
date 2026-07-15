@@ -292,6 +292,7 @@ void _androidCiUsesCiSizedEmulatorBootBudget() {
 
 void _androidCockpitUsesStableGuestMemoryBudget() {
   final workflow = File('.github/workflows/ci.yml').readAsStringSync();
+  final script = File('tool/pixa_android_cockpit_ci.sh').readAsStringSync();
   final cockpitStart = workflow.indexOf('\n  android-cockpit:\n');
   final platformStart = workflow.indexOf('\n  platform-build:\n');
   _expect(
@@ -303,6 +304,15 @@ void _androidCockpitUsesStableGuestMemoryBudget() {
   _expect(
     cockpitJob.contains('ram-size: 4096M'),
     'Android Cockpit should have enough guest RAM for the ps16k Google image.',
+  );
+  _expect(
+    cockpitJob.contains('-memory 4096'),
+    'Android Cockpit should override duplicate AVD profile RAM settings.',
+  );
+  _expect(
+    script.contains('/proc/meminfo') &&
+        script.contains('required_guest_ram_kib=3800000'),
+    'Android Cockpit should reject an emulator that did not receive 4 GB RAM.',
   );
   _expect(
     platformJob.contains('ram-size: 2048M'),
