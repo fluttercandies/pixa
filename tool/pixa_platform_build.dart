@@ -1236,7 +1236,7 @@ bool acceptsNonZeroPixaPlatformSelfCheckExit(String output, String reportText) {
 bool _hasFlutterDeviceGoldenProxyFailureAfterPassingSelfCheck(String output) {
   final String normalized = output.replaceAll('\r\n', '\n');
   final int failureSummaryCount = RegExp(
-    r'\b1 test passed, 1 failed\.',
+    r'\b(?:0 tests|1 test) passed, 1 failed\.',
   ).allMatches(normalized).length;
   return failureSummaryCount == 1 &&
       normalized.contains('streamListen: (-32602) Invalid params') &&

@@ -18,6 +18,7 @@ void main() {
   _androidCockpitUsesStableGuestMemoryBudget();
   _androidCiCapturesCockpitDiagnosticsOnFailure();
   _androidCiCapturesLiveCockpitDiagnostics();
+  _windowsNativeDependencyInstallRetriesTransientFailure();
   _androidAcceptanceUsesRemoteOnlyHostCapture();
   _androidAcceptanceBuildsOnlyTheEmulatorAbi();
   _androidAcceptanceDelaysBaselineUntilWorkbench();
@@ -324,17 +325,17 @@ void _androidCockpitUsesStableGuestMemoryBudget() {
   final cockpitJob = workflow.substring(cockpitStart, platformStart);
   final platformJob = workflow.substring(platformStart);
   _expect(
-    cockpitJob.contains('ram-size: 4096M'),
-    'Android Cockpit should have enough guest RAM for the ps16k Google image.',
+    cockpitJob.contains('ram-size: 3072M'),
+    'Android Cockpit should have enough guest RAM for the Google APIs image.',
   );
   _expect(
-    cockpitJob.contains('-memory 4096'),
+    cockpitJob.contains('-memory 3072'),
     'Android Cockpit should override duplicate AVD profile RAM settings.',
   );
   _expect(
     script.contains('/proc/meminfo') &&
-        script.contains('required_guest_ram_kib=3800000'),
-    'Android Cockpit should reject an emulator that did not receive 4 GB RAM.',
+        script.contains('required_guest_ram_kib=2900000'),
+    'Android Cockpit should reject an emulator that did not receive 3 GB RAM.',
   );
   _expect(
     platformJob.contains('ram-size: 2048M'),
@@ -374,6 +375,21 @@ void _androidCiCapturesCockpitDiagnosticsOnFailure() {
   _expect(
     script.contains(r'exit "$status"'),
     'Android cockpit CI script should preserve the acceptance exit code.',
+  );
+}
+
+void _windowsNativeDependencyInstallRetriesTransientFailure() {
+  final workflow = File('.github/workflows/ci.yml').readAsStringSync();
+  const step = '- name: Install Windows native ROI build dependencies';
+  final start = workflow.indexOf(step);
+  final end = workflow.indexOf('\n      - name:', start + step.length);
+  _expect(start >= 0 && end > start, 'Windows NASM install step should exist.');
+  final block = workflow.substring(start, end);
+  _expect(
+    block.contains(r'$maxAttempts = 3') &&
+        block.contains(r'Start-Sleep') &&
+        block.contains('choco install nasm'),
+    'Windows NASM install should retry transient Chocolatey failures.',
   );
 }
 

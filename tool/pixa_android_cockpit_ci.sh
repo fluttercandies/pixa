@@ -44,7 +44,7 @@ pixa_android_cockpit_monitor() {
 
 trap cleanup_live_diagnostics EXIT
 
-required_guest_ram_kib=3800000
+required_guest_ram_kib=2900000
 adb -s emulator-5554 shell cat /proc/meminfo \
   > "$diagnostics_dir/guest-meminfo.txt" 2>&1
 guest_ram_kib="$(

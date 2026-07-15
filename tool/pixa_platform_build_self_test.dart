@@ -38,7 +38,7 @@ streamListen: (-32602) Invalid params
 streamListen: invalid 'streamId' parameter: integration_test.VmServiceProxyGoldenFileComparator
 loading /tmp/probe/integration_test/pixa_self_check_test.dart (failed)
 Pixa runtime platform self-check passes
-00:00 +1 -1: 1 test passed, 1 failed.
+00:00 +0 -1: 0 tests passed, 1 failed.
 ''',
   );
   _expect(

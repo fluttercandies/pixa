@@ -198,10 +198,10 @@ jobs:
           arch: x86_64
           target: google_apis
           profile: pixel_2
-          ram-size: 4096M
+          ram-size: 3072M
           heap-size: 512M
           emulator-boot-timeout: 2700
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 4096
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 3072
           script: bash tool/pixa_android_cockpit_ci.sh
       - name: Upload Android gallery Cockpit acceptance
         if: always()
@@ -260,7 +260,18 @@ jobs:
       - name: Install Windows native ROI build dependencies
         if: matrix.platform == 'windows'
         shell: pwsh
-        run: choco install nasm -y
+        run: |
+          $maxAttempts = 3
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            choco install nasm -y --no-progress
+            if ($LASTEXITCODE -eq 0) {
+              break
+            }
+            if ($attempt -eq $maxAttempts) {
+              exit $LASTEXITCODE
+            }
+            Start-Sleep -Seconds (10 * $attempt)
+          }
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
         if: matrix.platform == 'android'
       - name: Install Android NDK
