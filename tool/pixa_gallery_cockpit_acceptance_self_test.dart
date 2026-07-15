@@ -7,7 +7,7 @@ import 'pixa_gallery_cockpit_acceptance.dart' as acceptance;
 
 void main() {
   _mobilePlatformsUseCiSizedLaunchBudget();
-  _androidCiSeparatesCockpitFromHardwareAcceleration();
+  _androidCiUsesKvmWithoutVulkanForCockpit();
   _androidCiIsolatesPlatformProbeFromCockpit();
   _androidCockpitSeparatesUiFrom16KbAcceptance();
   _androidCockpitPinsReproducibleEmulatorBuild();
@@ -345,13 +345,13 @@ void _androidCiIsolatesPlatformProbeFromCockpit() {
   );
 }
 
-void _androidCiSeparatesCockpitFromHardwareAcceleration() {
+void _androidCiUsesKvmWithoutVulkanForCockpit() {
   final workflow = File('.github/workflows/ci.yml').readAsStringSync();
   const kvmStep = '- name: Enable Android emulator KVM acceleration';
   final kvmMatches = kvmStep.allMatches(workflow).toList(growable: false);
   _expect(
-    kvmMatches.length == 1,
-    'Only the Android platform probe should enable KVM acceleration.',
+    kvmMatches.length == 2,
+    'Both isolated Android jobs should enable KVM acceleration.',
   );
   final cockpitStart = workflow.indexOf('\n  android-cockpit:\n');
   final platformStart = workflow.indexOf('\n  platform-build:\n');
@@ -362,13 +362,16 @@ void _androidCiSeparatesCockpitFromHardwareAcceleration() {
   final cockpitJob = workflow.substring(cockpitStart, platformStart);
   final platformJobs = workflow.substring(platformStart);
   _expect(
-    cockpitJob.contains('disable-linux-hw-accel: true') &&
-        !cockpitJob.contains('/dev/kvm'),
-    'Rich Android Cockpit acceptance should avoid the crashing Linux KVM path.',
+    cockpitJob.contains('/dev/kvm') &&
+        cockpitJob.contains('-feature -Vulkan') &&
+        !cockpitJob.contains('disable-linux-hw-accel: true'),
+    'Rich Android Cockpit acceptance should keep KVM while disabling the crashing Vulkan path.',
   );
   _expect(
-    platformJobs.contains(kvmStep) && platformJobs.contains('/dev/kvm'),
-    'Android platform and 16 KB acceptance should keep KVM acceleration.',
+    platformJobs.contains(kvmStep) &&
+        platformJobs.contains('/dev/kvm') &&
+        !platformJobs.contains('-feature -Vulkan'),
+    'Android platform and 16 KB acceptance should keep the default renderer.',
   );
 }
 
