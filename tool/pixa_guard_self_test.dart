@@ -108,6 +108,7 @@ void _enforcesAndroid16KbCiEvidence() {
   const String complete = '''
 api-level: 35
 target: google_apis_ps16k
+bash -euo pipefail <<'PIXA_ANDROID_ACCEPTANCE'
 adb -s emulator-5554 shell getconf PAGE_SIZE
 16384
 zipalign -c -P 16
@@ -127,7 +128,7 @@ dart run tool/pixa_platform_build.dart --platform=android
 ''';
   final List<String> failures = pixaAndroid16KbCiFailures(legacy);
   _expect(
-    failures.length == 8,
+    failures.length == 9,
     'legacy 4 KB Android CI should miss every 16 KB evidence gate',
   );
 }

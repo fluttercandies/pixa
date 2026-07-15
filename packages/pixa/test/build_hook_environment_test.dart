@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:code_assets/code_assets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../hook/build.dart';
@@ -84,7 +85,89 @@ void main() {
     );
   });
 
-  test('Windows TurboJPEG delegates native compiler discovery to cmake-rs', () {
+  test('Windows native build imports the developer prompt environment', () async {
+    final Map<String, String> environment = <String, String>{
+      'ComSpec': r'C:\Windows\System32\cmd.exe',
+      'PATH': r'C:\base',
+    };
+    String? executable;
+    List<String>? arguments;
+
+    await pixaApplyWindowsDeveloperCommandPromptEnvironment(
+      environment,
+      DeveloperCommandPrompt(
+        script: Uri.file(
+          r'C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\Tools\VsDevCmd.bat',
+          windows: true,
+        ),
+        arguments: const <String>['-arch=x64', '-host_arch=x64'],
+      ),
+      runProcess:
+          (
+            String command,
+            List<String> commandArguments, {
+            String? workingDirectory,
+            Map<String, String>? environment,
+          }) async {
+            executable = command;
+            arguments = commandArguments;
+            return ProcessResult(
+              1,
+              0,
+              'INCLUDE=C:\\VC\\include\r\n'
+                  'LIB=C:\\VC\\lib\r\n'
+                  'Path=C:\\VC\\bin;C:\\base\r\n'
+                  '=C:=C:\\repo\r\n',
+              '',
+            );
+          },
+    );
+
+    expect(executable, r'C:\Windows\System32\cmd.exe');
+    expect(arguments, hasLength(4));
+    expect(arguments!.take(3), <String>['/d', '/s', '/c']);
+    expect(
+      arguments!.last,
+      contains(
+        'call "C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise'
+        '\\Common7\\Tools\\VsDevCmd.bat" "-arch=x64" '
+        '"-host_arch=x64" >nul && set',
+      ),
+    );
+    expect(environment['INCLUDE'], r'C:\VC\include');
+    expect(environment['LIB'], r'C:\VC\lib');
+    expect(environment['Path'], r'C:\VC\bin;C:\base');
+    expect(environment, isNot(contains('PATH')));
+    expect(environment, isNot(contains('=C:')));
+  });
+
+  test('Windows developer prompt failures are actionable', () async {
+    await expectLater(
+      pixaApplyWindowsDeveloperCommandPromptEnvironment(
+        <String, String>{'ComSpec': r'C:\Windows\System32\cmd.exe'},
+        DeveloperCommandPrompt(
+          script: Uri.file(r'C:\VS\VsDevCmd.bat', windows: true),
+          arguments: const <String>['-arch=x64'],
+        ),
+        runProcess:
+            (
+              String executable,
+              List<String> arguments, {
+              String? workingDirectory,
+              Map<String, String>? environment,
+            }) async => ProcessResult(1, 1, '', 'compiler setup failed'),
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          allOf(contains('VsDevCmd.bat'), contains('compiler setup failed')),
+        ),
+      ),
+    );
+  });
+
+  test('Windows TurboJPEG delegates native compiler selection to cmake-rs', () {
     final String hook = File('hook/build.dart').readAsStringSync();
 
     expect(hook, isNot(contains('pixaWindowsTurboJpegCmakeToolchain')));

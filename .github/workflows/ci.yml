@@ -69,7 +69,7 @@ jobs:
         shell: bash
         run: cargo install cargo-audit --version 0.22.2 --locked
       - name: Install Melos
-        run: dart pub global activate melos 8.2.1
+        run: dart pub global activate melos 8.2.2
       - name: Add Pub cache bin
         shell: bash
         run: |
@@ -235,7 +235,7 @@ jobs:
           emulator-boot-timeout: 2700
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           script: |
-            set -euo pipefail
+            bash -euo pipefail <<'PIXA_ANDROID_ACCEPTANCE'
             page_size="$(adb -s emulator-5554 shell getconf PAGE_SIZE | tr -d '\r')"
             if [[ "$page_size" != "16384" ]]; then
               echo "Expected Android 16 KB page size, got $page_size." >&2
@@ -260,6 +260,7 @@ jobs:
             done
             .dart_tool/pixa_platform_probe/android/android/gradlew --stop
             bash tool/pixa_android_cockpit_ci.sh
+            PIXA_ANDROID_ACCEPTANCE
       - name: Boot iOS simulator
         if: matrix.platform == 'ios'
         shell: bash

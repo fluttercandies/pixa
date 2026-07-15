@@ -1514,6 +1514,8 @@ List<String> pixaAndroid16KbCiFailures(String workflow) {
   const Map<String, String> required = <String, String>{
     'api-level: 35': 'API 35 emulator',
     'google_apis_ps16k': '16 KB system image',
+    "bash -euo pipefail <<'PIXA_ANDROID_ACCEPTANCE'":
+        'Bash wrapper for emulator action script',
     'getconf PAGE_SIZE': 'device page-size assertion',
     '16384': '16 KB page-size value',
     '-P 16': 'APK 16 KB ZIP alignment check',

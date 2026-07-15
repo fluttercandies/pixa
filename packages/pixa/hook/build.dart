@@ -81,6 +81,16 @@ Future<void> main(List<String> args) async {
     environment['PIXA_PLUGIN_PLAN'] = pluginPlanOutput.toFilePath();
     environment['CARGO_TARGET_DIR'] = cargoTargetDirectory.toFilePath();
     _configureRustToolchainEnvironment(environment);
+    if (input.config.code.targetOS == OS.windows) {
+      final DeveloperCommandPrompt? developerCommandPrompt =
+          input.config.code.cCompiler?.windows.developerCommandPrompt;
+      if (developerCommandPrompt != null) {
+        await pixaApplyWindowsDeveloperCommandPromptEnvironment(
+          environment,
+          developerCommandPrompt,
+        );
+      }
+    }
     _configureNativeRoiEnvironment(environment, pluginPlan);
     _configureAppleCompileEnvironment(
       environment,
@@ -254,6 +264,78 @@ void _configureWindowsNasmEnvironment(Map<String, String> environment) {
       _prependPath(environment, path);
     }
   }
+}
+
+/// Imports the MSVC environment described by Flutter's Native Assets config.
+Future<void> pixaApplyWindowsDeveloperCommandPromptEnvironment(
+  Map<String, String> environment,
+  DeveloperCommandPrompt prompt, {
+  PixaHookProcessRunner runProcess = Process.run,
+}) async {
+  final String commandInterpreter =
+      _caseInsensitiveEnvironmentValue(environment, 'ComSpec') ?? 'cmd.exe';
+  final String script = prompt.script.toFilePath(windows: true);
+  final String command = <String>[
+    'call',
+    _quoteWindowsCommandArgument(script),
+    for (final String argument in prompt.arguments)
+      _quoteWindowsCommandArgument(argument),
+    '>nul',
+    '&&',
+    'set',
+  ].join(' ');
+  final ProcessResult result = await runProcess(commandInterpreter, <String>[
+    '/d',
+    '/s',
+    '/c',
+    command,
+  ], environment: Map<String, String>.of(environment));
+  if (result.exitCode != 0) {
+    final String stderrText = result.stderr.toString().trim();
+    throw StateError(
+      'Pixa could not initialize the Windows C/C++ compiler using $script.'
+      '${stderrText.isEmpty ? '' : '\n$stderrText'}',
+    );
+  }
+
+  var imported = 0;
+  for (final String line in result.stdout.toString().split(RegExp(r'\r?\n'))) {
+    final int separator = line.indexOf('=');
+    if (separator <= 0) {
+      continue;
+    }
+    final String name = line.substring(0, separator);
+    final String value = line.substring(separator + 1);
+    environment.removeWhere(
+      (String key, String _) =>
+          key != name && key.toLowerCase() == name.toLowerCase(),
+    );
+    environment[name] = value;
+    imported++;
+  }
+  if (imported == 0) {
+    throw StateError(
+      'Pixa initialized the Windows C/C++ compiler using $script, but the '
+      'developer command prompt returned no environment variables.',
+    );
+  }
+}
+
+String? _caseInsensitiveEnvironmentValue(
+  Map<String, String> environment,
+  String name,
+) {
+  final String normalized = name.toLowerCase();
+  for (final MapEntry<String, String> entry in environment.entries) {
+    if (entry.key.toLowerCase() == normalized) {
+      return entry.value;
+    }
+  }
+  return null;
+}
+
+String _quoteWindowsCommandArgument(String value) {
+  return '"${value.replaceAll('"', '""')}"';
 }
 
 void _clearStaleTurboJpegCmakeCaches(
