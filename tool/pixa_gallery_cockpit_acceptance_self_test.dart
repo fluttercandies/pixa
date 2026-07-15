@@ -77,7 +77,7 @@ void _androidCiUsesNonPersistentBuildProcesses() {
     'tool/pixa_android_cockpit_prebuild_ci.sh',
   ).readAsStringSync();
   final int cockpitBuild = prebuild.indexOf(
-    'run_memory_bounded_android_build flutter build apk',
+    'run_memory_bounded_android_build_with_retry 3 flutter build apk',
   );
 
   _expect(
@@ -200,9 +200,7 @@ void _androidCiPrebuildsCockpitBeforeStartingTheEmulator() {
   );
   final String source = script.readAsStringSync();
   for (final String required in <String>[
-    'run_memory_bounded_android_build_with_retry 3',
-    './android/gradlew --version --no-daemon',
-    'flutter build apk',
+    'run_memory_bounded_android_build_with_retry 3 flutter build apk',
     '--target cockpit/main.dart',
     '--target-platform=android-x64',
     'FLUTTER_COCKPIT_REMOTE_ENABLED=true',
@@ -216,9 +214,8 @@ void _androidCiPrebuildsCockpitBeforeStartingTheEmulator() {
     );
   }
   _expect(
-    source.indexOf('./android/gradlew --version --no-daemon') <
-        source.indexOf('flutter build apk'),
-    'Android Cockpit should prewarm Gradle before compiling the APK.',
+    !source.contains('./android/gradlew'),
+    'Android Cockpit must not invoke the ignored Gradle wrapper directly.',
   );
 }
 

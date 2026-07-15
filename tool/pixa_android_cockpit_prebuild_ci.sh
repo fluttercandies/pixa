@@ -16,9 +16,7 @@ flutter_version="$(flutter --version --machine | jq -er '.frameworkVersion | sel
 
 (
   cd examples/pixa_gallery
-  run_memory_bounded_android_build_with_retry 3 \
-    ./android/gradlew --version --no-daemon
-  run_memory_bounded_android_build flutter build apk \
+  run_memory_bounded_android_build_with_retry 3 flutter build apk \
     --debug \
     --target cockpit/main.dart \
     --target-platform=android-x64 \
