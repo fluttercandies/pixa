@@ -194,14 +194,14 @@ jobs:
       - name: Build and run Android Cockpit acceptance
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
-          api-level: 35
+          api-level: 30
           arch: x86_64
-          target: google_apis
+          target: google_atd
           profile: pixel_2
-          ram-size: 3072M
+          ram-size: 2048M
           heap-size: 512M
           emulator-boot-timeout: 2700
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 3072
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 2048
           script: bash tool/pixa_android_cockpit_ci.sh
       - name: Upload Android gallery Cockpit acceptance
         if: always()

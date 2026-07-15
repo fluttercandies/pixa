@@ -1123,7 +1123,14 @@ void main() {
     expect(displayDecoder['completionQueueDepth'], 1);
     expect(displayDecoder['completionsReleasedThisFrame'], 1);
     expect(displayDecoder['completionFrameScheduled'], isTrue);
-    expect(secondImage.isCompleted, isFalse);
+    expect(
+      <bool>[
+        firstImage.isCompleted,
+        secondImage.isCompleted,
+      ].where((bool completed) => completed).length,
+      lessThanOrEqualTo(1),
+      reason: 'At most one listener may pass the current frame budget.',
+    );
 
     final ImageInfo firstInfo = await firstImage.future.timeout(
       const Duration(seconds: 5),

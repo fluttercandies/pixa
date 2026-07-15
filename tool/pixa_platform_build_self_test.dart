@@ -99,6 +99,32 @@ Pixa runtime platform self-check passes
     ),
     'does not retry once a passing report exists',
   );
+  const String disappearedVmServiceOutput = '''
+Failed to load "/tmp/probe/integration_test/pixa_self_check_test.dart": Instance of 'VmServiceDisappearedException'
+package:flutter_tools/src/vmservice.dart 873:7 FlutterVmService.findExtensionIsolate
+0 tests passed, 1 failed.
+''';
+  _expect(
+    build.shouldRetryPixaPlatformSelfCheckFailureForTesting(
+      disappearedVmServiceOutput,
+      null,
+    ),
+    'retries a disappeared VM service before self-check evidence exists',
+  );
+  _expect(
+    !build.shouldRetryPixaPlatformSelfCheckFailureForTesting(
+      disappearedVmServiceOutput,
+      passingReport,
+    ),
+    'does not retry a disappeared VM service after evidence exists',
+  );
+  _expect(
+    !build.shouldRetryPixaPlatformSelfCheckFailureForTesting(
+      'loading integration_test/pixa_self_check_test.dart (failed)\n',
+      null,
+    ),
+    'does not retry an unrelated self-check failure',
+  );
 
   stdout.writeln('Pixa platform build self-test passed.');
 }

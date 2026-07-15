@@ -374,9 +374,10 @@ void _androidCockpitSeparatesUiFrom16KbAcceptance() {
   final cockpitJob = workflow.substring(cockpitStart, platformStart);
   final platformJob = workflow.substring(platformStart);
   _expect(
-    cockpitJob.contains('target: google_apis\n') &&
+    cockpitJob.contains('api-level: 30') &&
+        cockpitJob.contains('target: google_atd\n') &&
         !cockpitJob.contains('google_apis_ps16k'),
-    'Android UI acceptance should use the stable Google APIs image.',
+    'Android UI acceptance should use the lightweight stable ATD image.',
   );
   _expect(
     platformJob.contains('target: google_apis_ps16k'),
@@ -412,17 +413,17 @@ void _androidCockpitUsesStableGuestMemoryBudget() {
   final cockpitJob = workflow.substring(cockpitStart, platformStart);
   final platformJob = workflow.substring(platformStart);
   _expect(
-    cockpitJob.contains('ram-size: 3072M'),
-    'Android Cockpit should have enough guest RAM for the Google APIs image.',
+    cockpitJob.contains('ram-size: 2048M'),
+    'Android Cockpit should use the proven ATD guest RAM budget.',
   );
   _expect(
-    cockpitJob.contains('-memory 3072'),
+    cockpitJob.contains('-memory 2048'),
     'Android Cockpit should override duplicate AVD profile RAM settings.',
   );
   _expect(
     script.contains('/proc/meminfo') &&
-        script.contains('required_guest_ram_kib=2900000'),
-    'Android Cockpit should reject an emulator that did not receive 3 GB RAM.',
+        script.contains('required_guest_ram_kib=1900000'),
+    'Android Cockpit should reject an emulator that did not receive 2 GB RAM.',
   );
   _expect(
     platformJob.contains('ram-size: 2048M'),

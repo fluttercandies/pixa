@@ -1152,6 +1152,17 @@ Future<void> _runSelfCheck(
         );
         return;
       }
+      if (attempt < _selfCheckMaxAttempts &&
+          _shouldRetryPixaPlatformSelfCheckFailure(
+            capturedOutput,
+            reportText,
+          )) {
+        stdout.writeln(
+          'Pixa platform self-check lost the VM service before producing a '
+          'report; retrying once.',
+        );
+        continue;
+      }
       throw ProcessException(executable, arguments, 'command failed', exitCode);
     }
     if (reportPath == null || reportPath.trim().isEmpty) {
@@ -1187,6 +1198,28 @@ bool _shouldRetryPixaPlatformSelfCheckTimeout(
   String? reportText,
 ) {
   return reportText == null && !hasFlutterTestPassedMarker(output);
+}
+
+bool shouldRetryPixaPlatformSelfCheckFailureForTesting(
+  String output,
+  String? reportText,
+) {
+  return _shouldRetryPixaPlatformSelfCheckFailure(output, reportText);
+}
+
+bool _shouldRetryPixaPlatformSelfCheckFailure(
+  String output,
+  String? reportText,
+) {
+  if (reportText != null || hasFlutterTestPassedMarker(output)) {
+    return false;
+  }
+  final String normalized = output.replaceAll('\r\n', '\n');
+  return normalized.contains("Instance of 'VmServiceDisappearedException'") &&
+      RegExp(
+        r'Failed to load "[^"]*integration_test/pixa_self_check_test\.dart"',
+      ).hasMatch(normalized) &&
+      normalized.contains('0 tests passed, 1 failed.');
 }
 
 Future<void> _terminateProcess(
