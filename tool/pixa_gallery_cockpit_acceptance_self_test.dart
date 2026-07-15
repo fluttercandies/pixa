@@ -10,6 +10,7 @@ void main() {
   _androidCiEnablesHardwareAcceleration();
   _androidCiIsolatesPlatformProbeFromCockpit();
   _androidCockpitSeparatesUiFrom16KbAcceptance();
+  _androidCockpitPinsKnownStableEmulatorBuild();
   _androidCiReleasesProbeBuildResources();
   _androidCiUsesNonPersistentBuildProcesses();
   _androidBuildPrerequisiteRetrySucceedsOnThirdAttempt();
@@ -382,6 +383,21 @@ void _androidCockpitSeparatesUiFrom16KbAcceptance() {
   _expect(
     platformJob.contains('target: google_apis_ps16k'),
     'Android 16 KB acceptance should keep the ps16k system image.',
+  );
+}
+
+void _androidCockpitPinsKnownStableEmulatorBuild() {
+  final workflow = File('.github/workflows/ci.yml').readAsStringSync();
+  final cockpitStart = workflow.indexOf('\n  android-cockpit:\n');
+  final platformStart = workflow.indexOf('\n  platform-build:\n');
+  _expect(
+    cockpitStart >= 0 && platformStart > cockpitStart,
+    'Android Cockpit and platform jobs should both exist.',
+  );
+  final cockpitJob = workflow.substring(cockpitStart, platformStart);
+  _expect(
+    cockpitJob.contains('emulator-build: 15261927'),
+    'Android Cockpit should pin the known stable Emulator 36.5.11 build.',
   );
 }
 

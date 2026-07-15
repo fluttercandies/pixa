@@ -201,6 +201,7 @@ jobs:
           ram-size: 2048M
           heap-size: 512M
           emulator-boot-timeout: 2700
+          emulator-build: 15261927 # Android Emulator 36.5.11 stable
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 2048
           script: bash tool/pixa_android_cockpit_ci.sh
       - name: Upload Android gallery Cockpit acceptance
