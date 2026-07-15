@@ -488,6 +488,13 @@ void _androidCiCapturesLiveCockpitDiagnostics() {
     'live-adb-heartbeat.txt',
     'live-process-snapshot.txt',
     'pixa_android_cockpit_monitor',
+    'capture_host_emulator_diagnostics',
+    'host-memory.txt',
+    '/sys/fs/cgroup/memory.events',
+    'host-qemu-process.txt',
+    'host-kernel.log',
+    'host-emulator-crash.txt',
+    '/tmp/android-runner/emu-crash-',
     'cleanup_live_diagnostics',
   ]) {
     _expect(

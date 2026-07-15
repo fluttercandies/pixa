@@ -42,6 +42,53 @@ pixa_android_cockpit_monitor() {
   done
 }
 
+capture_host_emulator_diagnostics() {
+  {
+    printf '=== %s ===\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    free -b
+    cat /proc/meminfo
+    for cgroup_file in \
+      /sys/fs/cgroup/memory.events \
+      /sys/fs/cgroup/memory.events.local \
+      /sys/fs/cgroup/memory.current \
+      /sys/fs/cgroup/memory.max; do
+      if [ -r "$cgroup_file" ]; then
+        printf '\n=== %s ===\n' "$cgroup_file"
+        cat "$cgroup_file"
+      fi
+    done
+    printf '\n=== processes ===\n'
+    ps -eo pid,ppid,stat,rss,vsz,etime,comm,args \
+      | grep -E '(flutter|dart|gradle|adb|emulator|qemu|java)' \
+      | grep -v grep \
+      | head -80
+  } > "$diagnostics_dir/host-memory.txt" 2>&1
+
+  : > "$diagnostics_dir/host-qemu-process.txt"
+  while IFS= read -r qemu_pid; do
+    [ -n "$qemu_pid" ] || continue
+    {
+      printf '=== qemu pid %s ===\n' "$qemu_pid"
+      for proc_file in status stat limits cgroup smaps_rollup; do
+        printf '\n--- /proc/%s/%s ---\n' "$qemu_pid" "$proc_file"
+        cat "/proc/$qemu_pid/$proc_file" 2>&1 || true
+      done
+    } >> "$diagnostics_dir/host-qemu-process.txt" 2>&1
+  done < <(pgrep -f 'qemu-system.*-avd test' || true)
+
+  timeout 15s sudo -n dmesg --ctime \
+    > "$diagnostics_dir/host-kernel.log" 2>&1 || true
+
+  : > "$diagnostics_dir/host-emulator-crash.txt"
+  for crash_dir in /tmp/android-runner/emu-crash-*; do
+    [ -d "$crash_dir" ] || continue
+    {
+      printf '=== %s ===\n' "$crash_dir"
+      find "$crash_dir" -maxdepth 4 -type f -printf '%p %s bytes\n'
+    } >> "$diagnostics_dir/host-emulator-crash.txt" 2>&1
+  done
+}
+
 trap cleanup_live_diagnostics EXIT
 
 required_guest_ram_kib=1900000
@@ -77,6 +124,7 @@ status=$?
 
 if [ "$status" -ne 0 ]; then
   printf '%s\n' "$status" > "$diagnostics_dir/acceptance-exit-code.txt"
+  capture_host_emulator_diagnostics
   adb devices -l > "$diagnostics_dir/adb-devices.txt" 2>&1 || true
   adb -s emulator-5554 forward --list > "$diagnostics_dir/adb-forward-list.txt" 2>&1 || true
   timeout 20s adb -s emulator-5554 shell pidof dev.pixa.pixa_gallery > "$diagnostics_dir/app-pid.txt" 2>&1 || true
