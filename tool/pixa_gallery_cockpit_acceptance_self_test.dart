@@ -12,6 +12,8 @@ void main() {
   _androidCockpitSeparatesUiFrom16KbAcceptance();
   _androidCiReleasesProbeBuildResources();
   _androidCiUsesNonPersistentBuildProcesses();
+  _androidBuildPrerequisiteRetrySucceedsOnThirdAttempt();
+  _androidBuildPrerequisiteRetryStopsAtConfiguredLimit();
   _androidCiPrebuildsCockpitBeforeStartingTheEmulator();
   _androidAcceptanceReusesThePrebuiltCockpitApk();
   _androidCiUsesCiSizedEmulatorBootBudget();
@@ -98,6 +100,87 @@ void _androidCiUsesNonPersistentBuildProcesses() {
   );
 }
 
+void _androidBuildPrerequisiteRetrySucceedsOnThirdAttempt() {
+  final result = _runAndroidBuildRetryProbe(
+    maxAttempts: 3,
+    successfulAttempt: 3,
+  );
+  _expect(
+    result.exitCode == 0,
+    'Android build prerequisite retry should recover on the third attempt: '
+    '${result.stderr}',
+  );
+  _expect(
+    result.attempts == 3,
+    'Android build prerequisite retry should run exactly three attempts.',
+  );
+}
+
+void _androidBuildPrerequisiteRetryStopsAtConfiguredLimit() {
+  final result = _runAndroidBuildRetryProbe(
+    maxAttempts: 3,
+    successfulAttempt: 4,
+  );
+  _expect(
+    result.exitCode != 0,
+    'Android build prerequisite retry should preserve terminal failure.',
+  );
+  _expect(
+    result.attempts == 3,
+    'Android build prerequisite retry should stop at the configured limit.',
+  );
+}
+
+({int exitCode, int attempts, String stderr}) _runAndroidBuildRetryProbe({
+  required int maxAttempts,
+  required int successfulAttempt,
+}) {
+  final temp = Directory.systemTemp.createTempSync(
+    'pixa_android_build_retry_self_test_',
+  );
+  try {
+    final counter = File('${temp.path}/attempts.txt');
+    final probe = File('${temp.path}/probe.sh')
+      ..writeAsStringSync('''
+#!/usr/bin/env bash
+set -euo pipefail
+counter_file="\$1"
+successful_attempt="\$2"
+attempt=0
+if [[ -f "\$counter_file" ]]; then
+  attempt="\$(<"\$counter_file")"
+fi
+attempt="\$((attempt + 1))"
+printf '%s' "\$attempt" >"\$counter_file"
+if (( attempt < successful_attempt )); then
+  exit 75
+fi
+''');
+    final process = Process.runSync('bash', <String>[
+      '-c',
+      '''
+source tool/pixa_android_ci_build_env.sh
+PIXA_ANDROID_BUILD_RETRY_DELAY_SECONDS=0 \\
+  run_memory_bounded_android_build_with_retry "\$1" bash "\$2" "\$3" "\$4"
+''',
+      '_',
+      '$maxAttempts',
+      probe.path,
+      counter.path,
+      '$successfulAttempt',
+    ]);
+    return (
+      exitCode: process.exitCode,
+      attempts: counter.existsSync()
+          ? int.parse(counter.readAsStringSync())
+          : 0,
+      stderr: process.stderr.toString(),
+    );
+  } finally {
+    temp.deleteSync(recursive: true);
+  }
+}
+
 void _androidCiPrebuildsCockpitBeforeStartingTheEmulator() {
   final String workflow = File('.github/workflows/ci.yml').readAsStringSync();
   const String prebuildStep = '- name: Prebuild Android gallery Cockpit APK';
@@ -117,6 +200,8 @@ void _androidCiPrebuildsCockpitBeforeStartingTheEmulator() {
   );
   final String source = script.readAsStringSync();
   for (final String required in <String>[
+    'run_memory_bounded_android_build_with_retry 3',
+    './android/gradlew --version --no-daemon',
     'flutter build apk',
     '--target cockpit/main.dart',
     '--target-platform=android-x64',
@@ -130,6 +215,11 @@ void _androidCiPrebuildsCockpitBeforeStartingTheEmulator() {
       'Android Cockpit prebuild should include $required.',
     );
   }
+  _expect(
+    source.indexOf('./android/gradlew --version --no-daemon') <
+        source.indexOf('flutter build apk'),
+    'Android Cockpit should prewarm Gradle before compiling the APK.',
+  );
 }
 
 void _androidAcceptanceReusesThePrebuiltCockpitApk() {
