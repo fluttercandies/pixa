@@ -1507,15 +1507,25 @@ void _checkAndroid16KbCiEvidence(Directory root, List<String> failures) {
   final String workflow = File(
     '${root.path}/.github/workflows/ci.yml',
   ).readAsStringSync();
-  failures.addAll(pixaAndroid16KbCiFailures(workflow));
+  final File acceptanceScript = File(
+    '${root.path}/tool/pixa_android_platform_ci.sh',
+  );
+  if (!acceptanceScript.existsSync()) {
+    failures.add('Android 16 KB CI: missing tool/pixa_android_platform_ci.sh');
+  }
+  failures.addAll(
+    pixaAndroid16KbCiFailures(
+      '$workflow\n${acceptanceScript.existsSync() ? acceptanceScript.readAsStringSync() : ''}',
+    ),
+  );
 }
 
 List<String> pixaAndroid16KbCiFailures(String workflow) {
   const Map<String, String> required = <String, String>{
     'api-level: 35': 'API 35 emulator',
     'google_apis_ps16k': '16 KB system image',
-    "bash -euo pipefail <<'PIXA_ANDROID_ACCEPTANCE'":
-        'Bash wrapper for emulator action script',
+    'bash tool/pixa_android_platform_ci.sh': 'single Bash action command',
+    'set -euo pipefail': 'strict Bash acceptance script',
     'getconf PAGE_SIZE': 'device page-size assertion',
     '16384': '16 KB page-size value',
     '-P 16': 'APK 16 KB ZIP alignment check',
