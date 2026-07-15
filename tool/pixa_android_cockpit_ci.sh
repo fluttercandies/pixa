@@ -2,6 +2,9 @@
 
 set +e
 
+: "${PIXA_ANDROID_COCKPIT_LAUNCH_ID:?Missing Android Cockpit launch id.}"
+: "${PIXA_ANDROID_COCKPIT_PREBUILT_APK:?Missing Android Cockpit APK path.}"
+
 output_root="build/reports/pixa_gallery_cockpit_android"
 diagnostics_dir="$output_root/android-diagnostics"
 
@@ -47,7 +50,13 @@ logcat_pid=$!
 pixa_android_cockpit_monitor &
 monitor_pid=$!
 
-dart run tool/pixa_gallery_cockpit_acceptance.dart --platform=android --device-id=emulator-5554 --output-root="$output_root"
+dart run tool/pixa_gallery_cockpit_acceptance.dart \
+  --platform=android \
+  --device-id=emulator-5554 \
+  --output-root="$output_root" \
+  --prebuilt-android-apk="$PIXA_ANDROID_COCKPIT_PREBUILT_APK" \
+  --prebuilt-android-launch-id="$PIXA_ANDROID_COCKPIT_LAUNCH_ID" \
+  --skip-pub-get
 status=$?
 
 if [ "$status" -ne 0 ]; then

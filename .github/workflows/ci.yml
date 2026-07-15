@@ -147,6 +147,9 @@ jobs:
   platform-build:
     name: Platform build ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
+    env:
+      PIXA_ANDROID_COCKPIT_LAUNCH_ID: pixa-android-cockpit-ci
+      PIXA_ANDROID_COCKPIT_PREBUILT_APK: examples/pixa_gallery/build/app/outputs/flutter-apk/app-debug.apk
     strategy:
       fail-fast: false
       matrix:
@@ -206,6 +209,10 @@ jobs:
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
       - name: Install root dependencies
         run: dart pub get
+      - name: Prebuild Android gallery Cockpit APK
+        if: matrix.platform == 'android'
+        shell: bash
+        run: bash tool/pixa_android_cockpit_prebuild_ci.sh
       - name: Enable Android emulator KVM acceleration
         if: matrix.platform == 'android'
         shell: bash

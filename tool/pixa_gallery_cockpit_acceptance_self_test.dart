@@ -11,6 +11,8 @@ void main() {
   _androidCiUsesOneEmulatorForPlatformAcceptance();
   _androidCiReleasesProbeBuildResources();
   _androidCiUsesNonPersistentBuildProcesses();
+  _androidCiPrebuildsCockpitBeforeStartingTheEmulator();
+  _androidAcceptanceReusesThePrebuiltCockpitApk();
   _androidCiUsesCiSizedEmulatorBootBudget();
   _androidCiCapturesCockpitDiagnosticsOnFailure();
   _androidCiCapturesLiveCockpitDiagnostics();
@@ -60,7 +62,12 @@ void _androidCiUsesNonPersistentBuildProcesses() {
   final String script = File(
     'tool/pixa_android_platform_ci.sh',
   ).readAsStringSync();
-  final int helper = script.indexOf('run_memory_bounded_android_build()');
+  final String buildEnvironment = File(
+    'tool/pixa_android_ci_build_env.sh',
+  ).readAsStringSync();
+  final int helper = buildEnvironment.indexOf(
+    'run_memory_bounded_android_build()',
+  );
   final int probe = script.indexOf(
     'run_memory_bounded_android_build dart run '
     'tool/pixa_platform_build.dart',
@@ -71,19 +78,104 @@ void _androidCiUsesNonPersistentBuildProcesses() {
   );
 
   _expect(
-    helper >= 0 && probe > helper && cockpit > probe,
+    helper >= 0 &&
+        script.contains('source tool/pixa_android_ci_build_env.sh') &&
+        probe >= 0 &&
+        cockpit > probe,
     'Android CI should bound both serial Android builds.',
   );
   _expect(
-    script.contains('-Dorg.gradle.daemon=false') &&
-        script.contains('-Dorg.gradle.workers.max=2'),
+    buildEnvironment.contains('-Dorg.gradle.daemon=false') &&
+        buildEnvironment.contains('-Dorg.gradle.workers.max=2'),
     'Android CI should avoid persistent Gradle daemons and bound workers.',
   );
   _expect(
-    script.contains(
+    buildEnvironment.contains(
       'ORG_GRADLE_PROJECT_kotlin.compiler.execution.strategy=in-process',
     ),
     'Android CI should compile Kotlin inside the bounded Gradle process.',
+  );
+}
+
+void _androidCiPrebuildsCockpitBeforeStartingTheEmulator() {
+  final String workflow = File('.github/workflows/ci.yml').readAsStringSync();
+  const String prebuildStep = '- name: Prebuild Android gallery Cockpit APK';
+  const String emulatorStep =
+      '- name: Build and run Android platform acceptance';
+  final int prebuild = workflow.indexOf(prebuildStep);
+  final int emulator = workflow.indexOf(emulatorStep);
+  final File script = File('tool/pixa_android_cockpit_prebuild_ci.sh');
+
+  _expect(
+    prebuild >= 0 && emulator > prebuild,
+    'Android Cockpit should build before the memory-heavy emulator starts.',
+  );
+  _expect(
+    script.existsSync(),
+    'Android CI should provide a dedicated Cockpit prebuild script.',
+  );
+  final String source = script.readAsStringSync();
+  for (final String required in <String>[
+    'flutter build apk',
+    '--target cockpit/main.dart',
+    '--target-platform=android-x64',
+    'FLUTTER_COCKPIT_REMOTE_ENABLED=true',
+    'FLUTTER_COCKPIT_REMOTE_LAUNCH_ID=',
+    'PIXA_ANDROID_COCKPIT_PREBUILT_APK',
+    'dart compilation-server shutdown',
+  ]) {
+    _expect(
+      source.contains(required),
+      'Android Cockpit prebuild should include $required.',
+    );
+  }
+}
+
+void _androidAcceptanceReusesThePrebuiltCockpitApk() {
+  final String ciScript = File(
+    'tool/pixa_android_cockpit_ci.sh',
+  ).readAsStringSync();
+  final String acceptanceSource = File(
+    'tool/pixa_gallery_cockpit_acceptance.dart',
+  ).readAsStringSync();
+
+  for (final String required in <String>[
+    '--prebuilt-android-apk=',
+    '--prebuilt-android-launch-id=',
+    'PIXA_ANDROID_COCKPIT_PREBUILT_APK',
+    'PIXA_ANDROID_COCKPIT_LAUNCH_ID',
+  ]) {
+    _expect(
+      ciScript.contains(required),
+      'Android Cockpit CI should pass $required to acceptance.',
+    );
+  }
+  for (final String required in <String>[
+    'CockpitAndroidRemoteSessionLauncher',
+    'CockpitRemoteSessionLaunchOptions',
+    'prebuiltAndroidApk',
+    'prebuiltAndroidLaunchId',
+    'isCockpitAndroidBuildApkCommand',
+  ]) {
+    _expect(
+      acceptanceSource.contains(required),
+      'Android acceptance should reuse the APK through $required.',
+    );
+  }
+  _expect(
+    acceptance.isCockpitAndroidBuildApkCommand(
+      '/opt/flutter/bin/flutter',
+      const <String>['build', 'apk', '--debug'],
+    ),
+    'Prebuilt Android acceptance should skip only Flutter APK builds.',
+  );
+  _expect(
+    !acceptance.isCockpitAndroidBuildApkCommand('adb', const <String>[
+      'install',
+      '-r',
+      'app-debug.apk',
+    ]),
+    'Prebuilt Android acceptance should still execute adb installation.',
   );
 }
 

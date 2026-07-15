@@ -1,13 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-run_memory_bounded_android_build() {
-  local gradle_opts="${GRADLE_OPTS:-}"
-  env \
-    GRADLE_OPTS="${gradle_opts:+$gradle_opts }-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2" \
-    'ORG_GRADLE_PROJECT_kotlin.compiler.execution.strategy=in-process' \
-    "$@"
-}
+source tool/pixa_android_ci_build_env.sh
 
 device=emulator-5554
 page_size="$(adb -s "$device" shell getconf PAGE_SIZE | tr -d '\r')"

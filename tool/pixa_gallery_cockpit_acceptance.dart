@@ -20,6 +20,9 @@ Future<void> main(List<String> args) async {
   final outputRoot = Directory(
     options.outputRoot ?? 'build/reports/pixa_gallery_cockpit_$platform',
   ).absolute;
+  final File? prebuiltAndroidApk = options.prebuiltAndroidApk == null
+      ? null
+      : File(options.prebuiltAndroidApk!).absolute;
 
   if (!projectDir.existsSync()) {
     throw StateError(
@@ -29,6 +32,19 @@ Future<void> main(List<String> args) async {
   if (!workflowFile.existsSync()) {
     throw StateError(
       'Cockpit workflow file does not exist: ${workflowFile.path}',
+    );
+  }
+  if (prebuiltAndroidApk != null && platform != 'android') {
+    throw ArgumentError(
+      '--prebuilt-android-apk is only valid when --platform=android.',
+    );
+  }
+  if (prebuiltAndroidApk != null &&
+      (!prebuiltAndroidApk.existsSync() ||
+          prebuiltAndroidApk.lengthSync() == 0)) {
+    throw StateError(
+      'Prebuilt Android Cockpit APK is missing or empty: '
+      '${prebuiltAndroidApk.path}',
     );
   }
 
@@ -82,6 +98,8 @@ Future<void> main(List<String> args) async {
           scriptPath:
               '${outputRoot.path}${Platform.pathSeparator}pixa_gallery_acceptance.yaml',
           workflow: workflow,
+          prebuiltAndroidApk: prebuiltAndroidApk,
+          prebuiltAndroidLaunchId: options.prebuiltAndroidLaunchId,
         )
       : await _runCockpitValidateTaskCli(
           configFile: configFile,
@@ -191,9 +209,18 @@ Future<_ValidationCommandResult> _runValidationWithRemoteOnlyHostCapture({
   required String outputRoot,
   required String scriptPath,
   required String workflow,
+  required File? prebuiltAndroidApk,
+  required String? prebuiltAndroidLaunchId,
 }) async {
   try {
-    final launchService = cockpit.CockpitLaunchRemoteSessionService();
+    final launchService = cockpit.CockpitLaunchRemoteSessionService(
+      launcher: prebuiltAndroidApk == null
+          ? null
+          : _prebuiltAndroidCockpitLauncher(
+              prebuiltAndroidApk: prebuiltAndroidApk,
+              prebuiltAndroidLaunchId: prebuiltAndroidLaunchId!,
+            ),
+    );
     final runScriptService = cockpit.CockpitRunRemoteControlScriptService(
       captureStrategyResolver: _remoteOnlyAndroidCaptureStrategyResolver(),
     );
@@ -250,6 +277,116 @@ Future<_ValidationCommandResult> _runValidationWithRemoteOnlyHostCapture({
       exitCode: 1,
       stdout: '',
       stderr: '$error\n$stackTrace\n',
+    );
+  }
+}
+
+cockpit.CockpitRemoteSessionLauncher _prebuiltAndroidCockpitLauncher({
+  required File prebuiltAndroidApk,
+  required String prebuiltAndroidLaunchId,
+}) {
+  final delegate = cockpit.CockpitAndroidRemoteSessionLauncher(
+    processRunner: (executable, arguments, {workingDirectory, environment}) {
+      if (isCockpitAndroidBuildApkCommand(executable, arguments)) {
+        if (!prebuiltAndroidApk.existsSync() ||
+            prebuiltAndroidApk.lengthSync() == 0) {
+          return Future<ProcessResult>.value(
+            ProcessResult(
+              0,
+              1,
+              '',
+              'Prebuilt Android Cockpit APK is missing or empty: '
+                  '${prebuiltAndroidApk.path}',
+            ),
+          );
+        }
+        stdout.writeln(
+          '  android build: using prebuilt APK ${prebuiltAndroidApk.path}',
+        );
+        return Future<ProcessResult>.value(
+          ProcessResult(
+            0,
+            0,
+            'Using prebuilt Android Cockpit APK: '
+                '${prebuiltAndroidApk.path}',
+            '',
+          ),
+        );
+      }
+      return Process.run(
+        executable,
+        arguments,
+        workingDirectory: workingDirectory,
+        environment: environment,
+      );
+    },
+    buildArtifactResolver:
+        ({required projectDir, required buildDirectory, flavor}) async {
+          final applicationId =
+              await cockpit
+                  .CockpitAndroidRemoteSessionLauncher.resolveApplicationId(
+                projectDir: projectDir,
+              );
+          if (applicationId == null) {
+            throw StateError(
+              'Unable to resolve Android applicationId from $projectDir.',
+            );
+          }
+          return cockpit.CockpitAndroidBuildArtifact(
+            applicationId: applicationId,
+            apkPath: prebuiltAndroidApk.path,
+          );
+        },
+  );
+  return _AndroidPrebuiltLaunchIdLauncher(
+    delegate: delegate,
+    launchId: prebuiltAndroidLaunchId,
+  );
+}
+
+bool isCockpitAndroidBuildApkCommand(
+  String executable,
+  List<String> arguments,
+) {
+  final executableName = executable
+      .replaceAll('\\', '/')
+      .split('/')
+      .last
+      .toLowerCase();
+  return (executableName == 'flutter' || executableName == 'flutter.bat') &&
+      arguments.length >= 2 &&
+      arguments[0] == 'build' &&
+      arguments[1] == 'apk';
+}
+
+final class _AndroidPrebuiltLaunchIdLauncher
+    implements cockpit.CockpitRemoteSessionLauncher {
+  const _AndroidPrebuiltLaunchIdLauncher({
+    required this.delegate,
+    required this.launchId,
+  });
+
+  final cockpit.CockpitRemoteSessionLauncher delegate;
+  final String launchId;
+
+  @override
+  Future<cockpit.CockpitRemoteSessionHandle> launch(
+    cockpit.CockpitRemoteSessionLaunchOptions options,
+  ) {
+    return delegate.launch(
+      cockpit.CockpitRemoteSessionLaunchOptions(
+        projectDir: options.projectDir,
+        target: options.target,
+        platform: options.platform,
+        deviceId: options.deviceId,
+        sessionPort: options.sessionPort,
+        flavor: options.flavor,
+        launchTimeout: options.launchTimeout,
+        flutterVersion: options.flutterVersion,
+        flutterExecutable: options.flutterExecutable,
+        launchId: launchId,
+        launchConfiguration: options.launchConfiguration,
+      ),
     );
   }
 }
@@ -733,6 +870,8 @@ final class _Options {
     required this.sessionPort,
     required this.launchTimeoutSeconds,
     required this.skipPubGet,
+    required this.prebuiltAndroidApk,
+    required this.prebuiltAndroidLaunchId,
   });
 
   final bool help;
@@ -744,6 +883,8 @@ final class _Options {
   final int sessionPort;
   final int? launchTimeoutSeconds;
   final bool skipPubGet;
+  final String? prebuiltAndroidApk;
+  final String? prebuiltAndroidLaunchId;
 
   factory _Options.parse(List<String> args) {
     final values = <String, String>{};
@@ -761,6 +902,18 @@ final class _Options {
         throw ArgumentError('Unknown argument: $arg');
       }
     }
+    final prebuiltAndroidApk = values['prebuilt-android-apk'];
+    final prebuiltAndroidLaunchId = values['prebuilt-android-launch-id'];
+    if ((prebuiltAndroidApk == null) != (prebuiltAndroidLaunchId == null)) {
+      throw ArgumentError(
+        '--prebuilt-android-apk and --prebuilt-android-launch-id '
+        'must be provided together.',
+      );
+    }
+    if (prebuiltAndroidApk?.trim().isEmpty == true ||
+        prebuiltAndroidLaunchId?.trim().isEmpty == true) {
+      throw ArgumentError('Prebuilt Android Cockpit values cannot be empty.');
+    }
     return _Options(
       help: help,
       projectDir: values['project-dir'] ?? 'examples/pixa_gallery',
@@ -775,6 +928,8 @@ final class _Options {
           ? int.parse(values['launch-timeout-seconds']!)
           : null,
       skipPubGet: skipPubGet,
+      prebuiltAndroidApk: prebuiltAndroidApk,
+      prebuiltAndroidLaunchId: prebuiltAndroidLaunchId,
     );
   }
 }
@@ -792,5 +947,7 @@ Options:
   --output-root=<path>                 Defaults to build/reports/pixa_gallery_cockpit_<platform>.
   --session-port=<port>                Defaults to 47331.
   --launch-timeout-seconds=<seconds>   Defaults to 2160 on Android/iOS, 240 elsewhere.
+  --prebuilt-android-apk=<path>        Reuse an APK built before the CI emulator starts.
+  --prebuilt-android-launch-id=<id>    Launch id embedded in the prebuilt Android APK.
   --skip-pub-get                       Do not run flutter pub get first.
 ''';
