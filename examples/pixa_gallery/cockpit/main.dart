@@ -1,6 +1,19 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_cockpit/flutter_cockpit_flutter.dart';
 import 'package:pixa_gallery/main.dart' as gallery;
+
+CockpitNativeCapture? pixaCockpitNativeCaptureOverride(
+  TargetPlatform platform,
+) {
+  if (platform != TargetPlatform.android) {
+    return null;
+  }
+  return const CockpitNativeCapture(
+    channel: MethodChannel('dev.pixa.gallery/cockpit_flutter_capture'),
+  );
+}
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -8,6 +21,7 @@ void main() {
     FlutterCockpitApp(
       config: FlutterCockpitConfig.production(
         initialRouteName: '/gallery',
+        nativeCapture: pixaCockpitNativeCaptureOverride(defaultTargetPlatform),
         remoteSession: CockpitRemoteSessionConfiguration.resolveFromEnvironment(
           fallback: const CockpitRemoteSessionConfiguration(
             enabled: true,
