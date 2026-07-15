@@ -196,7 +196,7 @@ jobs:
         with:
           api-level: 35
           arch: x86_64
-          target: google_apis_ps16k
+          target: google_apis
           profile: pixel_2
           ram-size: 4096M
           heap-size: 512M

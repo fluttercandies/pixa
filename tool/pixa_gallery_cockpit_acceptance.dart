@@ -586,6 +586,7 @@ final class _ValidationCommandResult {
 int defaultLaunchTimeoutSecondsForPlatform(String platform) {
   return switch (platform) {
     'android' || 'ios' => 2160,
+    'macos' => 600,
     _ => 240,
   };
 }

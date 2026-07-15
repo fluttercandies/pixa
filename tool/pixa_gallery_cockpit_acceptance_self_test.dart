@@ -9,6 +9,7 @@ void main() {
   _mobilePlatformsUseCiSizedLaunchBudget();
   _androidCiEnablesHardwareAcceleration();
   _androidCiIsolatesPlatformProbeFromCockpit();
+  _androidCockpitSeparatesUiFrom16KbAcceptance();
   _androidCiReleasesProbeBuildResources();
   _androidCiUsesNonPersistentBuildProcesses();
   _androidCiPrebuildsCockpitBeforeStartingTheEmulator();
@@ -188,8 +189,8 @@ void _mobilePlatformsUseCiSizedLaunchBudget() {
     'iOS cockpit acceptance should allow CI cold simulator build.',
   );
   _expect(
-    acceptance.defaultLaunchTimeoutSecondsForPlatform('macos') == 240,
-    'Desktop cockpit acceptance should keep the normal launch budget.',
+    acceptance.defaultLaunchTimeoutSecondsForPlatform('macos') == 600,
+    'macOS cockpit acceptance should allow a cold Native Assets build.',
   );
 }
 
@@ -272,6 +273,27 @@ void _androidCiEnablesHardwareAcceleration() {
       'Android KVM acceleration should configure /dev/kvm access.',
     );
   }
+}
+
+void _androidCockpitSeparatesUiFrom16KbAcceptance() {
+  final workflow = File('.github/workflows/ci.yml').readAsStringSync();
+  final cockpitStart = workflow.indexOf('\n  android-cockpit:\n');
+  final platformStart = workflow.indexOf('\n  platform-build:\n');
+  _expect(
+    cockpitStart >= 0 && platformStart > cockpitStart,
+    'Android Cockpit and platform jobs should both exist.',
+  );
+  final cockpitJob = workflow.substring(cockpitStart, platformStart);
+  final platformJob = workflow.substring(platformStart);
+  _expect(
+    cockpitJob.contains('target: google_apis\n') &&
+        !cockpitJob.contains('google_apis_ps16k'),
+    'Android UI acceptance should use the stable Google APIs image.',
+  );
+  _expect(
+    platformJob.contains('target: google_apis_ps16k'),
+    'Android 16 KB acceptance should keep the ps16k system image.',
+  );
 }
 
 void _androidCiUsesCiSizedEmulatorBootBudget() {
