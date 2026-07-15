@@ -120,6 +120,7 @@ jobs:
     needs:
       - flutter-stable
       - platform-build
+      - android-cockpit
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -144,12 +145,74 @@ jobs:
           --require-native-modules=jpeg-turbo-roi,webp-roi
           --require-git-commit=${{ github.sha }}
 
-  platform-build:
-    name: Platform build ${{ matrix.platform }}
-    runs-on: ${{ matrix.os }}
+  android-cockpit:
+    name: Android gallery Cockpit
+    runs-on: ubuntu-latest
     env:
       PIXA_ANDROID_COCKPIT_LAUNCH_ID: pixa-android-cockpit-ci
       PIXA_ANDROID_COCKPIT_PREBUILT_APK: examples/pixa_gallery/build/app/outputs/flutter-apk/app-debug.apk
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install Rust 1.89.0
+        shell: bash
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+          rustup target add x86_64-linux-android --toolchain 1.89.0
+      - name: Install Android native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build nasm pkg-config
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - name: Install Android NDK
+        shell: bash
+        run: |
+          sdkmanager "ndk;27.0.12077973" "platforms;android-36" "build-tools;36.0.0"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+      - name: Install root dependencies
+        run: dart pub get
+      - name: Prebuild Android gallery Cockpit APK
+        shell: bash
+        run: bash tool/pixa_android_cockpit_prebuild_ci.sh
+      - name: Enable Android emulator KVM acceleration
+        shell: bash
+        run: |
+          if [[ -e /dev/kvm ]]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+            sudo chmod 666 /dev/kvm
+            ls -l /dev/kvm
+          else
+            echo "/dev/kvm is not available; Android emulator will use software acceleration."
+          fi
+      - name: Build and run Android Cockpit acceptance
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis_ps16k
+          profile: pixel_2
+          ram-size: 2048M
+          heap-size: 512M
+          emulator-boot-timeout: 2700
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: bash tool/pixa_android_cockpit_ci.sh
+      - name: Upload Android gallery Cockpit acceptance
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pixa-gallery-cockpit-android
+          path: build/reports/pixa_gallery_cockpit_android
+
+  platform-build:
+    name: Platform build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -209,10 +272,6 @@ jobs:
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
       - name: Install root dependencies
         run: dart pub get
-      - name: Prebuild Android gallery Cockpit APK
-        if: matrix.platform == 'android'
-        shell: bash
-        run: bash tool/pixa_android_cockpit_prebuild_ci.sh
       - name: Enable Android emulator KVM acceleration
         if: matrix.platform == 'android'
         shell: bash
@@ -296,7 +355,7 @@ jobs:
           name: pixa-platform-probe-self-check-${{ matrix.platform }}
           path: build/reports/pixa_platform_probe_self_check_${{ matrix.platform }}.json
       - name: Upload gallery cockpit acceptance
-        if: always()
+        if: always() && matrix.platform != 'android'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pixa-gallery-cockpit-${{ matrix.platform }}

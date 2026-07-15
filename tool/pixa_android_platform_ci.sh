@@ -41,4 +41,3 @@ for alignment in "${load_alignments[@]}"; do
 done
 
 .dart_tool/pixa_platform_probe/android/android/gradlew --stop
-run_memory_bounded_android_build bash tool/pixa_android_cockpit_ci.sh
