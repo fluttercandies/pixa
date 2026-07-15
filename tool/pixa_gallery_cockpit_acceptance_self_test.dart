@@ -10,6 +10,7 @@ void main() {
   _androidCiEnablesHardwareAcceleration();
   _androidCiUsesOneEmulatorForPlatformAcceptance();
   _androidCiReleasesProbeBuildResources();
+  _androidCiUsesNonPersistentBuildProcesses();
   _androidCiUsesCiSizedEmulatorBootBudget();
   _androidCiCapturesCockpitDiagnosticsOnFailure();
   _androidCiCapturesLiveCockpitDiagnostics();
@@ -52,6 +53,37 @@ void _androidCiReleasesProbeBuildResources() {
         properties.contains('kotlin.daemon.jvmargs=-Xmx1G') &&
         !properties.contains('-Xmx8G'),
     'Android gallery builds should fit beside the CI emulator.',
+  );
+}
+
+void _androidCiUsesNonPersistentBuildProcesses() {
+  final String script = File(
+    'tool/pixa_android_platform_ci.sh',
+  ).readAsStringSync();
+  final int helper = script.indexOf('run_memory_bounded_android_build()');
+  final int probe = script.indexOf(
+    'run_memory_bounded_android_build dart run '
+    'tool/pixa_platform_build.dart',
+  );
+  final int cockpit = script.indexOf(
+    'run_memory_bounded_android_build bash '
+    'tool/pixa_android_cockpit_ci.sh',
+  );
+
+  _expect(
+    helper >= 0 && probe > helper && cockpit > probe,
+    'Android CI should bound both serial Android builds.',
+  );
+  _expect(
+    script.contains('-Dorg.gradle.daemon=false') &&
+        script.contains('-Dorg.gradle.workers.max=2'),
+    'Android CI should avoid persistent Gradle daemons and bound workers.',
+  );
+  _expect(
+    script.contains(
+      'ORG_GRADLE_PROJECT_kotlin.compiler.execution.strategy=in-process',
+    ),
+    'Android CI should compile Kotlin inside the bounded Gradle process.',
   );
 }
 

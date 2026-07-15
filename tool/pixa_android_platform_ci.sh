@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+run_memory_bounded_android_build() {
+  local gradle_opts="${GRADLE_OPTS:-}"
+  env \
+    GRADLE_OPTS="${gradle_opts:+$gradle_opts }-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2" \
+    'ORG_GRADLE_PROJECT_kotlin.compiler.execution.strategy=in-process' \
+    "$@"
+}
+
 device=emulator-5554
 page_size="$(adb -s "$device" shell getconf PAGE_SIZE | tr -d '\r')"
 if [[ "$page_size" != "16384" ]]; then
@@ -8,7 +16,7 @@ if [[ "$page_size" != "16384" ]]; then
   exit 1
 fi
 
-dart run tool/pixa_platform_build.dart \
+run_memory_bounded_android_build dart run tool/pixa_platform_build.dart \
   --platform=android \
   --enable-native-roi \
   --run-self-check \
@@ -39,4 +47,4 @@ for alignment in "${load_alignments[@]}"; do
 done
 
 .dart_tool/pixa_platform_probe/android/android/gradlew --stop
-bash tool/pixa_android_cockpit_ci.sh
+run_memory_bounded_android_build bash tool/pixa_android_cockpit_ci.sh
