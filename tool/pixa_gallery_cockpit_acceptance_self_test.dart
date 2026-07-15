@@ -14,6 +14,7 @@ void main() {
   _androidCiCapturesCockpitDiagnosticsOnFailure();
   _androidCiCapturesLiveCockpitDiagnostics();
   _androidAcceptanceUsesRemoteOnlyHostCapture();
+  _androidAcceptanceBuildsOnlyTheEmulatorAbi();
   _androidAcceptanceDelaysBaselineUntilWorkbench();
   _androidAcceptanceStabilizesRemoteCommandsBeforeWorkflow();
   _cockpitEntrypointStartsRemoteBeforeGalleryBootstrap();
@@ -255,6 +256,21 @@ void _androidAcceptanceUsesRemoteOnlyHostCapture() {
   }
 }
 
+void _androidAcceptanceBuildsOnlyTheEmulatorAbi() {
+  final android = acceptance.cockpitLaunchConfigurationForPlatform('android');
+  final macos = acceptance.cockpitLaunchConfigurationForPlatform('macos');
+
+  _expect(
+    android.flutterArgs.length == 1 &&
+        android.flutterArgs.single == '--target-platform=android-x64',
+    'Android Cockpit should build only the ABI used by its x64 emulator.',
+  );
+  _expect(
+    macos.isEmpty,
+    'Non-Android Cockpit launch configuration should remain unchanged.',
+  );
+}
+
 void _androidAcceptanceDelaysBaselineUntilWorkbench() {
   _expect(
     !acceptance.baselineCaptureScreenshotForPlatform('android'),
@@ -325,8 +341,16 @@ void _androidAcceptanceDelaysBaselineUntilWorkbench() {
     'Android validate-task config should disable automatic baseline capture.',
   );
   _expect(
+    androidConfig.contains("- '--target-platform=android-x64'"),
+    'Android validate-task config should preserve the x64-only launch.',
+  );
+  _expect(
     macosConfig.contains('captureScreenshot: true'),
     'Non-Android validate-task config should keep automatic baseline capture.',
+  );
+  _expect(
+    !macosConfig.contains('--target-platform'),
+    'Non-Android validate-task config should not select an Android ABI.',
   );
 }
 

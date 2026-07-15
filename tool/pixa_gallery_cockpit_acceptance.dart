@@ -215,6 +215,9 @@ Future<_ValidationCommandResult> _runValidationWithRemoteOnlyHostCapture({
             deviceId: deviceId,
             sessionPort: sessionPort,
             launchTimeout: Duration(seconds: launchTimeoutSeconds),
+            launchConfiguration: cockpitLaunchConfigurationForPlatform(
+              platform,
+            ),
           ),
           outputRoot: outputRoot,
           persistScriptPath: scriptPath,
@@ -253,6 +256,17 @@ Future<_ValidationCommandResult> _runValidationWithRemoteOnlyHostCapture({
 
 bool usesRemoteOnlyHostCaptureForPlatform(String platform) {
   return platform == 'android';
+}
+
+cockpit.CockpitFlutterLaunchConfiguration cockpitLaunchConfigurationForPlatform(
+  String platform,
+) {
+  if (platform != 'android') {
+    return cockpit.CockpitFlutterLaunchConfiguration.empty;
+  }
+  return cockpit.CockpitFlutterLaunchConfiguration(
+    flutterArgs: const <String>['--target-platform=android-x64'],
+  );
 }
 
 const int androidRemoteCommandSurfaceStableSeconds = 20;
@@ -638,6 +652,14 @@ String validateTaskConfig({
   required String scriptPath,
   required String workflow,
 }) {
+  final launchConfiguration = cockpitLaunchConfigurationForPlatform(platform);
+  final launchConfigurationYaml = launchConfiguration.isEmpty
+      ? ''
+      : '''
+    launchConfiguration:
+      flutterArgs:
+${launchConfiguration.flutterArgs.map((argument) => '        - ${_yaml(argument)}').join('\n')}
+''';
   return '''
 runTask:
   launch:
@@ -647,6 +669,7 @@ runTask:
     deviceId: ${_yaml(deviceId)}
     sessionPort: $sessionPort
     launchTimeoutSeconds: $launchTimeoutSeconds
+$launchConfigurationYaml
   outputRoot: ${_yaml(outputRoot)}
   persistScriptPath: ${_yaml(scriptPath)}
   liveRunDisplayName: Pixa gallery cockpit acceptance
