@@ -173,13 +173,40 @@ void main() {
     );
   });
 
-  test('Windows TurboJPEG delegates native compiler selection to cmake-rs', () {
-    final String hook = File('hook/build.dart').readAsStringSync();
+  test(
+    'Windows TurboJPEG uses the imported MSVC environment through NMake',
+    () {
+      final Map<String, String> environment = <String, String>{};
 
-    expect(hook, isNot(contains('pixaWindowsTurboJpegCmakeToolchain')));
-    expect(hook, isNot(contains('_configureWindowsTurboJpegCmakeEnvironment')));
-    expect(hook, isNot(contains('set(CMAKE_SYSTEM_NAME Windows)')));
-  });
+      pixaConfigureWindowsTurboJpegCmakeEnvironment(environment);
+
+      expect(
+        environment['CMAKE_GENERATOR_x86_64-pc-windows-msvc'],
+        'NMake Makefiles',
+      );
+      expect(
+        environment['CMAKE_GENERATOR_x86_64_pc_windows_msvc'],
+        'NMake Makefiles',
+      );
+      expect(
+        environment['CMAKE_GENERATOR_aarch64-pc-windows-msvc'],
+        'NMake Makefiles',
+      );
+      expect(
+        environment['CMAKE_GENERATOR_aarch64_pc_windows_msvc'],
+        'NMake Makefiles',
+      );
+
+      final String hook = File('hook/build.dart').readAsStringSync();
+
+      expect(hook, isNot(contains('pixaWindowsTurboJpegCmakeToolchain')));
+      expect(
+        hook,
+        isNot(contains('_configureWindowsTurboJpegCmakeEnvironment')),
+      );
+      expect(hook, isNot(contains('set(CMAKE_SYSTEM_NAME Windows)')));
+    },
+  );
 
   test('published Rust workspace pins its toolchain and MSRV', () {
     final String toolchain = File(

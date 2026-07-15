@@ -241,6 +241,25 @@ void _configureNativeRoiEnvironment(
     environment['TURBOJPEG_SOURCE'] = 'vendor';
     environment['TURBOJPEG_STATIC'] = '1';
     _configureWindowsNasmEnvironment(environment);
+    if (Platform.isWindows) {
+      pixaConfigureWindowsTurboJpegCmakeEnvironment(environment);
+    }
+  }
+}
+
+void pixaConfigureWindowsTurboJpegCmakeEnvironment(
+  Map<String, String> environment,
+) {
+  for (final String targetTriple in const <String>[
+    'x86_64-pc-windows-msvc',
+    'aarch64-pc-windows-msvc',
+  ]) {
+    _setTargetCmakeEnvironment(
+      environment,
+      targetTriple,
+      'CMAKE_GENERATOR',
+      'NMake Makefiles',
+    );
   }
 }
 
