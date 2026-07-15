@@ -14,6 +14,7 @@ void main() {
   _androidCiPrebuildsCockpitBeforeStartingTheEmulator();
   _androidAcceptanceReusesThePrebuiltCockpitApk();
   _androidCiUsesCiSizedEmulatorBootBudget();
+  _androidCockpitUsesStableGuestMemoryBudget();
   _androidCiCapturesCockpitDiagnosticsOnFailure();
   _androidCiCapturesLiveCockpitDiagnostics();
   _androidAcceptanceUsesRemoteOnlyHostCapture();
@@ -286,6 +287,26 @@ void _androidCiUsesCiSizedEmulatorBootBudget() {
   _expect(
     timeouts.every((timeout) => timeout == 2700),
     'Android emulator boot timeouts should allow slow CI boot.',
+  );
+}
+
+void _androidCockpitUsesStableGuestMemoryBudget() {
+  final workflow = File('.github/workflows/ci.yml').readAsStringSync();
+  final cockpitStart = workflow.indexOf('\n  android-cockpit:\n');
+  final platformStart = workflow.indexOf('\n  platform-build:\n');
+  _expect(
+    cockpitStart >= 0 && platformStart > cockpitStart,
+    'Android Cockpit and platform jobs should both exist.',
+  );
+  final cockpitJob = workflow.substring(cockpitStart, platformStart);
+  final platformJob = workflow.substring(platformStart);
+  _expect(
+    cockpitJob.contains('ram-size: 4096M'),
+    'Android Cockpit should have enough guest RAM for the ps16k Google image.',
+  );
+  _expect(
+    platformJob.contains('ram-size: 2048M'),
+    'The passing Android platform probe should keep its smaller RAM budget.',
   );
 }
 

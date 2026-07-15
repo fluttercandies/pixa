@@ -198,7 +198,7 @@ jobs:
           arch: x86_64
           target: google_apis_ps16k
           profile: pixel_2
-          ram-size: 2048M
+          ram-size: 4096M
           heap-size: 512M
           emulator-boot-timeout: 2700
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
