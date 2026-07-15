@@ -213,6 +213,16 @@ Future<_ValidationCommandResult> _runValidationWithRemoteOnlyHostCapture({
   required String? prebuiltAndroidLaunchId,
 }) async {
   try {
+    final File? androidRemoteCommandTrace = platform == 'android'
+        ? File(
+            '$outputRoot${Platform.pathSeparator}android-diagnostics'
+            '${Platform.pathSeparator}remote-command-timeline.ndjson',
+          )
+        : null;
+    if (androidRemoteCommandTrace != null) {
+      androidRemoteCommandTrace.parent.createSync(recursive: true);
+      androidRemoteCommandTrace.writeAsStringSync('');
+    }
     final launchService = cockpit.CockpitLaunchRemoteSessionService(
       launcher: prebuiltAndroidApk == null
           ? null
@@ -228,6 +238,7 @@ Future<_ValidationCommandResult> _runValidationWithRemoteOnlyHostCapture({
       runTaskService: cockpit.CockpitRunTaskService(
         launch: _launchWithAndroidRemoteCommandSurfaceStabilization(
           launchService,
+          traceFile: androidRemoteCommandTrace,
         ),
         runScriptService: runScriptService,
       ),
@@ -413,15 +424,19 @@ const int _androidRemoteCommandSurfaceRequestTimeoutSeconds = 5;
 
 cockpit.CockpitLaunchTaskFunction
 _launchWithAndroidRemoteCommandSurfaceStabilization(
-  cockpit.CockpitLaunchRemoteSessionService launchService,
-) {
+  cockpit.CockpitLaunchRemoteSessionService launchService, {
+  File? traceFile,
+}) {
   return (request) async {
     final result = await launchService.launch(request);
     if (request.platform == 'android') {
       stdout.writeln(
         '  android remote command surface: waiting for stable readiness',
       );
-      await waitForAndroidRemoteCommandSurface(result.sessionHandle);
+      await waitForAndroidRemoteCommandSurface(
+        result.sessionHandle,
+        traceFile: traceFile,
+      );
       stdout.writeln('  android remote command surface: stable');
     }
     return result;
@@ -439,6 +454,7 @@ Future<void> waitForAndroidRemoteCommandSurface(
   Duration pollInterval = const Duration(
     milliseconds: androidRemoteCommandSurfacePollMilliseconds,
   ),
+  File? traceFile,
 }) async {
   final client = cockpit.CockpitRemoteSessionClient(
     baseUri: sessionHandle.baseUri,
@@ -453,9 +469,26 @@ Future<void> waitForAndroidRemoteCommandSurface(
 
   while (true) {
     attempts += 1;
+    _writeAndroidRemoteCommandTrace(
+      traceFile: traceFile,
+      attempt: attempts,
+      command: 'attempt',
+      phase: 'start',
+    );
     try {
-      final ready = await _androidRemoteCommandSurfaceReady(client);
+      final ready = await _androidRemoteCommandSurfaceReady(
+        client,
+        attempt: attempts,
+        traceFile: traceFile,
+      );
       final now = DateTime.now().toUtc();
+      _writeAndroidRemoteCommandTrace(
+        traceFile: traceFile,
+        attempt: attempts,
+        command: 'attempt',
+        phase: 'success',
+        result: ready ? 'ready' : 'not_ready',
+      );
       if (ready) {
         stableSince ??= now;
         if (now.difference(stableSince) >= stableWindow) {
@@ -467,6 +500,13 @@ Future<void> waitForAndroidRemoteCommandSurface(
     } on Object catch (error) {
       stableSince = null;
       lastError = error;
+      _writeAndroidRemoteCommandTrace(
+        traceFile: traceFile,
+        attempt: attempts,
+        command: 'attempt',
+        phase: 'failure',
+        error: error,
+      );
     }
 
     final now = DateTime.now().toUtc();
@@ -494,15 +534,35 @@ Future<void> waitForAndroidRemoteCommandSurface(
 }
 
 Future<bool> _androidRemoteCommandSurfaceReady(
-  cockpit.CockpitRemoteSessionClient client,
-) async {
-  if (!await client.ping()) {
+  cockpit.CockpitRemoteSessionClient client, {
+  required int attempt,
+  required File? traceFile,
+}) async {
+  final ping = await _traceAndroidRemoteCommand(
+    traceFile: traceFile,
+    attempt: attempt,
+    command: 'ping',
+    action: client.ping,
+  );
+  if (!ping) {
     return false;
   }
-  if (!await client.ready()) {
+  final ready = await _traceAndroidRemoteCommand(
+    traceFile: traceFile,
+    attempt: attempt,
+    command: 'ready',
+    action: client.ready,
+  );
+  if (!ready) {
     return false;
   }
-  final status = await client.readStatus();
+  final status = await _traceAndroidRemoteCommand(
+    traceFile: traceFile,
+    attempt: attempt,
+    command: 'readStatus',
+    action: client.readStatus,
+    summarize: (_) => 'status_received',
+  );
   final statusJson = status.toJson();
   final capabilities = statusJson['capabilities'];
   if (capabilities is! Map<String, Object?>) {
@@ -512,13 +572,111 @@ Future<bool> _androidRemoteCommandSurfaceReady(
   if (commands is! List<Object?> ||
       !commands.contains('assertText') ||
       !commands.contains('captureScreenshot')) {
+    _writeAndroidRemoteCommandTrace(
+      traceFile: traceFile,
+      attempt: attempt,
+      command: 'validateCapabilities',
+      phase: 'failure',
+      result: 'required_commands_missing',
+    );
     return false;
   }
-  await client.readSnapshot();
-  return client.waitForUiIdle(
-    timeout: const Duration(milliseconds: 1200),
-    includeNetworkIdle: false,
+  _writeAndroidRemoteCommandTrace(
+    traceFile: traceFile,
+    attempt: attempt,
+    command: 'validateCapabilities',
+    phase: 'success',
+    result: 'required_commands_available',
   );
+  await _traceAndroidRemoteCommand(
+    traceFile: traceFile,
+    attempt: attempt,
+    command: 'readSnapshot',
+    action: client.readSnapshot,
+    summarize: (_) => 'snapshot_received',
+  );
+  return _traceAndroidRemoteCommand(
+    traceFile: traceFile,
+    attempt: attempt,
+    command: 'waitForUiIdle',
+    action: () => client.waitForUiIdle(
+      timeout: const Duration(milliseconds: 1200),
+      includeNetworkIdle: false,
+    ),
+  );
+}
+
+Future<T> _traceAndroidRemoteCommand<T>({
+  required File? traceFile,
+  required int attempt,
+  required String command,
+  required Future<T> Function() action,
+  Object? Function(T result)? summarize,
+}) async {
+  _writeAndroidRemoteCommandTrace(
+    traceFile: traceFile,
+    attempt: attempt,
+    command: command,
+    phase: 'start',
+  );
+  try {
+    final result = await action();
+    _writeAndroidRemoteCommandTrace(
+      traceFile: traceFile,
+      attempt: attempt,
+      command: command,
+      phase: 'success',
+      result: summarize?.call(result) ?? result,
+    );
+    return result;
+  } on Object catch (error) {
+    _writeAndroidRemoteCommandTrace(
+      traceFile: traceFile,
+      attempt: attempt,
+      command: command,
+      phase: 'failure',
+      error: error,
+    );
+    rethrow;
+  }
+}
+
+void _writeAndroidRemoteCommandTrace({
+  required File? traceFile,
+  required int attempt,
+  required String command,
+  required String phase,
+  Object? result,
+  Object? error,
+}) {
+  final line = androidRemoteCommandTraceLine(
+    timestamp: DateTime.now().toUtc(),
+    attempt: attempt,
+    command: command,
+    phase: phase,
+    result: result,
+    error: error,
+  );
+  stdout.writeln('  android remote command trace: $line');
+  traceFile?.writeAsStringSync('$line\n', mode: FileMode.append, flush: true);
+}
+
+String androidRemoteCommandTraceLine({
+  required DateTime timestamp,
+  required int attempt,
+  required String command,
+  required String phase,
+  Object? result,
+  Object? error,
+}) {
+  return jsonEncode(<String, Object?>{
+    'timestampUtc': timestamp.toUtc().toIso8601String(),
+    'attempt': attempt,
+    'command': command,
+    'phase': phase,
+    'result': ?result,
+    if (error != null) 'error': error.toString(),
+  });
 }
 
 cockpit.CockpitCaptureStrategyResolver

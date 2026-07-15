@@ -10,7 +10,7 @@ void main() {
   _androidCiEnablesHardwareAcceleration();
   _androidCiIsolatesPlatformProbeFromCockpit();
   _androidCockpitSeparatesUiFrom16KbAcceptance();
-  _androidCockpitPinsKnownStableEmulatorBuild();
+  _androidCockpitPinsReproducibleEmulatorBuild();
   _androidCiReleasesProbeBuildResources();
   _androidCiUsesNonPersistentBuildProcesses();
   _androidBuildPrerequisiteRetrySucceedsOnThirdAttempt();
@@ -21,11 +21,13 @@ void main() {
   _androidCockpitUsesStableGuestMemoryBudget();
   _androidCiCapturesCockpitDiagnosticsOnFailure();
   _androidCiCapturesLiveCockpitDiagnostics();
+  _androidCiCapturesQemuExitStatus();
   _windowsNativeDependencyInstallRetriesTransientFailure();
   _androidAcceptanceUsesRemoteOnlyHostCapture();
   _androidAcceptanceBuildsOnlyTheEmulatorAbi();
   _androidAcceptanceDelaysBaselineUntilWorkbench();
   _androidAcceptanceStabilizesRemoteCommandsBeforeWorkflow();
+  _androidRemoteCommandTraceIsStructured();
   _cockpitEntrypointStartsRemoteBeforeGalleryBootstrap();
   _workflowAllowsSlowGalleryBootstrap();
   _windowsFlutterRootResolvesBat();
@@ -386,7 +388,7 @@ void _androidCockpitSeparatesUiFrom16KbAcceptance() {
   );
 }
 
-void _androidCockpitPinsKnownStableEmulatorBuild() {
+void _androidCockpitPinsReproducibleEmulatorBuild() {
   final workflow = File('.github/workflows/ci.yml').readAsStringSync();
   final cockpitStart = workflow.indexOf('\n  android-cockpit:\n');
   final platformStart = workflow.indexOf('\n  platform-build:\n');
@@ -396,8 +398,10 @@ void _androidCockpitPinsKnownStableEmulatorBuild() {
   );
   final cockpitJob = workflow.substring(cockpitStart, platformStart);
   _expect(
-    cockpitJob.contains('emulator-build: 15261927'),
-    'Android Cockpit should pin the known stable Emulator 36.5.11 build.',
+    cockpitJob.contains(
+      'emulator-build: 15261927 # Reproducible diagnostic baseline',
+    ),
+    'Android Cockpit should pin a reproducible emulator diagnostic baseline.',
   );
 }
 
@@ -516,6 +520,30 @@ void _androidCiCapturesLiveCockpitDiagnostics() {
     _expect(
       script.contains(required),
       'Android cockpit live diagnostics should include $required.',
+    );
+  }
+}
+
+void _androidCiCapturesQemuExitStatus() {
+  const scriptPath = 'tool/pixa_android_cockpit_ci.sh';
+  final script = File(scriptPath).readAsStringSync();
+  final selfTest = Process.runSync('bash', <String>[scriptPath, '--self-test']);
+  _expect(
+    selfTest.exitCode == 0,
+    'Android Cockpit diagnostics should self-test Linux proc stat parsing: '
+    '${selfTest.stderr}',
+  );
+  for (final required in <String>[
+    'qemu-pid.txt',
+    'qemu-process-timeline.txt',
+    'qemu-zombie-proc.txt',
+    'pixa_proc_stat_field',
+    'pixa_qemu_monitor',
+    'exit_code_raw',
+  ]) {
+    _expect(
+      script.contains(required),
+      'Android Cockpit diagnostics should preserve QEMU evidence with $required.',
     );
   }
 }
@@ -671,10 +699,10 @@ void _androidAcceptanceStabilizesRemoteCommandsBeforeWorkflow() {
     'androidRemoteCommandSurfaceStableSeconds',
     '_launchWithAndroidRemoteCommandSurfaceStabilization',
     'waitForAndroidRemoteCommandSurface',
-    'client.ping()',
-    'client.ready()',
-    'client.readStatus()',
-    'client.readSnapshot()',
+    'action: client.ping',
+    'action: client.ready',
+    'action: client.readStatus',
+    'action: client.readSnapshot',
     'client.waitForUiIdle(',
   ]) {
     _expect(
@@ -682,6 +710,25 @@ void _androidAcceptanceStabilizesRemoteCommandsBeforeWorkflow() {
       'Android cockpit acceptance should stabilize remote commands with $required.',
     );
   }
+}
+
+void _androidRemoteCommandTraceIsStructured() {
+  final line = acceptance.androidRemoteCommandTraceLine(
+    timestamp: DateTime.utc(2026, 7, 15, 12, 34, 56),
+    attempt: 3,
+    command: 'readSnapshot',
+    phase: 'success',
+    result: 'snapshot_received',
+  );
+  final decoded = jsonDecode(line) as Map<String, Object?>;
+  _expect(
+    decoded['timestampUtc'] == '2026-07-15T12:34:56.000Z' &&
+        decoded['attempt'] == 3 &&
+        decoded['command'] == 'readSnapshot' &&
+        decoded['phase'] == 'success' &&
+        decoded['result'] == 'snapshot_received',
+    'Android remote command traces should be timestamped structured records.',
+  );
 }
 
 void _windowsFlutterRootResolvesBat() {
