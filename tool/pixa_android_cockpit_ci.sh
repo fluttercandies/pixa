@@ -27,6 +27,7 @@ pixa_proc_stat_self_test() {
   fields[49]=2304
   local stat_line="4242 (qemu process (test)) ${fields[*]}"
   [ "$(pixa_proc_stat_field "$stat_line" 3)" = "Z" ] || return 1
+  [ "$(pixa_proc_stat_field "$stat_line" 22)" = "22" ] || return 1
   [ "$(pixa_proc_stat_field "$stat_line" 52)" = "2304" ] || return 1
 }
 
@@ -41,7 +42,8 @@ fi
 output_root="build/reports/pixa_gallery_cockpit_android"
 diagnostics_dir="$output_root/android-diagnostics"
 qemu_pid=""
-qemu_zombie_captured=0
+qemu_start_time=""
+qemu_exit_captured=0
 
 mkdir -p "$diagnostics_dir"
 
@@ -73,19 +75,34 @@ capture_qemu_process_state() {
     return 0
   fi
 
-  local state exit_code_raw
+  local state current_start_time exit_code_raw
   state="$(pixa_proc_stat_field "$stat_line" 3 2>/dev/null)"
+  current_start_time="$(pixa_proc_stat_field "$stat_line" 22 2>/dev/null)"
   exit_code_raw="$(pixa_proc_stat_field "$stat_line" 52 2>/dev/null)"
+  if [ -n "$qemu_start_time" ] && [ "$current_start_time" != "$qemu_start_time" ]; then
+    printf '%s pid=%s state=pid_reused expected_start_time=%s actual_start_time=%s\n' \
+      "$timestamp" "$qemu_pid" "$qemu_start_time" "${current_start_time:-unavailable}" \
+      >> "$diagnostics_dir/qemu-process-timeline.txt"
+    qemu_exit_captured=1
+    return 0
+  fi
   printf '%s pid=%s state=%s exit_code_raw=%s\n' \
     "$timestamp" "$qemu_pid" "${state:-unknown}" "${exit_code_raw:-unavailable}" \
     >> "$diagnostics_dir/qemu-process-timeline.txt"
 
-  if [ "$state" = "Z" ] && [ "$qemu_zombie_captured" -eq 0 ]; then
-    qemu_zombie_captured=1
+  local exit_reason=""
+  if [ "$state" = "Z" ]; then
+    exit_reason="zombie"
+  elif [[ "$exit_code_raw" =~ ^[0-9]+$ ]] && [ "$exit_code_raw" != "0" ]; then
+    exit_reason="nonzero_exit_code"
+  fi
+  if [ -n "$exit_reason" ] && [ "$qemu_exit_captured" -eq 0 ]; then
+    qemu_exit_captured=1
     {
       printf 'timestamp_utc=%s\n' "$timestamp"
       printf 'pid=%s\n' "$qemu_pid"
       printf 'state=%s\n' "$state"
+      printf 'reason=%s\n' "$exit_reason"
       printf 'exit_code_raw=%s\n' "${exit_code_raw:-unavailable}"
       if [[ "$exit_code_raw" =~ ^[0-9]+$ ]]; then
         printf 'exit_status=%s\n' "$(((exit_code_raw >> 8) & 255))"
@@ -96,7 +113,7 @@ capture_qemu_process_state() {
       printf '%s\n' "$stat_line"
       printf '\n--- %s ---\n' "$status_file"
       cat "$status_file" 2>&1 || true
-    } > "$diagnostics_dir/qemu-zombie-proc.txt"
+    } > "$diagnostics_dir/qemu-exit-proc.txt"
   fi
 }
 
@@ -108,9 +125,13 @@ capture_qemu_pid() {
     qemu_pid=""
     return 0
   fi
+  local initial_stat
+  initial_stat="$(cat "/proc/$qemu_pid/stat" 2>/dev/null)"
+  qemu_start_time="$(pixa_proc_stat_field "$initial_stat" 22 2>/dev/null)"
   {
     printf 'timestamp_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
     printf 'pid=%s\n' "$qemu_pid"
+    printf 'start_time_ticks=%s\n' "${qemu_start_time:-unavailable}"
     printf 'cmdline='
     tr '\0' ' ' < "/proc/$qemu_pid/cmdline" 2>/dev/null || true
     printf '\n'
@@ -121,6 +142,9 @@ capture_qemu_pid() {
 pixa_qemu_monitor() {
   while true; do
     capture_qemu_process_state
+    if [ "$qemu_exit_captured" -eq 1 ]; then
+      return 0
+    fi
     sleep 1
   done
 }
@@ -222,7 +246,7 @@ logcat_pid=$!
 pixa_android_cockpit_monitor &
 monitor_pid=$!
 : > "$diagnostics_dir/qemu-process-timeline.txt"
-rm -f "$diagnostics_dir/qemu-zombie-proc.txt"
+rm -f "$diagnostics_dir/qemu-exit-proc.txt"
 capture_qemu_pid
 pixa_qemu_monitor &
 qemu_monitor_pid=$!

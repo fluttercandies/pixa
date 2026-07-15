@@ -7,7 +7,7 @@ import 'pixa_gallery_cockpit_acceptance.dart' as acceptance;
 
 void main() {
   _mobilePlatformsUseCiSizedLaunchBudget();
-  _androidCiEnablesHardwareAcceleration();
+  _androidCiSeparatesCockpitFromHardwareAcceleration();
   _androidCiIsolatesPlatformProbeFromCockpit();
   _androidCockpitSeparatesUiFrom16KbAcceptance();
   _androidCockpitPinsReproducibleEmulatorBuild();
@@ -345,25 +345,31 @@ void _androidCiIsolatesPlatformProbeFromCockpit() {
   );
 }
 
-void _androidCiEnablesHardwareAcceleration() {
+void _androidCiSeparatesCockpitFromHardwareAcceleration() {
   final workflow = File('.github/workflows/ci.yml').readAsStringSync();
   const kvmStep = '- name: Enable Android emulator KVM acceleration';
   final kvmMatches = kvmStep.allMatches(workflow).toList(growable: false);
   _expect(
-    kvmMatches.length == 2,
-    'Both isolated Android jobs should enable KVM acceleration.',
+    kvmMatches.length == 1,
+    'Only the Android platform probe should enable KVM acceleration.',
   );
-  for (final match in kvmMatches) {
-    final nextStepIndex = workflow.indexOf('\n      - name:', match.end);
-    final kvmBlock = workflow.substring(
-      match.start,
-      nextStepIndex == -1 ? workflow.length : nextStepIndex,
-    );
-    _expect(
-      kvmBlock.contains('/dev/kvm'),
-      'Android KVM acceleration should configure /dev/kvm access.',
-    );
-  }
+  final cockpitStart = workflow.indexOf('\n  android-cockpit:\n');
+  final platformStart = workflow.indexOf('\n  platform-build:\n');
+  _expect(
+    cockpitStart >= 0 && platformStart > cockpitStart,
+    'Android Cockpit and platform jobs should both exist.',
+  );
+  final cockpitJob = workflow.substring(cockpitStart, platformStart);
+  final platformJobs = workflow.substring(platformStart);
+  _expect(
+    cockpitJob.contains('disable-linux-hw-accel: true') &&
+        !cockpitJob.contains('/dev/kvm'),
+    'Rich Android Cockpit acceptance should avoid the crashing Linux KVM path.',
+  );
+  _expect(
+    platformJobs.contains(kvmStep) && platformJobs.contains('/dev/kvm'),
+    'Android platform and 16 KB acceptance should keep KVM acceleration.',
+  );
 }
 
 void _androidCockpitSeparatesUiFrom16KbAcceptance() {
@@ -536,9 +542,10 @@ void _androidCiCapturesQemuExitStatus() {
   for (final required in <String>[
     'qemu-pid.txt',
     'qemu-process-timeline.txt',
-    'qemu-zombie-proc.txt',
+    'qemu-exit-proc.txt',
     'pixa_proc_stat_field',
     'pixa_qemu_monitor',
+    'qemu_start_time',
     'exit_code_raw',
   ]) {
     _expect(
