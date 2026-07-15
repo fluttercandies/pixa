@@ -92,7 +92,12 @@ Future<void> main(List<String> args) async {
         );
       }
     }
-    _configureNativeRoiEnvironment(environment, pluginPlan);
+    _configureNativeRoiEnvironment(
+      environment,
+      pluginPlan,
+      targetTriple: targetTriple,
+      outputDirectory: input.outputDirectory,
+    );
     _configureAppleCompileEnvironment(
       environment,
       input.config.code,
@@ -235,14 +240,69 @@ Set<String> _cargoFeatures(PixaRuntimePluginBuildPlan pluginPlan) {
 
 void _configureNativeRoiEnvironment(
   Map<String, String> environment,
-  PixaRuntimePluginBuildPlan pluginPlan,
-) {
+  PixaRuntimePluginBuildPlan pluginPlan, {
+  required String? targetTriple,
+  required Uri outputDirectory,
+}) {
   final Set<String> features = _cargoFeatures(pluginPlan);
   if (features.contains('jpeg-turbo-roi')) {
     environment['TURBOJPEG_SOURCE'] = 'vendor';
     environment['TURBOJPEG_STATIC'] = '1';
     _configureWindowsNasmEnvironment(environment);
+    pixaConfigureWindowsTurboJpegCmakeEnvironment(
+      environment,
+      targetTriple: targetTriple,
+      outputDirectory: outputDirectory,
+    );
   }
+}
+
+void pixaConfigureWindowsTurboJpegCmakeEnvironment(
+  Map<String, String> environment, {
+  required String? targetTriple,
+  required Uri outputDirectory,
+}) {
+  final String? processor = pixaWindowsTurboJpegCmakeSystemProcessor(
+    targetTriple,
+  );
+  if (processor == null || targetTriple == null) {
+    return;
+  }
+  final File toolchain = File.fromUri(
+    outputDirectory.resolve('pixa_windows_turbojpeg_processor.cmake'),
+  );
+  toolchain.parent.createSync(recursive: true);
+  toolchain.writeAsStringSync(
+    'set(CMAKE_SYSTEM_PROCESSOR "$processor" CACHE STRING '
+    '"Pixa target processor for libjpeg-turbo" FORCE)\n',
+  );
+  _setTargetCmakeEnvironment(
+    environment,
+    targetTriple,
+    'CMAKE_TOOLCHAIN_FILE',
+    toolchain.path,
+  );
+}
+
+String? pixaWindowsTurboJpegCmakeSystemProcessor(String? targetTriple) {
+  return switch (targetTriple) {
+    'x86_64-pc-windows-msvc' => 'AMD64',
+    'aarch64-pc-windows-msvc' => 'ARM64',
+    _ => null,
+  };
+}
+
+bool pixaWindowsTurboJpegCmakeCacheIsCurrent(String cacheText) {
+  final bool hasProcessorToolchain = cacheText.contains(
+    'pixa_windows_turbojpeg_processor.cmake',
+  );
+  final bool hasProcessor = RegExp(
+    r'CMAKE_SYSTEM_PROCESSOR(?::STRING)?=(?:AMD64|ARM64)',
+  ).hasMatch(cacheText);
+  final bool compilerDiscoveryFailed = RegExp(
+    r'CMAKE_C_COMPILER(?::FILEPATH)?=.*(?:NOTFOUND|NOT-FOUND)',
+  ).hasMatch(cacheText);
+  return hasProcessorToolchain && hasProcessor && !compilerDiscoveryFailed;
 }
 
 void _configureWindowsNasmEnvironment(Map<String, String> environment) {
@@ -395,13 +455,7 @@ void _clearStaleTurboJpegCmakeCaches(
       }
       cmakeBuild.deleteSync(recursive: true);
     } else if (targetTriple.contains('windows-msvc')) {
-      final bool usedObsoleteToolchain = cacheText.contains(
-        'pixa_windows_turbojpeg_toolchain.cmake',
-      );
-      final bool compilerDiscoveryFailed = RegExp(
-        r'CMAKE_C_COMPILER(?::FILEPATH)?=.*(?:NOTFOUND|NOT-FOUND)',
-      ).hasMatch(cacheText);
-      if (!usedObsoleteToolchain && !compilerDiscoveryFailed) {
+      if (pixaWindowsTurboJpegCmakeCacheIsCurrent(cacheText)) {
         continue;
       }
       cmakeBuild.deleteSync(recursive: true);

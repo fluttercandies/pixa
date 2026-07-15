@@ -213,15 +213,83 @@ void main() {
     );
   });
 
-  test('Windows TurboJPEG delegates native compiler selection to cmake-rs', () {
-    final String hook = File('hook/build.dart').readAsStringSync();
-
-    expect(hook, isNot(contains('pixaWindowsTurboJpegCmakeToolchain')));
+  test('Windows TurboJPEG maps supported MSVC targets to CMake processors', () {
     expect(
-      hook,
-      isNot(contains('pixaConfigureWindowsTurboJpegCmakeEnvironment')),
+      pixaWindowsTurboJpegCmakeSystemProcessor('x86_64-pc-windows-msvc'),
+      'AMD64',
     );
-    expect(hook, isNot(contains('set(CMAKE_SYSTEM_NAME Windows)')));
+    expect(
+      pixaWindowsTurboJpegCmakeSystemProcessor('aarch64-pc-windows-msvc'),
+      'ARM64',
+    );
+    expect(
+      pixaWindowsTurboJpegCmakeSystemProcessor('x86_64-unknown-linux-gnu'),
+      isNull,
+    );
+  });
+
+  test('Windows TurboJPEG toolchain only supplies the missing processor', () {
+    final Directory output = Directory.systemTemp.createTempSync(
+      'pixa_windows_cmake_test_',
+    );
+    addTearDown(() => output.deleteSync(recursive: true));
+    final Map<String, String> environment = <String, String>{};
+
+    pixaConfigureWindowsTurboJpegCmakeEnvironment(
+      environment,
+      targetTriple: 'x86_64-pc-windows-msvc',
+      outputDirectory: output.uri,
+    );
+
+    final String path =
+        environment['CMAKE_TOOLCHAIN_FILE_x86_64-pc-windows-msvc']!;
+    expect(environment['CMAKE_TOOLCHAIN_FILE_x86_64_pc_windows_msvc'], path);
+    expect(environment['TARGET_CMAKE_TOOLCHAIN_FILE'], path);
+    final String toolchain = File(path).readAsStringSync();
+    expect(
+      toolchain,
+      contains(
+        'set(CMAKE_SYSTEM_PROCESSOR "AMD64" CACHE STRING '
+        '"Pixa target processor for libjpeg-turbo" FORCE)',
+      ),
+    );
+    expect(toolchain, isNot(contains('CMAKE_SYSTEM_NAME')));
+    expect(toolchain, isNot(contains('CMAKE_C_COMPILER')));
+    expect(toolchain, isNot(contains('CMAKE_GENERATOR')));
+  });
+
+  test('Windows TurboJPEG rejects stale or incomplete CMake caches', () {
+    const String current = '''
+CMAKE_C_COMPILER:FILEPATH=C:/Visual Studio/VC/Tools/MSVC/bin/cl.exe
+CMAKE_SYSTEM_PROCESSOR:STRING=AMD64
+CMAKE_TOOLCHAIN_FILE:FILEPATH=C:/temp/pixa_windows_turbojpeg_processor.cmake
+''';
+
+    expect(pixaWindowsTurboJpegCmakeCacheIsCurrent(current), isTrue);
+    expect(
+      pixaWindowsTurboJpegCmakeCacheIsCurrent(
+        current.replaceAll(
+          'pixa_windows_turbojpeg_processor.cmake',
+          'pixa_windows_turbojpeg_toolchain.cmake',
+        ),
+      ),
+      isFalse,
+    );
+    expect(
+      pixaWindowsTurboJpegCmakeCacheIsCurrent(
+        current.replaceAll('CMAKE_SYSTEM_PROCESSOR:STRING=AMD64\n', ''),
+      ),
+      isFalse,
+    );
+    expect(
+      pixaWindowsTurboJpegCmakeCacheIsCurrent(
+        current.replaceAll(
+          'C:/Visual Studio/VC/Tools/MSVC/bin/cl.exe',
+          'CMAKE_C_COMPILER-NOTFOUND',
+        ),
+      ),
+      isFalse,
+    );
   });
 
   test('published Rust workspace pins its toolchain and MSRV', () {
