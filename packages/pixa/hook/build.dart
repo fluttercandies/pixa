@@ -275,21 +275,40 @@ Future<void> pixaApplyWindowsDeveloperCommandPromptEnvironment(
   final String commandInterpreter =
       _caseInsensitiveEnvironmentValue(environment, 'ComSpec') ?? 'cmd.exe';
   final String script = prompt.script.toFilePath(windows: true);
-  final String command = <String>[
+  final String developerPromptCommand = <String>[
     'call',
     _quoteWindowsCommandArgument(script),
     for (final String argument in prompt.arguments)
       _quoteWindowsCommandArgument(argument),
     '>nul',
-    '&&',
-    'set',
   ].join(' ');
-  final ProcessResult result = await runProcess(commandInterpreter, <String>[
-    '/d',
-    '/s',
-    '/c',
-    command,
-  ], environment: Map<String, String>.of(environment));
+  final Directory temporaryDirectory = await Directory.systemTemp.createTemp(
+    'pixa_windows_toolchain_',
+  );
+  final File wrapper = File(
+    '${temporaryDirectory.path}${Platform.pathSeparator}'
+    'pixa_windows_toolchain.cmd',
+  );
+  late final ProcessResult result;
+  try {
+    await wrapper.writeAsString(
+      <String>[
+        '@echo off',
+        developerPromptCommand,
+        'if errorlevel 1 exit /b %errorlevel%',
+        'set',
+        '',
+      ].join('\r\n'),
+    );
+    result = await runProcess(commandInterpreter, <String>[
+      '/d',
+      '/s',
+      '/c',
+      wrapper.path,
+    ], environment: Map<String, String>.of(environment));
+  } finally {
+    await temporaryDirectory.delete(recursive: true);
+  }
   if (result.exitCode != 0) {
     final String stderrText = result.stderr.toString().trim();
     throw StateError(

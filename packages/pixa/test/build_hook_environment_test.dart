@@ -92,6 +92,8 @@ void main() {
     };
     String? executable;
     List<String>? arguments;
+    String? wrapperPath;
+    String? wrapperContents;
 
     await pixaApplyWindowsDeveloperCommandPromptEnvironment(
       environment,
@@ -111,6 +113,8 @@ void main() {
           }) async {
             executable = command;
             arguments = commandArguments;
+            wrapperPath = commandArguments.last;
+            wrapperContents = File(wrapperPath!).readAsStringSync();
             return ProcessResult(
               1,
               0,
@@ -127,13 +131,15 @@ void main() {
     expect(arguments, hasLength(4));
     expect(arguments!.take(3), <String>['/d', '/s', '/c']);
     expect(
-      arguments!.last,
+      wrapperContents,
       contains(
         'call "C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise'
         '\\Common7\\Tools\\VsDevCmd.bat" "-arch=x64" '
-        '"-host_arch=x64" >nul && set',
+        '"-host_arch=x64" >nul',
       ),
     );
+    expect(wrapperPath, endsWith('pixa_windows_toolchain.cmd'));
+    expect(File(wrapperPath!).existsSync(), isFalse);
     expect(environment['INCLUDE'], r'C:\VC\include');
     expect(environment['LIB'], r'C:\VC\lib');
     expect(environment['Path'], r'C:\VC\bin;C:\base');

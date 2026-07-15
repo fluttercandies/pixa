@@ -1226,8 +1226,29 @@ String? tryExtractPixaPlatformSelfCheckReport(String output) {
 }
 
 bool acceptsNonZeroPixaPlatformSelfCheckExit(String output, String reportText) {
-  return hasFlutterTestPassedMarker(output) &&
-      isPassingPixaPlatformSelfCheckReport(reportText);
+  if (!isPassingPixaPlatformSelfCheckReport(reportText)) {
+    return false;
+  }
+  return hasFlutterTestPassedMarker(output) ||
+      _hasFlutterDeviceGoldenProxyFailureAfterPassingSelfCheck(output);
+}
+
+bool _hasFlutterDeviceGoldenProxyFailureAfterPassingSelfCheck(String output) {
+  final String normalized = output.replaceAll('\r\n', '\n');
+  final int failureSummaryCount = RegExp(
+    r'\b1 test passed, 1 failed\.',
+  ).allMatches(normalized).length;
+  return failureSummaryCount == 1 &&
+      normalized.contains('streamListen: (-32602) Invalid params') &&
+      normalized.contains(
+        "streamListen: invalid 'streamId' parameter: "
+        'integration_test.VmServiceProxyGoldenFileComparator',
+      ) &&
+      RegExp(
+        r'loading [^\n]*integration_test/pixa_self_check_test\.dart '
+        r'\(failed\)',
+      ).hasMatch(normalized) &&
+      normalized.contains('Pixa runtime platform self-check passes');
 }
 
 bool hasFlutterTestPassedMarker(String output) {

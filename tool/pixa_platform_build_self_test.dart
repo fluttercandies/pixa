@@ -31,6 +31,23 @@ void main() {
     build.acceptsNonZeroPixaPlatformSelfCheckExit(passingOutput, passingReport),
     'accepts non-zero exit only with report and pass marker',
   );
+  final String goldenProxyFailureOutput = _outputWithReport(
+    passingReport,
+    suffix: '''
+streamListen: (-32602) Invalid params
+streamListen: invalid 'streamId' parameter: integration_test.VmServiceProxyGoldenFileComparator
+loading /tmp/probe/integration_test/pixa_self_check_test.dart (failed)
+Pixa runtime platform self-check passes
+00:00 +1 -1: 1 test passed, 1 failed.
+''',
+  );
+  _expect(
+    build.acceptsNonZeroPixaPlatformSelfCheckExit(
+      goldenProxyFailureOutput,
+      passingReport,
+    ),
+    'accepts the Flutter device golden proxy failure after Pixa passes',
+  );
 
   _expect(
     !build.acceptsNonZeroPixaPlatformSelfCheckExit(

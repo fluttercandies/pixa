@@ -25,18 +25,18 @@ void main() {
 }
 
 void _androidCiReleasesProbeBuildResources() {
-  final String workflow = File('.github/workflows/ci.yml').readAsStringSync();
+  final String script = File(
+    'tool/pixa_android_platform_ci.sh',
+  ).readAsStringSync();
   final String properties = File(
     'examples/pixa_gallery/android/gradle.properties',
   ).readAsStringSync();
-  final int probe = workflow.indexOf(
-    'pixa_platform_build.dart --platform=android',
-  );
-  final int stop = workflow.indexOf(
+  final int probe = script.indexOf('dart run tool/pixa_platform_build.dart');
+  final int stop = script.indexOf(
     '.dart_tool/pixa_platform_probe/android/android/gradlew --stop',
     probe,
   );
-  final int cockpit = workflow.indexOf(
+  final int cockpit = script.indexOf(
     'bash tool/pixa_android_cockpit_ci.sh',
     probe,
   );
@@ -124,9 +124,11 @@ void _androidCiUsesOneEmulatorForPlatformAcceptance() {
     acceptanceIndex,
     nextStepIndex == -1 ? workflow.length : nextStepIndex,
   );
+  final script = File('tool/pixa_android_platform_ci.sh').readAsStringSync();
   _expect(
-    acceptanceBlock.contains('pixa_platform_build.dart') &&
-        acceptanceBlock.contains('bash tool/pixa_android_cockpit_ci.sh'),
+    acceptanceBlock.contains('script: bash tool/pixa_android_platform_ci.sh') &&
+        script.contains('dart run tool/pixa_platform_build.dart') &&
+        script.contains('bash tool/pixa_android_cockpit_ci.sh'),
     'One Android emulator step should run both platform acceptance surfaces.',
   );
 }
@@ -171,6 +173,9 @@ void _androidCiUsesCiSizedEmulatorBootBudget() {
 
 void _androidCiCapturesCockpitDiagnosticsOnFailure() {
   final workflow = File('.github/workflows/ci.yml').readAsStringSync();
+  final platformScript = File(
+    'tool/pixa_android_platform_ci.sh',
+  ).readAsStringSync();
   final script = File('tool/pixa_android_cockpit_ci.sh').readAsStringSync();
   const cockpitStep = '- name: Build and run Android platform acceptance';
   final cockpitIndex = workflow.indexOf(cockpitStep);
@@ -181,7 +186,8 @@ void _androidCiCapturesCockpitDiagnosticsOnFailure() {
     nextStepIndex == -1 ? workflow.length : nextStepIndex,
   );
   _expect(
-    cockpitBlock.contains('bash tool/pixa_android_cockpit_ci.sh'),
+    cockpitBlock.contains('script: bash tool/pixa_android_platform_ci.sh') &&
+        platformScript.contains('bash tool/pixa_android_cockpit_ci.sh'),
     'Android cockpit acceptance should run through a single shell script.',
   );
   for (final required in <String>[
