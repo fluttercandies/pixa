@@ -5,6 +5,7 @@ import 'pixa_platform_build.dart' as build;
 
 void main() {
   _limitsAndroidBuildResources();
+  _collectsNativeHookFailureDiagnostics();
   _requiresOperationalNativeRoiEvidence();
   _requiresDecodableJpegRoiFixture();
   _requiresOpaqueLossyWebpRoiFixture();
@@ -62,6 +63,12 @@ void main() {
     'retries hosted simulator launch hangs without hiding failures',
   );
   _expect(
+    build
+        .pixaPlatformSelfCheckCommandForTesting('emulator-5554')
+        .contains('--no-dds'),
+    'platform self-check does not depend on the debug service',
+  );
+  _expect(
     build.shouldRetryPixaPlatformSelfCheckTimeoutForTesting(
       'Running Xcode build...\nXcode build done.\n',
       null,
@@ -77,6 +84,47 @@ void main() {
   );
 
   stdout.writeln('Pixa platform build self-test passed.');
+}
+
+void _collectsNativeHookFailureDiagnostics() {
+  final Directory temp = Directory.systemTemp.createTempSync(
+    'pixa-native-hook-diagnostics-',
+  );
+  try {
+    final File hookStderr = File(
+      '${temp.path}/.dart_tool/hooks_runner/pixa/hash/stderr.txt',
+    );
+    hookStderr.parent.createSync(recursive: true);
+    hookStderr.writeAsStringSync('developer prompt failed');
+    final File rustFailure = File(
+      '${temp.path}/build/pixa_rust_build_failure.log',
+    );
+    rustFailure.parent.createSync(recursive: true);
+    rustFailure.writeAsStringSync('cargo failed');
+    final File unrelated = File(
+      '${temp.path}/.dart_tool/hooks_runner/objective_c/hash/stderr.txt',
+    );
+    unrelated.parent.createSync(recursive: true);
+    unrelated.writeAsStringSync('unrelated');
+
+    final List<File> diagnostics = build.pixaNativeBuildDiagnosticFiles(temp);
+
+    _expect(diagnostics.length == 2, 'collects both Pixa native diagnostics');
+    _expect(
+      diagnostics.any((File file) => file.path == hookStderr.path),
+      'collects Pixa hook stderr before Cargo starts',
+    );
+    _expect(
+      diagnostics.any((File file) => file.path == rustFailure.path),
+      'collects the Rust build failure log',
+    );
+    _expect(
+      diagnostics.every((File file) => file.path != unrelated.path),
+      'does not print unrelated package hook logs',
+    );
+  } finally {
+    temp.deleteSync(recursive: true);
+  }
 }
 
 void _limitsAndroidBuildResources() {

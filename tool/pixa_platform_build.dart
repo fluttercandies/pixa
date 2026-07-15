@@ -960,9 +960,14 @@ List<String> _buildCommand(String platform) {
 List<String> _selfCheckCommand(String? deviceId) {
   return <String>[
     'test',
+    '--no-dds',
     'integration_test/pixa_self_check_test.dart',
     if (deviceId != null) ...<String>['-d', deviceId],
   ];
+}
+
+List<String> pixaPlatformSelfCheckCommandForTesting(String? deviceId) {
+  return List<String>.unmodifiable(_selfCheckCommand(deviceId));
 }
 
 String _defaultDeviceKind(String platform) {
@@ -1014,21 +1019,34 @@ Future<void> _run(
 }
 
 void _printRustBuildDiagnostics(Directory root) {
+  for (final File log in pixaNativeBuildDiagnosticFiles(root)) {
+    stderr.writeln('=== ${log.path} ===');
+    stderr.writeln(_tailText(log.readAsStringSync(), 24000));
+  }
+}
+
+List<File> pixaNativeBuildDiagnosticFiles(Directory root) {
   if (!root.existsSync()) {
-    return;
+    return const <File>[];
   }
   final List<File> logs = <File>[];
   for (final FileSystemEntity entity in root.listSync(recursive: true)) {
-    if (entity is File &&
-        entity.uri.pathSegments.last == 'pixa_rust_build_failure.log') {
+    if (entity is! File) {
+      continue;
+    }
+    final String normalizedPath = entity.path.replaceAll('\\', '/');
+    final bool isRustFailure = normalizedPath.endsWith(
+      '/pixa_rust_build_failure.log',
+    );
+    final bool isPixaHookStderr =
+        normalizedPath.contains('/hooks_runner/pixa/') &&
+        normalizedPath.endsWith('/stderr.txt');
+    if (isRustFailure || isPixaHookStderr) {
       logs.add(entity);
     }
   }
   logs.sort((File left, File right) => left.path.compareTo(right.path));
-  for (final File log in logs) {
-    stderr.writeln('=== ${log.path} ===');
-    stderr.writeln(_tailText(log.readAsStringSync(), 24000));
-  }
+  return logs;
 }
 
 String _tailText(String value, int maxChars) {
