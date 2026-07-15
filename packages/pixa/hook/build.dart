@@ -269,10 +269,11 @@ void pixaConfigureWindowsTurboJpegCmakeEnvironment(
     return;
   }
   final File toolchain = File.fromUri(
-    outputDirectory.resolve('pixa_windows_turbojpeg_processor.cmake'),
+    outputDirectory.resolve('pixa_windows_turbojpeg_system.cmake'),
   );
   toolchain.parent.createSync(recursive: true);
   toolchain.writeAsStringSync(
+    'set(CMAKE_SYSTEM_NAME Windows)\n'
     'set(CMAKE_SYSTEM_PROCESSOR "$processor" CACHE STRING '
     '"Pixa target processor for libjpeg-turbo" FORCE)\n',
   );
@@ -294,7 +295,7 @@ String? pixaWindowsTurboJpegCmakeSystemProcessor(String? targetTriple) {
 
 bool pixaWindowsTurboJpegCmakeCacheIsCurrent(String cacheText) {
   final bool hasProcessorToolchain = cacheText.contains(
-    'pixa_windows_turbojpeg_processor.cmake',
+    'pixa_windows_turbojpeg_system.cmake',
   );
   final bool hasProcessor = RegExp(
     r'CMAKE_SYSTEM_PROCESSOR(?::STRING)?=(?:AMD64|ARM64)',

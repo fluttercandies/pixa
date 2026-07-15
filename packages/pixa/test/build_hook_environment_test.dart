@@ -228,49 +228,52 @@ void main() {
     );
   });
 
-  test('Windows TurboJPEG toolchain only supplies the missing processor', () {
-    final Directory output = Directory.systemTemp.createTempSync(
-      'pixa_windows_cmake_test_',
-    );
-    addTearDown(() => output.deleteSync(recursive: true));
-    final Map<String, String> environment = <String, String>{};
+  test(
+    'Windows TurboJPEG identifies the target without selecting a compiler',
+    () {
+      final Directory output = Directory.systemTemp.createTempSync(
+        'pixa_windows_cmake_test_',
+      );
+      addTearDown(() => output.deleteSync(recursive: true));
+      final Map<String, String> environment = <String, String>{};
 
-    pixaConfigureWindowsTurboJpegCmakeEnvironment(
-      environment,
-      targetTriple: 'x86_64-pc-windows-msvc',
-      outputDirectory: output.uri,
-    );
+      pixaConfigureWindowsTurboJpegCmakeEnvironment(
+        environment,
+        targetTriple: 'x86_64-pc-windows-msvc',
+        outputDirectory: output.uri,
+      );
 
-    final String path =
-        environment['CMAKE_TOOLCHAIN_FILE_x86_64-pc-windows-msvc']!;
-    expect(environment['CMAKE_TOOLCHAIN_FILE_x86_64_pc_windows_msvc'], path);
-    expect(environment['TARGET_CMAKE_TOOLCHAIN_FILE'], path);
-    final String toolchain = File(path).readAsStringSync();
-    expect(
-      toolchain,
-      contains(
-        'set(CMAKE_SYSTEM_PROCESSOR "AMD64" CACHE STRING '
-        '"Pixa target processor for libjpeg-turbo" FORCE)',
-      ),
-    );
-    expect(toolchain, isNot(contains('CMAKE_SYSTEM_NAME')));
-    expect(toolchain, isNot(contains('CMAKE_C_COMPILER')));
-    expect(toolchain, isNot(contains('CMAKE_GENERATOR')));
-  });
+      final String path =
+          environment['CMAKE_TOOLCHAIN_FILE_x86_64-pc-windows-msvc']!;
+      expect(environment['CMAKE_TOOLCHAIN_FILE_x86_64_pc_windows_msvc'], path);
+      expect(environment['TARGET_CMAKE_TOOLCHAIN_FILE'], path);
+      final String toolchain = File(path).readAsStringSync();
+      expect(
+        toolchain,
+        contains(
+          'set(CMAKE_SYSTEM_PROCESSOR "AMD64" CACHE STRING '
+          '"Pixa target processor for libjpeg-turbo" FORCE)',
+        ),
+      );
+      expect(toolchain, contains('set(CMAKE_SYSTEM_NAME Windows)'));
+      expect(toolchain, isNot(contains('CMAKE_C_COMPILER')));
+      expect(toolchain, isNot(contains('CMAKE_GENERATOR')));
+    },
+  );
 
   test('Windows TurboJPEG rejects stale or incomplete CMake caches', () {
     const String current = '''
 CMAKE_C_COMPILER:FILEPATH=C:/Visual Studio/VC/Tools/MSVC/bin/cl.exe
 CMAKE_SYSTEM_PROCESSOR:STRING=AMD64
-CMAKE_TOOLCHAIN_FILE:FILEPATH=C:/temp/pixa_windows_turbojpeg_processor.cmake
+CMAKE_TOOLCHAIN_FILE:FILEPATH=C:/temp/pixa_windows_turbojpeg_system.cmake
 ''';
 
     expect(pixaWindowsTurboJpegCmakeCacheIsCurrent(current), isTrue);
     expect(
       pixaWindowsTurboJpegCmakeCacheIsCurrent(
         current.replaceAll(
+          'pixa_windows_turbojpeg_system.cmake',
           'pixa_windows_turbojpeg_processor.cmake',
-          'pixa_windows_turbojpeg_toolchain.cmake',
         ),
       ),
       isFalse,
