@@ -147,7 +147,7 @@ jobs:
 
   android-cockpit:
     name: Android gallery Cockpit
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     env:
       PIXA_ANDROID_COCKPIT_LAUNCH_ID: pixa-android-cockpit-ci
       PIXA_ANDROID_COCKPIT_PREBUILT_APK: examples/pixa_gallery/build/app/outputs/flutter-apk/app-debug.apk
@@ -162,7 +162,11 @@ jobs:
         run: |
           rustup toolchain install 1.89.0 --profile minimal
           rustup default 1.89.0
-          rustup target add aarch64-linux-android --toolchain 1.89.0
+          rustup target add x86_64-linux-android --toolchain 1.89.0
+      - name: Install Android native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build nasm pkg-config
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
       - name: Install Android NDK
         shell: bash
@@ -175,18 +179,31 @@ jobs:
       - name: Prebuild Android gallery Cockpit APK
         shell: bash
         run: bash tool/pixa_android_cockpit_prebuild_ci.sh
+      - name: Enable Android emulator KVM acceleration
+        shell: bash
+        run: |
+          if [[ -e /dev/kvm ]]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+            sudo chmod 666 /dev/kvm
+            ls -l /dev/kvm
+          else
+            echo "/dev/kvm is not available; Android emulator cannot run the Cockpit acceptance baseline." >&2
+            exit 1
+          fi
       - name: Build and run Android Cockpit acceptance
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
-          api-level: 30
-          arch: arm64-v8a
-          target: google_atd
-          profile: pixel_2
+          api-level: 34
+          arch: x86_64
+          target: default
+          profile: pixel_7
           ram-size: 2048M
           heap-size: 512M
           emulator-boot-timeout: 900
-          emulator-build: 15261927 # Reproducible diagnostic baseline
-          emulator-options: -no-window -gpu swiftshader_indirect -accel off -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 2048
+          emulator-build: 15507667 # Flutter Cockpit known-good baseline
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -camera-back none -camera-front none -memory 2048
           script: bash tool/pixa_android_cockpit_ci.sh
       - name: Upload Android gallery Cockpit acceptance
         if: always()

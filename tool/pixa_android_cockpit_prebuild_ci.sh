@@ -19,7 +19,7 @@ flutter_version="$(flutter --version --machine | jq -er '.frameworkVersion | sel
   run_memory_bounded_android_build_with_retry 3 flutter build apk \
     --debug \
     --target cockpit/main.dart \
-    --target-platform=android-arm64 \
+    --target-platform=android-x64 \
     --dart-define=FLUTTER_COCKPIT_REMOTE_ENABLED=true \
     --dart-define=FLUTTER_COCKPIT_REMOTE_HOST=0.0.0.0 \
     --dart-define=FLUTTER_COCKPIT_REMOTE_PORT=47331 \

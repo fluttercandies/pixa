@@ -413,7 +413,7 @@ cockpit.CockpitFlutterLaunchConfiguration cockpitLaunchConfigurationForPlatform(
     return cockpit.CockpitFlutterLaunchConfiguration.empty;
   }
   return cockpit.CockpitFlutterLaunchConfiguration(
-    flutterArgs: const <String>['--target-platform=android-arm64'],
+    flutterArgs: const <String>['--target-platform=android-x64'],
   );
 }
 

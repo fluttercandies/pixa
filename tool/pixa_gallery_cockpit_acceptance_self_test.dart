@@ -7,10 +7,10 @@ import 'pixa_gallery_cockpit_acceptance.dart' as acceptance;
 
 void main() {
   _mobilePlatformsUseCiSizedLaunchBudget();
-  _androidCiRunsRichCockpitOnMacosArm64WithoutNestedVirtualization();
+  _androidCiMatchesFlutterCockpitLinuxBaseline();
   _androidCiIsolatesPlatformProbeFromCockpit();
   _androidCockpitSeparatesUiFrom16KbAcceptance();
-  _androidCockpitPinsReproducibleEmulatorBuild();
+  _androidCockpitPinsKnownGoodEmulatorBuild();
   _androidCiReleasesProbeBuildResources();
   _androidCiUsesNonPersistentBuildProcesses();
   _androidBuildPrerequisiteRetrySucceedsOnThirdAttempt();
@@ -21,7 +21,7 @@ void main() {
   _androidCockpitUsesStableGuestMemoryBudget();
   _androidCiCapturesCockpitDiagnosticsOnFailure();
   _androidCiCapturesLiveCockpitDiagnostics();
-  _androidCockpitDiagnosticsMatchMacosHost();
+  _androidCockpitDiagnosticsMatchLinuxHost();
   _windowsNativeDependencyInstallRetriesTransientFailure();
   _androidAcceptanceUsesRemoteOnlyHostCapture();
   _androidAcceptanceBuildsOnlyTheEmulatorAbi();
@@ -205,7 +205,7 @@ void _androidCiPrebuildsCockpitBeforeStartingTheEmulator() {
   for (final String required in <String>[
     'run_memory_bounded_android_build_with_retry 3 flutter build apk',
     '--target cockpit/main.dart',
-    '--target-platform=android-arm64',
+    '--target-platform=android-x64',
     'FLUTTER_COCKPIT_REMOTE_ENABLED=true',
     'FLUTTER_COCKPIT_REMOTE_LAUNCH_ID=',
     'PIXA_ANDROID_COCKPIT_PREBUILT_APK',
@@ -345,13 +345,13 @@ void _androidCiIsolatesPlatformProbeFromCockpit() {
   );
 }
 
-void _androidCiRunsRichCockpitOnMacosArm64WithoutNestedVirtualization() {
+void _androidCiMatchesFlutterCockpitLinuxBaseline() {
   final workflow = File('.github/workflows/ci.yml').readAsStringSync();
   const kvmStep = '- name: Enable Android emulator KVM acceleration';
   final kvmMatches = kvmStep.allMatches(workflow).toList(growable: false);
   _expect(
-    kvmMatches.length == 1,
-    'Only the Linux Android platform probe should configure KVM.',
+    kvmMatches.length == 2,
+    'Both Linux Android jobs should configure KVM.',
   );
   final cockpitStart = workflow.indexOf('\n  android-cockpit:\n');
   final platformStart = workflow.indexOf('\n  platform-build:\n');
@@ -362,14 +362,16 @@ void _androidCiRunsRichCockpitOnMacosArm64WithoutNestedVirtualization() {
   final cockpitJob = workflow.substring(cockpitStart, platformStart);
   final platformJobs = workflow.substring(platformStart);
   _expect(
-    cockpitJob.contains('runs-on: macos-15') &&
-        cockpitJob.contains('arch: arm64-v8a') &&
-        cockpitJob.contains('rustup target add aarch64-linux-android') &&
-        cockpitJob.contains('-accel off') &&
-        !cockpitJob.contains('/dev/kvm') &&
+    cockpitJob.contains('runs-on: ubuntu-latest') &&
+        cockpitJob.contains('arch: x86_64') &&
+        cockpitJob.contains('rustup target add x86_64-linux-android') &&
+        cockpitJob.contains('/dev/kvm') &&
+        cockpitJob.contains('-no-snapshot-save') &&
+        cockpitJob.contains('-camera-front none') &&
+        !cockpitJob.contains('-accel off') &&
         !cockpitJob.contains('-feature -Vulkan') &&
-        !cockpitJob.contains('apt-get'),
-    'Rich Android Cockpit acceptance should use the macOS arm64 software execution path.',
+        !cockpitJob.contains('macos-15'),
+    'Rich Android Cockpit acceptance should match Flutter Cockpit Linux CI.',
   );
   _expect(
     platformJobs.contains(kvmStep) &&
@@ -390,10 +392,11 @@ void _androidCockpitSeparatesUiFrom16KbAcceptance() {
   final cockpitJob = workflow.substring(cockpitStart, platformStart);
   final platformJob = workflow.substring(platformStart);
   _expect(
-    cockpitJob.contains('api-level: 30') &&
-        cockpitJob.contains('target: google_atd\n') &&
+    cockpitJob.contains('api-level: 34') &&
+        cockpitJob.contains('target: default\n') &&
+        cockpitJob.contains('profile: pixel_7') &&
         !cockpitJob.contains('google_apis_ps16k'),
-    'Android UI acceptance should use the lightweight stable ATD image.',
+    'Android UI acceptance should use Flutter Cockpit\'s proven API 34 default image.',
   );
   _expect(
     platformJob.contains('target: google_apis_ps16k'),
@@ -401,7 +404,7 @@ void _androidCockpitSeparatesUiFrom16KbAcceptance() {
   );
 }
 
-void _androidCockpitPinsReproducibleEmulatorBuild() {
+void _androidCockpitPinsKnownGoodEmulatorBuild() {
   final workflow = File('.github/workflows/ci.yml').readAsStringSync();
   final cockpitStart = workflow.indexOf('\n  android-cockpit:\n');
   final platformStart = workflow.indexOf('\n  platform-build:\n');
@@ -412,9 +415,9 @@ void _androidCockpitPinsReproducibleEmulatorBuild() {
   final cockpitJob = workflow.substring(cockpitStart, platformStart);
   _expect(
     cockpitJob.contains(
-      'emulator-build: 15261927 # Reproducible diagnostic baseline',
+      'emulator-build: 15507667 # Flutter Cockpit known-good baseline',
     ),
-    'Android Cockpit should pin a reproducible emulator diagnostic baseline.',
+    'Android Cockpit should pin the emulator build proven by Flutter Cockpit CI.',
   );
 }
 
@@ -430,7 +433,7 @@ void _androidCiUsesBoundedEmulatorBootBudgets() {
   final platformJobs = workflow.substring(platformStart);
   _expect(
     cockpitJob.contains('emulator-boot-timeout: 900'),
-    'macOS software execution should fail within a bounded boot budget.',
+    'The rich Android Cockpit job should fail within a bounded boot budget.',
   );
   _expect(
     platformJobs.contains('emulator-boot-timeout: 2700'),
@@ -451,7 +454,7 @@ void _androidCockpitUsesStableGuestMemoryBudget() {
   final platformJob = workflow.substring(platformStart);
   _expect(
     cockpitJob.contains('ram-size: 2048M'),
-    'Android Cockpit should use the proven ATD guest RAM budget.',
+    'Android Cockpit should use a stable guest RAM budget.',
   );
   _expect(
     cockpitJob.contains('-memory 2048'),
@@ -527,9 +530,11 @@ void _androidCiCapturesLiveCockpitDiagnostics() {
     'pixa_android_cockpit_monitor',
     'capture_host_emulator_diagnostics',
     'host-memory.txt',
-    'host-emulator-processes.txt',
-    'host-diagnostic-reports.txt',
-    'Library/Logs/DiagnosticReports',
+    '/sys/fs/cgroup/memory.events',
+    'host-qemu-process.txt',
+    'host-kernel.log',
+    'host-emulator-crash.txt',
+    '/tmp/android-runner/emu-crash-',
     'cleanup_live_diagnostics',
   ]) {
     _expect(
@@ -539,36 +544,27 @@ void _androidCiCapturesLiveCockpitDiagnostics() {
   }
 }
 
-void _androidCockpitDiagnosticsMatchMacosHost() {
+void _androidCockpitDiagnosticsMatchLinuxHost() {
   const scriptPath = 'tool/pixa_android_cockpit_ci.sh';
   final script = File(scriptPath).readAsStringSync();
   final selfTest = Process.runSync('bash', <String>[scriptPath, '--self-test']);
   _expect(
     selfTest.exitCode == 0,
-    'Android Cockpit diagnostics timeout helper should self-test: '
+    'Android Cockpit diagnostics should self-test Linux proc stat parsing: '
     '${selfTest.stderr}',
   );
   for (final required in <String>[
-    'sysctl -n hw.memsize',
-    'vm_stat',
-    'ps -axo',
-    'host-memory.txt',
+    'qemu-pid.txt',
+    'qemu-process-timeline.txt',
+    'qemu-exit-proc.txt',
+    'pixa_proc_stat_field',
+    'pixa_qemu_monitor',
+    'qemu_start_time',
+    'exit_code_raw',
   ]) {
     _expect(
       script.contains(required),
-      'Android Cockpit diagnostics should capture macOS host evidence with $required.',
-    );
-  }
-  for (final linuxOnly in <String>[
-    '/sys/fs/cgroup',
-    '/proc/\$qemu_pid',
-    'free -b',
-    'sudo -n dmesg',
-    '/tmp/android-runner/emu-crash-',
-  ]) {
-    _expect(
-      !script.contains(linuxOnly),
-      'macOS Android Cockpit diagnostics should not use $linuxOnly.',
+      'Android Cockpit diagnostics should preserve QEMU evidence with $required.',
     );
   }
 }
@@ -608,8 +604,8 @@ void _androidAcceptanceBuildsOnlyTheEmulatorAbi() {
 
   _expect(
     android.flutterArgs.length == 1 &&
-        android.flutterArgs.single == '--target-platform=android-arm64',
-    'Android Cockpit should build only the ABI used by its arm64 emulator.',
+        android.flutterArgs.single == '--target-platform=android-x64',
+    'Android Cockpit should build only the ABI used by its x64 emulator.',
   );
   _expect(
     macos.isEmpty,
@@ -687,8 +683,8 @@ void _androidAcceptanceDelaysBaselineUntilWorkbench() {
     'Android validate-task config should disable automatic baseline capture.',
   );
   _expect(
-    androidConfig.contains("- '--target-platform=android-arm64'"),
-    'Android validate-task config should preserve the arm64-only launch.',
+    androidConfig.contains("- '--target-platform=android-x64'"),
+    'Android validate-task config should preserve the x64-only launch.',
   );
   _expect(
     macosConfig.contains('captureScreenshot: true'),
