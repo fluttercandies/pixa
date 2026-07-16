@@ -12,14 +12,14 @@ concurrency:
 
 jobs:
   flutter-minimum:
-    name: Flutter 3.41 Linux
+    name: Flutter 3.38 Linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
-          flutter-version: "3.41.9"
+          flutter-version: "3.38.1"
           cache: true
       - name: Install Rust stable
         run: |
@@ -30,7 +30,7 @@ jobs:
       - name: Install root dependencies
         run: dart pub get
       - name: Guard
-        run: dart run tool/pixa_guard.dart
+        run: dart run tool/pixa_guard.dart --skip-dart-dependency-currency
       - name: Platform build wrapper self-test
         run: dart run tool/pixa_platform_build_self_test.dart
       - name: Gallery cockpit wrapper self-test

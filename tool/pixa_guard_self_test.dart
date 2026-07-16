@@ -7,6 +7,8 @@ void main() {
   _detectsCargoCompatibleUpdates();
   _enforcesDependencyOnlyReadmeInstall();
   _enforcesAndroid16KbCiEvidence();
+  _enforcesSdkCompatibilityContract();
+  _selectsDartDependencyCurrencyGate();
   stdout.writeln('Pixa guard self-test passed.');
 }
 
@@ -131,6 +133,92 @@ dart run tool/pixa_platform_build.dart --platform=android
   _expect(
     failures.length == 10,
     'legacy 4 KB Android CI should miss every 16 KB evidence gate',
+  );
+}
+
+void _enforcesSdkCompatibilityContract() {
+  final Map<String, String> compatible = <String, String>{
+    'pubspec.yaml': '''
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+''',
+    'packages/pixa/pubspec.yaml': '''
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+  flutter: ">=3.38.1"
+dependencies:
+  code_assets: ^1.2.1
+  hooks: ^2.0.2
+''',
+    for (final String path in <String>[
+      'packages/pixa_fetcher_s3/pubspec.yaml',
+      'packages/pixa_video_frame_mjpeg/pubspec.yaml',
+      'examples/pixa_gallery/pubspec.yaml',
+    ])
+      path: '''
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+  flutter: ">=3.38.1"
+''',
+    'tool/pixa_platform_build.dart': 'sdk: ">=3.10.0 <4.0.0"',
+    'tool/pixa_pub_dependency_smoke.dart': 'sdk: ">=3.10.0 <4.0.0"',
+    'packages/pixa/PLUGIN_AUTHORING.md': '''
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+  flutter: ">=3.38.1"
+''',
+    '.github/workflows/ci.yml': '''
+name: Flutter 3.38 Linux
+flutter-version: "3.38.1"
+run: dart run tool/pixa_guard.dart --skip-dart-dependency-currency
+''',
+  };
+  _expect(
+    pixaSdkCompatibilityFailures(compatible).isEmpty,
+    'Flutter 3.38.1 and Dart 3.10 compatibility contract should pass',
+  );
+
+  final Map<String, String> stale = <String, String>{
+    ...compatible,
+    'packages/pixa/pubspec.yaml': '''
+environment:
+  sdk: ">=3.11.0 <4.0.0"
+  flutter: ">=3.41.9"
+dependencies:
+  code_assets: ^1.0.0
+  hooks: ">=1.0.0 <3.0.0"
+''',
+    '.github/workflows/ci.yml': '''
+name: Flutter 3.41 Linux
+flutter-version: "3.41.9"
+run: dart run tool/pixa_guard.dart --skip-dart-dependency-currency
+''',
+  };
+  final List<String> failures = pixaSdkCompatibilityFailures(stale);
+  _expect(
+    failures.length == 6,
+    'stale core and CI constraints should fail every compatibility gate',
+  );
+  _expect(
+    failures.any((String failure) => failure.contains('code_assets')),
+    'code_assets compatibility drift should be explicit',
+  );
+  _expect(
+    failures.any((String failure) => failure.contains('Flutter 3.38.1')),
+    'minimum Flutter CI drift should be explicit',
+  );
+}
+
+void _selectsDartDependencyCurrencyGate() {
+  _expect(
+    pixaShouldCheckDartDependencyCurrency(const <String>[]),
+    'full guard should check Dart dependency currency by default',
+  );
+  _expect(
+    !pixaShouldCheckDartDependencyCurrency(const <String>[
+      '--skip-dart-dependency-currency',
+    ]),
+    'minimum-SDK guard should explicitly skip Dart dependency currency',
   );
 }
 

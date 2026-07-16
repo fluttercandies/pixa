@@ -1,11 +1,24 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:yaml/yaml.dart';
+
 const String _rustWorkspacePath = 'packages/pixa/native_src/rust';
 const String _rustManifestPath = '$_rustWorkspacePath/Cargo.toml';
 const String _rustLockPath = '$_rustWorkspacePath/Cargo.lock';
 
-void main() {
+void main(List<String> args) {
+  const String skipDartDependencyCurrency = '--skip-dart-dependency-currency';
+  final List<String> unknownArguments = args
+      .where((String argument) => argument != skipDartDependencyCurrency)
+      .toList(growable: false);
+  if (unknownArguments.isNotEmpty) {
+    stderr.writeln(
+      'Unknown pixa_guard argument(s): ${unknownArguments.join(', ')}',
+    );
+    exitCode = 64;
+    return;
+  }
   final Directory root = Directory.current;
   final List<String> failures = <String>[];
 
@@ -56,6 +69,7 @@ void main() {
   _checkDeveloperDxDocs(root, failures);
   _checkBrandAssets(root, failures);
   _checkUserFacingReadmes(root, failures);
+  _checkSdkCompatibilityContract(root, failures);
   _checkReleaseNeutralReadmeInstallCopy(root, failures);
   _checkPubReleaseReadiness(root, failures);
   _checkReleasePreflightHardening(root, failures);
@@ -67,7 +81,11 @@ void main() {
   _checkRustResolvedLicenses(root, failures);
   _checkRustDependencyAdvisories(root, failures);
   _checkRustDependencyCurrency(root, failures);
-  _checkDartDependencyAdvisories(root, failures);
+  _checkDartDependencyAdvisories(
+    root,
+    failures,
+    checkCurrency: pixaShouldCheckDartDependencyCurrency(args),
+  );
 
   if (failures.isNotEmpty) {
     stderr.writeln('Pixa guard failed:');
@@ -78,6 +96,150 @@ void main() {
     return;
   }
   stdout.writeln('Pixa guard passed.');
+}
+
+bool pixaShouldCheckDartDependencyCurrency(List<String> args) =>
+    !args.contains('--skip-dart-dependency-currency');
+
+const String _minimumDartSdk = '>=3.10.0 <4.0.0';
+const String _minimumFlutterSdk = '>=3.38.1';
+const String _minimumFlutterVersion = '3.38.1';
+
+void _checkSdkCompatibilityContract(Directory root, List<String> failures) {
+  const List<String> paths = <String>[
+    'pubspec.yaml',
+    'packages/pixa/pubspec.yaml',
+    'packages/pixa_fetcher_s3/pubspec.yaml',
+    'packages/pixa_video_frame_mjpeg/pubspec.yaml',
+    'examples/pixa_gallery/pubspec.yaml',
+    'tool/pixa_platform_build.dart',
+    'tool/pixa_pub_dependency_smoke.dart',
+    'packages/pixa/PLUGIN_AUTHORING.md',
+    '.github/workflows/ci.yml',
+  ];
+  final Map<String, String> sources = <String, String>{};
+  for (final String path in paths) {
+    final File file = File('${root.path}/$path');
+    if (file.existsSync()) {
+      sources[path] = file.readAsStringSync();
+    }
+  }
+  failures.addAll(pixaSdkCompatibilityFailures(sources));
+}
+
+List<String> pixaSdkCompatibilityFailures(Map<String, String> sources) {
+  final List<String> failures = <String>[];
+  const List<String> packagePubspecs = <String>[
+    'packages/pixa/pubspec.yaml',
+    'packages/pixa_fetcher_s3/pubspec.yaml',
+    'packages/pixa_video_frame_mjpeg/pubspec.yaml',
+    'examples/pixa_gallery/pubspec.yaml',
+  ];
+  final Map<String, YamlMap> pubspecs = <String, YamlMap>{};
+  for (final String path in <String>['pubspec.yaml', ...packagePubspecs]) {
+    final String? source = sources[path];
+    if (source == null) {
+      failures.add('SDK compatibility: $path is missing');
+      continue;
+    }
+    try {
+      final Object? document = loadYaml(source);
+      if (document is! YamlMap) {
+        failures.add('SDK compatibility: $path must contain a YAML map');
+        continue;
+      }
+      pubspecs[path] = document;
+    } on YamlException catch (error) {
+      failures.add('SDK compatibility: $path is invalid YAML: $error');
+    }
+  }
+
+  for (final MapEntry<String, YamlMap> entry in pubspecs.entries) {
+    final Object? environment = entry.value['environment'];
+    final Object? dartSdk = environment is YamlMap ? environment['sdk'] : null;
+    if (dartSdk != _minimumDartSdk) {
+      failures.add(
+        'SDK compatibility: ${entry.key} must declare Dart '
+        '`$_minimumDartSdk`',
+      );
+    }
+  }
+  for (final String path in packagePubspecs) {
+    final Object? environment = pubspecs[path]?['environment'];
+    final Object? flutterSdk = environment is YamlMap
+        ? environment['flutter']
+        : null;
+    if (pubspecs.containsKey(path) && flutterSdk != _minimumFlutterSdk) {
+      failures.add(
+        'SDK compatibility: $path must declare Flutter '
+        '`$_minimumFlutterSdk`',
+      );
+    }
+  }
+
+  final YamlMap? corePubspec = pubspecs['packages/pixa/pubspec.yaml'];
+  final Object? dependencies = corePubspec?['dependencies'];
+  if (corePubspec != null &&
+      (dependencies is! YamlMap || dependencies['code_assets'] != '^1.2.1')) {
+    failures.add(
+      'SDK compatibility: packages/pixa/pubspec.yaml must declare '
+      '`code_assets: ^1.2.1`',
+    );
+  }
+  if (corePubspec != null &&
+      (dependencies is! YamlMap || dependencies['hooks'] != '^2.0.2')) {
+    failures.add(
+      'SDK compatibility: packages/pixa/pubspec.yaml must declare '
+      '`hooks: ^2.0.2`',
+    );
+  }
+
+  for (final String path in <String>[
+    'tool/pixa_platform_build.dart',
+    'tool/pixa_pub_dependency_smoke.dart',
+    'packages/pixa/PLUGIN_AUTHORING.md',
+  ]) {
+    final String? source = sources[path];
+    if (source == null) {
+      failures.add('SDK compatibility: $path is missing');
+    } else if (!source.contains('sdk: "$_minimumDartSdk"')) {
+      failures.add('SDK compatibility: $path must use Dart `$_minimumDartSdk`');
+    }
+  }
+  final String? pluginGuide = sources['packages/pixa/PLUGIN_AUTHORING.md'];
+  if (pluginGuide != null &&
+      !pluginGuide.contains('flutter: "$_minimumFlutterSdk"')) {
+    failures.add(
+      'SDK compatibility: packages/pixa/PLUGIN_AUTHORING.md must use '
+      'Flutter `$_minimumFlutterSdk`',
+    );
+  }
+
+  final String? workflow = sources['.github/workflows/ci.yml'];
+  if (workflow == null) {
+    failures.add('SDK compatibility: .github/workflows/ci.yml is missing');
+  } else {
+    if (!workflow.contains('name: Flutter 3.38 Linux')) {
+      failures.add(
+        'SDK compatibility: CI must name the Flutter 3.38 minimum job',
+      );
+    }
+    if (!workflow.contains('flutter-version: "$_minimumFlutterVersion"')) {
+      failures.add(
+        'SDK compatibility: CI must test exact Flutter '
+        '$_minimumFlutterVersion',
+      );
+    }
+    if (!workflow.contains(
+      'dart run tool/pixa_guard.dart --skip-dart-dependency-currency',
+    )) {
+      failures.add(
+        'SDK compatibility: minimum CI must skip only Dart dependency '
+        'currency checks',
+      );
+    }
+  }
+  return failures;
 }
 
 final List<RegExp> _unsupportedFormatClaimPatterns = <RegExp>[
@@ -2225,7 +2387,11 @@ ProcessResult _runCargoAuditExecutable(Directory root) {
   return Process.runSync(executable.path, args, workingDirectory: root.path);
 }
 
-void _checkDartDependencyAdvisories(Directory root, List<String> failures) {
+void _checkDartDependencyAdvisories(
+  Directory root,
+  List<String> failures, {
+  required bool checkCurrency,
+}) {
   final ProcessResult result = Process.runSync(
     Platform.resolvedExecutable,
     <String>['pub', 'outdated', '--json'],
@@ -2238,7 +2404,9 @@ void _checkDartDependencyAdvisories(Directory root, List<String> failures) {
 
   final Map<String, Object?> outdated =
       jsonDecode(result.stdout as String) as Map<String, Object?>;
-  failures.addAll(pixaDartDependencyCurrencyFailures(outdated));
+  if (checkCurrency) {
+    failures.addAll(pixaDartDependencyCurrencyFailures(outdated));
+  }
   final List<Object?> packages = outdated['packages']! as List<Object?>;
   for (final Object? package in packages) {
     final Map<String, Object?> typed = package! as Map<String, Object?>;

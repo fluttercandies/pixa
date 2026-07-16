@@ -764,7 +764,7 @@ name: pixa_pub_dependency_smoke_${scenario.id}
 publish_to: none
 
 environment:
-  sdk: ">=3.11.0 <4.0.0"
+  sdk: ">=3.10.0 <4.0.0"
 
 dependencies:
   flutter:

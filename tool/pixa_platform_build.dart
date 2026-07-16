@@ -253,7 +253,7 @@ description: Platform build probe for Pixa runtime assets.
 publish_to: none
 
 environment:
-  sdk: ">=3.11.0 <4.0.0"
+  sdk: ">=3.10.0 <4.0.0"
 
 dependencies:
   flutter:

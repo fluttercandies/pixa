@@ -96,8 +96,8 @@ version: 1.0.0
 repository: https://github.com/example/my_pixa_fetcher
 
 environment:
-  sdk: ">=3.11.0 <4.0.0"
-  flutter: ">=3.41.9"
+  sdk: ">=3.10.0 <4.0.0"
+  flutter: ">=3.38.1"
 
 dependencies:
   flutter:

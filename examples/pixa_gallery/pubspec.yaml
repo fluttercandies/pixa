@@ -3,8 +3,8 @@ description: Runtime acceptance gallery for the Pixa image loading package.
 publish_to: none
 
 environment:
-  sdk: ">=3.11.0 <4.0.0"
-  flutter: ">=3.41.9"
+  sdk: ">=3.10.0 <4.0.0"
+  flutter: ">=3.38.1"
 
 dependencies:
   crypto: ^3.0.7
