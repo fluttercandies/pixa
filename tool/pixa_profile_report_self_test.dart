@@ -65,6 +65,25 @@ Future<void> main() async {
     accepted.supplementalFailures.isEmpty,
     'complete live-network evidence should pass its supplemental checks',
   );
+  final profile.PixaProfileEvaluation shortMemoryRun = profile
+      .evaluateProfileRun(
+        _run(
+          refreshRateHz: 120,
+          buildP99Micros: 7200,
+          rasterP99Micros: 7600,
+          overBudgetFrames: 1,
+          rssSamples: <int>[220 * _mib, 221 * _mib, 221 * _mib, 221 * _mib],
+          padMemorySamples: false,
+        ),
+        baseline: baseline,
+      );
+  _expect(
+    !shortMemoryRun.passed &&
+        shortMemoryRun.failures.any(
+          (String failure) => failure.contains('24 long-scroll memory samples'),
+        ),
+    'short RSS sampling must not qualify as long-scroll memory evidence',
+  );
   final profile.PixaProfileEvaluation missingRequiredLive = profile
       .evaluateProfileRun(
         _run(
@@ -454,15 +473,11 @@ Future<void> main() async {
       rasterP99Micros: 7000,
       overBudgetFrames: 0,
       rssSamples: <int>[
-        200 * _mib,
-        220 * _mib,
-        240 * _mib,
-        260 * _mib,
-        280 * _mib,
-        300 * _mib,
+        for (var index = 0; index < 24; index += 1) (200 + index * 20) * _mib,
       ],
       finalInflight: 1,
       finalCompletionQueue: 1,
+      padMemorySamples: false,
     ),
     baseline: baseline,
   );
@@ -781,7 +796,15 @@ Map<String, Object?> _run({
   String? runId,
   String gitCommit = _fixtureCommit,
   String gitTreeState = 'clean',
+  bool padMemorySamples = true,
 }) {
+  final List<int> effectiveRssSamples =
+      padMemorySamples && rssSamples.length < 24
+      ? <int>[
+          ...rssSamples,
+          ...List<int>.filled(24 - rssSamples.length, rssSamples.last),
+        ]
+      : rssSamples;
   const List<String> scenarios = <String>[
     'cold_network_loopback',
     'encoded_memory_hit_burst',
@@ -791,9 +814,9 @@ Map<String, Object?> _run({
     'prefetch_cancellation_completion_pacing',
   ];
   return <String, Object?>{
-    'schemaVersion': 3,
+    'schemaVersion': 4,
     'evidenceLevel': 'full',
-    'toolVersion': 'pixa-profile-v3',
+    'toolVersion': 'pixa-profile-v4',
     'runId': runId ?? 'fixture-run-${_runSerial++}',
     'capturedAtUtc': '2026-07-10T12:00:00.000Z',
     'mode': 'profile',
@@ -852,6 +875,7 @@ Map<String, Object?> _run({
       'maximumRssSlopeBytesPerCycle': 1 * _mib,
       'maximumRegistryPlateauGrowthEntries': 32,
       'maximumRegistrySlopeEntriesPerCycle': 4,
+      'minimumMemorySamples': 24,
     },
     'memoryWarmup': <String, Object?>{
       'stable': true,
@@ -935,10 +959,10 @@ Map<String, Object?> _run({
         },
     ],
     'memorySamples': <Object?>[
-      for (var index = 0; index < rssSamples.length; index += 1)
+      for (var index = 0; index < effectiveRssSamples.length; index += 1)
         <String, Object?>{
           'cycle': index,
-          'rssBytes': rssSamples[index],
+          'rssBytes': effectiveRssSamples[index],
           'runtimeMemoryBytes': 40 * _mib,
           'encodedMemoryBytes': 32 * _mib,
           'processedMemoryBytes': 8 * _mib,
@@ -949,14 +973,14 @@ Map<String, Object?> _run({
           'decodedLiveEntries': 12,
           'decodedRegistryEntries': 256,
           'queueDepth': 0,
-          'inflightRequests': index == rssSamples.length - 1
+          'inflightRequests': index == effectiveRssSamples.length - 1
               ? finalInflight
               : 0,
           'prefetchPending': 0,
           'prefetchActive': 0,
           'liveOwnedBufferHandles': 0,
           'liveProgressSessions': 0,
-          'completionQueueDepth': index == rssSamples.length - 1
+          'completionQueueDepth': index == effectiveRssSamples.length - 1
               ? finalCompletionQueue
               : 0,
         },

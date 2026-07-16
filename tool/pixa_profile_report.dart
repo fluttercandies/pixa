@@ -7,8 +7,8 @@ import 'src/pixa_profile_git_state.dart';
 part 'src/pixa_profile_report_markdown.dart';
 part 'src/pixa_profile_report_support.dart';
 
-const int _profileSchemaVersion = 3;
-const String _profileToolVersion = 'pixa-profile-v3';
+const int _profileSchemaVersion = 4;
+const String _profileToolVersion = 'pixa-profile-v4';
 const Set<String> _requiredScenarios = <String>{
   'cold_network_loopback',
   'encoded_memory_hit_burst',
@@ -25,6 +25,7 @@ const int _profileMaximumRssPlateauGrowthBytes = 16 * 1024 * 1024;
 const int _profileMaximumRssSlopeBytesPerCycle = 1024 * 1024;
 const int _profileMaximumRegistryPlateauGrowthEntries = 32;
 const int _profileMaximumRegistrySlopeEntriesPerCycle = 4;
+const int _profileMinimumMemorySamples = 24;
 const int _profileMemoryWarmupStableSamples = 3;
 const int _profileMemoryWarmupMaxEncodedDriftBytes = 1024 * 1024;
 const int _profileMemoryWarmupMaxEntryDrift = 4;
@@ -263,6 +264,7 @@ void _validateReportedThresholds(
         _profileMaximumRegistryPlateauGrowthEntries,
     'maximumRegistrySlopeEntriesPerCycle':
         _profileMaximumRegistrySlopeEntriesPerCycle,
+    'minimumMemorySamples': _profileMinimumMemorySamples,
   };
   for (final MapEntry<String, Object> threshold in expected.entries) {
     if (reported[threshold.key] != threshold.value) {
@@ -670,8 +672,11 @@ _MemoryEvaluation _evaluateMemory(
     _validateMemoryWarmup(warmup, failures);
   }
   final List<Map<String, Object?>> samples = _objects(run, 'memorySamples');
-  if (samples.length < 4) {
-    failures.add('At least four long-scroll memory samples are required.');
+  if (samples.length < _profileMinimumMemorySamples) {
+    failures.add(
+      'At least $_profileMinimumMemorySamples long-scroll memory samples '
+      'are required.',
+    );
   }
   if (samples.isEmpty) {
     return const _MemoryEvaluation.empty();

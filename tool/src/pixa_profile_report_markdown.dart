@@ -69,6 +69,10 @@ String _renderMarkdown(
       '${_bytes(_profileMaximumRssSlopeBytesPerCycle)}/cycle.',
     )
     ..writeln(
+      '- Long-scroll memory: at least $_profileMinimumMemorySamples drained '
+      'samples after cache warmup.',
+    )
+    ..writeln(
       '- Decoded registry plateau: growth no more than '
       '$_profileMaximumRegistryPlateauGrowthEntries entries; slope no more '
       'than $_profileMaximumRegistrySlopeEntriesPerCycle entries/cycle.',
@@ -150,6 +154,10 @@ String _renderMarkdown(
     ..writeln()
     ..writeln('| Metric | Measured |')
     ..writeln('| --- | ---: |')
+    ..writeln(
+      '| Drained long-scroll samples | '
+      '${_objects(run, 'memorySamples').length} |',
+    )
     ..writeln('| RSS plateau growth | ${_bytes(memory.plateauGrowthBytes)} |')
     ..writeln(
       '| Theil-Sen RSS slope | '

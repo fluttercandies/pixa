@@ -25,6 +25,7 @@ const int _frameBudgetMicros = 8333;
 const int _memoryCacheBudget = 48 * _mib;
 const int _decodedCacheBudget = 64 * _mib;
 const int _decodedCacheEntryBudget = 256;
+const int _memorySampleCycles = 24;
 const int _profileNetworkConcurrency = int.fromEnvironment(
   'PIXA_PROFILE_NETWORK_CONCURRENCY',
   defaultValue: 6,
@@ -267,7 +268,7 @@ void main() {
     await _seedDecodedCacheForMemory(harness);
     final Map<String, Object?> memoryWarmup = await _warmMemoryPlateau(harness);
     final List<Map<String, Object?>> memorySamples = <Map<String, Object?>>[];
-    for (var cycle = 0; cycle < 10; cycle += 1) {
+    for (var cycle = 0; cycle < _memorySampleCycles; cycle += 1) {
       await harness.scrollToEnd(const Duration(milliseconds: 750));
       await harness.scrollToStart(const Duration(milliseconds: 750));
       await _waitForDrain(harness);
@@ -319,9 +320,9 @@ void main() {
     final FlutterView view = binding.platformDispatcher.views.single;
     final double refreshRate = view.display.refreshRate;
     binding.reportData = <String, dynamic>{
-      'schemaVersion': 3,
+      'schemaVersion': 4,
       'evidenceLevel': 'full',
-      'toolVersion': 'pixa-profile-v3',
+      'toolVersion': 'pixa-profile-v4',
       'runId': const String.fromEnvironment(
         'PIXA_PROFILE_RUN_ID',
         defaultValue: 'unknown',
@@ -387,6 +388,7 @@ void main() {
         'maximumRssSlopeBytesPerCycle': 1 * _mib,
         'maximumRegistryPlateauGrowthEntries': 32,
         'maximumRegistrySlopeEntriesPerCycle': 4,
+        'minimumMemorySamples': _memorySampleCycles,
       },
       'memoryWarmup': memoryWarmup,
       'scenarios': scenarios,
