@@ -128,7 +128,7 @@ Future<void> main() async {
   );
   _expect(
     acceptance.profileRustVersionCommand().join(' ') ==
-        'rustup run 1.89.0 rustc --version',
+        'rustup run 1.96.0 rustc --version',
     'profile metadata must probe the pinned release toolchain',
   );
   _expect(

@@ -142,7 +142,7 @@ final class ReleasePreflightPlan {
         executable: 'rustup',
         arguments: <String>[
           'run',
-          '1.89.0',
+          '1.96.0',
           'cargo',
           'fmt',
           '--manifest-path',
@@ -157,7 +157,7 @@ final class ReleasePreflightPlan {
         executable: 'rustup',
         arguments: <String>[
           'run',
-          '1.89.0',
+          '1.96.0',
           'cargo',
           'clippy',
           '--manifest-path',
@@ -177,7 +177,7 @@ final class ReleasePreflightPlan {
         executable: 'rustup',
         arguments: <String>[
           'run',
-          '1.89.0',
+          '1.96.0',
           'cargo',
           'audit',
           '-f',
@@ -192,7 +192,7 @@ final class ReleasePreflightPlan {
         executable: 'rustup',
         arguments: <String>[
           'run',
-          '1.89.0',
+          '1.96.0',
           'cargo',
           'test',
           '--manifest-path',

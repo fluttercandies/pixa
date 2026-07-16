@@ -309,8 +309,8 @@ CMAKE_TOOLCHAIN_FILE:FILEPATH=C:/temp/pixa_windows_turbojpeg_system.cmake
       'native_src/rust/pixa_runtime/Cargo.toml',
     ).readAsStringSync();
 
-    expect(toolchain, contains('channel = "1.89.0"'));
-    expect(workspace, contains('rust-version = "1.89"'));
+    expect(toolchain, contains('channel = "1.96.0"'));
+    expect(workspace, contains('rust-version = "1.96"'));
     expect(core, contains('rust-version.workspace = true'));
     expect(runtime, contains('rust-version.workspace = true'));
   });
@@ -336,7 +336,7 @@ CMAKE_TOOLCHAIN_FILE:FILEPATH=C:/temp/pixa_windows_turbojpeg_system.cmake
               }) async {
                 commands.add('$executable ${arguments.join(' ')}');
                 if (executable == 'cargo') {
-                  return ProcessResult(1, 0, 'cargo 1.89.0', '');
+                  return ProcessResult(1, 0, 'cargo 1.96.0', '');
                 }
                 return ProcessResult(2, 0, 'rustc 1.88.0', '');
               },
@@ -346,14 +346,14 @@ CMAKE_TOOLCHAIN_FILE:FILEPATH=C:/temp/pixa_windows_turbojpeg_system.cmake
               .having(
                 (StateError error) => error.message,
                 'message',
-                contains('rustup toolchain install 1.89.0 --profile minimal'),
+                contains('rustup toolchain install 1.96.0 --profile minimal'),
               )
               .having(
                 (StateError error) => error.message,
                 'message',
                 contains(
                   'rustup target add x86_64-pc-windows-msvc '
-                  '--toolchain 1.89.0',
+                  '--toolchain 1.96.0',
                 ),
               )
               .having(

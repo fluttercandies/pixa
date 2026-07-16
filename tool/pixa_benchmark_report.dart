@@ -15,7 +15,7 @@ List<_BenchmarkCommand> _commands() => <_BenchmarkCommand>[
     executable: 'rustup',
     arguments: <String>[
       'run',
-      '1.89.0',
+      '1.96.0',
       'cargo',
       'run',
       '--release',
@@ -34,7 +34,7 @@ List<_BenchmarkCommand> _commands() => <_BenchmarkCommand>[
     executable: 'rustup',
     arguments: <String>[
       'run',
-      '1.89.0',
+      '1.96.0',
       'cargo',
       'run',
       '--release',
@@ -305,7 +305,7 @@ List<List<String>> benchmarkRustCommands() => _commands()
 List<String> benchmarkRustVersionCommand() => const <String>[
   'rustup',
   'run',
-  '1.89.0',
+  '1.96.0',
   'rustc',
   '--version',
 ];

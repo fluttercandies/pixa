@@ -217,8 +217,8 @@ void _usesThePinnedRustToolchain(ReleasePreflightPlan plan) {
     final ReleasePreflightStep step = steps[id]!;
     _expect(step.executable == 'rustup', '$id should execute through rustup');
     _expect(
-      step.arguments.take(3).join(' ') == 'run 1.89.0 cargo',
-      '$id should use the packaged Rust 1.89.0 toolchain',
+      step.arguments.take(3).join(' ') == 'run 1.96.0 cargo',
+      '$id should use the packaged Rust 1.96.0 toolchain',
     );
   }
 }
@@ -313,7 +313,7 @@ void _pinsCiActionsAndRustToolchain() {
     'CI actions should not use mutable major-version tags',
   );
   _expect(
-    workflow.contains('rustup toolchain install 1.89.0 --profile minimal'),
+    workflow.contains('rustup toolchain install 1.96.0 --profile minimal'),
     'CI should install the packaged Rust toolchain',
   );
   _expect(

@@ -1308,13 +1308,13 @@ void _checkReleasePreflightHardening(Directory root, List<String> failures) {
     'packages/pixa_fetcher_s3/.pubignore': <String>['*.iml'],
     'packages/pixa_video_frame_mjpeg/.pubignore': <String>['*.iml'],
     '$_rustWorkspacePath/rust-toolchain.toml': <String>[
-      'channel = "1.89.0"',
+      'channel = "1.96.0"',
       'profile = "minimal"',
     ],
-    _rustManifestPath: <String>['rust-version = "1.89"'],
+    _rustManifestPath: <String>['rust-version = "1.96"'],
     'packages/pixa/hook/build.dart': <String>[
       'pixaValidateRustToolchain',
-      "const String pixaRustToolchainVersion = '1.89.0'",
+      "const String pixaRustToolchainVersion = '1.96.0'",
       r'rustup toolchain install $pixaRustToolchainVersion --profile minimal',
     ],
     'tool/pixa_release_preflight.dart': <String>[
@@ -1363,7 +1363,7 @@ void _checkReleasePreflightHardening(Directory root, List<String> failures) {
     ],
     'tool/pixa_profile_acceptance.dart': <String>[
       "'rustup'",
-      "'1.89.0'",
+      "'1.96.0'",
       'profileRustVersionCommand',
     ],
     'tool/pixa_native_assets_log_check.dart': <String>[
@@ -1456,7 +1456,7 @@ void _checkReleasePreflightHardening(Directory root, List<String> failures) {
     'packages/pixa/README_ZH.md',
   ]) {
     final String source = File('${root.path}/$readme').readAsStringSync();
-    if (!source.contains('1.89.0') ||
+    if (!source.contains('1.96.0') ||
         !source.contains('rustup toolchain install')) {
       failures.add(
         'release preflight hardening: $readme must document the pinned Rust '
@@ -2297,7 +2297,7 @@ List<String> pixaDartDependencyCurrencyFailures(Map<String, Object?> outdated) {
 void _checkRustDependencyCurrency(Directory root, List<String> failures) {
   final ProcessResult result = Process.runSync('rustup', <String>[
     'run',
-    '1.89.0',
+    '1.96.0',
     'cargo',
     'update',
     '--manifest-path',
@@ -2315,7 +2315,7 @@ void _checkRustDependencyCurrency(Directory root, List<String> failures) {
   } else if (pixaCargoUpdateDryRunHasCompatibleUpdates(output)) {
     failures.add(
       'rust dependency currency: Cargo.lock has compatible updates; '
-      'run rustup run 1.89.0 cargo update --manifest-path '
+      'run rustup run 1.96.0 cargo update --manifest-path '
       '$_rustManifestPath',
     );
   }

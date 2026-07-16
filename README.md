@@ -29,7 +29,7 @@ Pixa builds its packaged Rust runtime through Flutter Native Assets. Install
 the pinned Rust toolchain before the first Flutter build:
 
 ```bash
-rustup toolchain install 1.89.0 --profile minimal
+rustup toolchain install 1.96.0 --profile minimal
 ```
 
 Cross-platform builds also need that target's Rust standard library and native

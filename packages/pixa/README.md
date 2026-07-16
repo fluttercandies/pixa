@@ -24,10 +24,10 @@ Pixa compiles its packaged Rust runtime with Flutter Native Assets. Install the
 pinned toolchain before building an app that depends on Pixa:
 
 ```bash
-rustup toolchain install 1.89.0 --profile minimal
+rustup toolchain install 1.96.0 --profile minimal
 ```
 
-Cross targets also require `rustup target add <target> --toolchain 1.89.0` and
+Cross targets also require `rustup target add <target> --toolchain 1.96.0` and
 their platform compiler. The Native Assets hook emits an actionable command if
 Rust, Cargo, or the requested target is unavailable. Windows JPEG Turbo ROI
 builds require Visual Studio with the Desktop development with C++ workload and

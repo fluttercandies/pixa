@@ -7,7 +7,7 @@ import 'package:hooks/hooks.dart';
 import 'plugin_plan.dart';
 
 /// Rust toolchain pinned by Pixa's published Native Assets source package.
-const String pixaRustToolchainVersion = '1.89.0';
+const String pixaRustToolchainVersion = '1.96.0';
 
 /// Process boundary used to validate the Rust toolchain before a native build.
 typedef PixaHookProcessRunner =
@@ -658,7 +658,7 @@ Install a C/C++ compiler, CMake, Ninja, pkg-config, and NASM for native ROI buil
     _ => '',
   };
   return '''
-Pixa Native Assets requires Rust 1.89 or newer and pins toolchain $pixaRustToolchainVersion.
+Pixa Native Assets requires Rust 1.96 or newer and pins toolchain $pixaRustToolchainVersion.
 Install Rust with rustup, then run:
   rustup toolchain install $pixaRustToolchainVersion --profile minimal
 ${targetTriple == null ? '' : '  rustup target add $targetTriple --toolchain $pixaRustToolchainVersion\n'}Ensure cargo and rustc from rustup are available on PATH.

@@ -24,10 +24,10 @@ Pixa 使用 Flutter Native Assets 编译包内 Rust runtime。构建依赖 Pixa 
 固定 toolchain：
 
 ```bash
-rustup toolchain install 1.89.0 --profile minimal
+rustup toolchain install 1.96.0 --profile minimal
 ```
 
-跨平台 target 还需要执行 `rustup target add <target> --toolchain 1.89.0` 并安装对应
+跨平台 target 还需要执行 `rustup target add <target> --toolchain 1.96.0` 并安装对应
 platform compiler。Rust、Cargo 或 target 缺失时，Native Assets hook 会输出可直接执行
 的修复命令。Windows JPEG Turbo ROI 构建需要 Visual Studio 的 Desktop development
 with C++ workload 和 NASM。Android 构建需要 Android NDK、SDK CMake 和 Ninja；
