@@ -11,6 +11,7 @@ void main() {
   _androidCiIsolatesPlatformProbeFromCockpit();
   _androidCockpitSeparatesUiFrom16KbAcceptance();
   _androidCockpitPinsKnownGoodEmulatorBuild();
+  _androidCockpitUsesReferenceImpellerBackend();
   _androidCiReleasesProbeBuildResources();
   _androidCiUsesNonPersistentBuildProcesses();
   _androidBuildPrerequisiteRetrySucceedsOnThirdAttempt();
@@ -418,6 +419,20 @@ void _androidCockpitPinsKnownGoodEmulatorBuild() {
       'emulator-build: 15507667 # Flutter Cockpit known-good baseline',
     ),
     'Android Cockpit should pin the emulator build proven by Flutter Cockpit CI.',
+  );
+}
+
+void _androidCockpitUsesReferenceImpellerBackend() {
+  final manifest = File(
+    'examples/pixa_gallery/android/app/src/debug/AndroidManifest.xml',
+  ).readAsStringSync();
+  _expect(
+    manifest.contains(
+          'android:name="io.flutter.embedding.android.ImpellerBackend"',
+        ) &&
+        manifest.contains('android:value="vulkan"'),
+    'Android Cockpit debug builds should use the Vulkan backend proven by '
+    'Flutter Cockpit CI.',
   );
 }
 
