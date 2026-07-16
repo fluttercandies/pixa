@@ -21,10 +21,10 @@ jobs:
           channel: stable
           flutter-version: "3.41.9"
           cache: true
-      - name: Install Rust 1.96.0
+      - name: Install Rust stable
         run: |
-          rustup toolchain install 1.96.0 --profile minimal --component clippy --component rustfmt
-          rustup default 1.96.0
+          rustup toolchain install stable --profile minimal --component clippy --component rustfmt
+          rustup default stable
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked
       - name: Install root dependencies
@@ -60,11 +60,11 @@ jobs:
         with:
           channel: stable
           cache: true
-      - name: Install Rust 1.96.0
+      - name: Install Rust stable
         shell: bash
         run: |
-          rustup toolchain install 1.96.0 --profile minimal --component clippy --component rustfmt
-          rustup default 1.96.0
+          rustup toolchain install stable --profile minimal --component clippy --component rustfmt
+          rustup default stable
       - name: Install cargo-audit
         shell: bash
         run: cargo install cargo-audit --version 0.22.2 --locked
@@ -95,14 +95,14 @@ jobs:
           path: build/reports/pixa_platform_self_check_${{ matrix.platform }}.json
 
   rust:
-    name: Rust 1.96.0
+    name: Rust
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      - name: Install Rust 1.96.0
+      - name: Install Rust stable
         run: |
-          rustup toolchain install 1.96.0 --profile minimal --component clippy --component rustfmt
-          rustup default 1.96.0
+          rustup toolchain install stable --profile minimal --component clippy --component rustfmt
+          rustup default stable
       - name: Install cargo-audit
         run: cargo install cargo-audit --version 0.22.2 --locked
       - name: Format
@@ -123,10 +123,10 @@ jobs:
         with:
           channel: stable
           cache: true
-      - name: Install Rust 1.96.0
+      - name: Install Rust stable
         run: |
-          rustup toolchain install 1.96.0 --profile minimal
-          rustup default 1.96.0
+          rustup toolchain install stable --profile minimal
+          rustup default stable
       - name: Install dependencies
         run: |
           dart pub get
@@ -201,12 +201,12 @@ jobs:
         with:
           channel: stable
           cache: true
-      - name: Install Rust 1.96.0
+      - name: Install Rust stable
         shell: bash
         run: |
-          rustup toolchain install 1.96.0 --profile minimal
-          rustup default 1.96.0
-          rustup target add x86_64-linux-android --toolchain 1.96.0
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add x86_64-linux-android --toolchain stable
       - name: Install Android native build dependencies
         run: |
           sudo apt-get update
@@ -284,12 +284,12 @@ jobs:
         with:
           channel: stable
           cache: true
-      - name: Install Rust 1.96.0
+      - name: Install Rust stable
         shell: bash
         run: |
-          rustup toolchain install 1.96.0 --profile minimal --component clippy --component rustfmt
-          rustup default 1.96.0
-          rustup target add ${{ matrix.rust-targets }} --toolchain 1.96.0
+          rustup toolchain install stable --profile minimal --component clippy --component rustfmt
+          rustup default stable
+          rustup target add ${{ matrix.rust-targets }} --toolchain stable
       - name: Install Linux build dependencies
         if: matrix.platform == 'linux'
         run: |

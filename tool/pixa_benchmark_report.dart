@@ -12,11 +12,8 @@ const int _benchmarkAbsoluteNoiseNanoseconds = 100;
 List<_BenchmarkCommand> _commands() => <_BenchmarkCommand>[
   _BenchmarkCommand(
     source: 'rust-core',
-    executable: 'rustup',
+    executable: 'cargo',
     arguments: <String>[
-      'run',
-      '1.96.0',
-      'cargo',
       'run',
       '--release',
       '--manifest-path',
@@ -31,11 +28,8 @@ List<_BenchmarkCommand> _commands() => <_BenchmarkCommand>[
   ),
   _BenchmarkCommand(
     source: 'rust-runtime',
-    executable: 'rustup',
+    executable: 'cargo',
     arguments: <String>[
-      'run',
-      '1.96.0',
-      'cargo',
       'run',
       '--release',
       '--manifest-path',
@@ -302,13 +296,7 @@ List<List<String>> benchmarkRustCommands() => _commands()
     .toList(growable: false);
 
 /// Exact pinned Rust compiler probe used in benchmark evidence metadata.
-List<String> benchmarkRustVersionCommand() => const <String>[
-  'rustup',
-  'run',
-  '1.96.0',
-  'rustc',
-  '--version',
-];
+List<String> benchmarkRustVersionCommand() => <String>['rustc', '--version'];
 
 String get _usage => '''
 Usage: dart run tool/pixa_benchmark_report.dart [options]

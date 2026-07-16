@@ -1307,15 +1307,11 @@ void _checkReleasePreflightHardening(Directory root, List<String> failures) {
     'packages/pixa/.pubignore': <String>['*.iml'],
     'packages/pixa_fetcher_s3/.pubignore': <String>['*.iml'],
     'packages/pixa_video_frame_mjpeg/.pubignore': <String>['*.iml'],
-    '$_rustWorkspacePath/rust-toolchain.toml': <String>[
-      'channel = "1.96.0"',
-      'profile = "minimal"',
-    ],
-    _rustManifestPath: <String>['rust-version = "1.96"'],
+    _rustManifestPath: <String>['rust-version = "'],
     'packages/pixa/hook/build.dart': <String>[
       'pixaValidateRustToolchain',
-      "const String pixaRustToolchainVersion = '1.96.0'",
-      r'rustup toolchain install $pixaRustToolchainVersion --profile minimal',
+      'uses the host Rust toolchain',
+      r'rustup target add $targetTriple',
     ],
     'tool/pixa_release_preflight.dart': <String>[
       "id: 'release-preflight-self-test'",
@@ -1362,8 +1358,7 @@ void _checkReleasePreflightHardening(Directory root, List<String> failures) {
       'Baseline benchmark environment is not comparable.',
     ],
     'tool/pixa_profile_acceptance.dart': <String>[
-      "'rustup'",
-      "'1.96.0'",
+      "'rustc'",
       'profileRustVersionCommand',
     ],
     'tool/pixa_native_assets_log_check.dart': <String>[
@@ -1456,11 +1451,11 @@ void _checkReleasePreflightHardening(Directory root, List<String> failures) {
     'packages/pixa/README_ZH.md',
   ]) {
     final String source = File('${root.path}/$readme').readAsStringSync();
-    if (!source.contains('1.96.0') ||
-        !source.contains('rustup toolchain install')) {
+    if (!source.toLowerCase().contains('rustup') ||
+        !source.toLowerCase().contains('toolchain')) {
       failures.add(
-        'release preflight hardening: $readme must document the pinned Rust '
-        'toolchain install command',
+        'release preflight hardening: $readme must document the Rust '
+        'toolchain prerequisite',
       );
     }
   }
@@ -1481,11 +1476,14 @@ void _checkReleasePreflightHardening(Directory root, List<String> failures) {
   final String workflow = File(
     '${root.path}/.github/workflows/ci.yml',
   ).readAsStringSync();
-  if (RegExp(r'uses:\s+[^\s#]+@v\d+').hasMatch(workflow) ||
-      workflow.contains('rustup toolchain install stable')) {
+  if (RegExp(r'uses:\s+[^\s#]+@v\d+').hasMatch(workflow)) {
     failures.add(
-      'release preflight hardening: CI actions and Rust must use immutable '
-      'pins',
+      'release preflight hardening: CI actions must use immutable pins',
+    );
+  }
+  if (!workflow.contains('rustup toolchain install stable')) {
+    failures.add(
+      'release preflight hardening: CI must validate rolling Rust stable',
     );
   }
 }
@@ -2295,10 +2293,7 @@ List<String> pixaDartDependencyCurrencyFailures(Map<String, Object?> outdated) {
 }
 
 void _checkRustDependencyCurrency(Directory root, List<String> failures) {
-  final ProcessResult result = Process.runSync('rustup', <String>[
-    'run',
-    '1.96.0',
-    'cargo',
+  final ProcessResult result = Process.runSync('cargo', <String>[
     'update',
     '--manifest-path',
     _rustManifestPath,
@@ -2315,7 +2310,7 @@ void _checkRustDependencyCurrency(Directory root, List<String> failures) {
   } else if (pixaCargoUpdateDryRunHasCompatibleUpdates(output)) {
     failures.add(
       'rust dependency currency: Cargo.lock has compatible updates; '
-      'run rustup run 1.96.0 cargo update --manifest-path '
+      'run cargo update --manifest-path '
       '$_rustManifestPath',
     );
   }

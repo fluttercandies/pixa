@@ -6,9 +6,6 @@ import 'package:hooks/hooks.dart';
 
 import 'plugin_plan.dart';
 
-/// Rust toolchain pinned by Pixa's published Native Assets source package.
-const String pixaRustToolchainVersion = '1.96.0';
-
 /// Process boundary used to validate the Rust toolchain before a native build.
 typedef PixaHookProcessRunner =
     Future<ProcessResult> Function(
@@ -81,7 +78,6 @@ Future<void> main(List<String> args) async {
     );
     environment['PIXA_PLUGIN_PLAN'] = pluginPlanOutput.toFilePath();
     environment['CARGO_TARGET_DIR'] = cargoTargetDirectory.toFilePath();
-    _configureRustToolchainEnvironment(environment);
     if (input.config.code.targetOS == OS.windows) {
       final DeveloperCommandPrompt? developerCommandPrompt =
           input.config.code.cCompiler?.windows.developerCommandPrompt;
@@ -517,13 +513,6 @@ String _cargoExecutable(Map<String, String> environment) {
   if (configured != null && configured.trim().isNotEmpty) {
     return configured;
   }
-  final String? home = environment['HOME'];
-  if (home != null && home.isNotEmpty) {
-    final File rustupCargo = File('$home/.cargo/bin/cargo');
-    if (rustupCargo.existsSync()) {
-      return rustupCargo.path;
-    }
-  }
   return 'cargo';
 }
 
@@ -532,17 +521,10 @@ String _rustcExecutable(Map<String, String> environment) {
   if (configured != null && configured.trim().isNotEmpty) {
     return configured;
   }
-  final String? home = environment['HOME'];
-  if (home != null && home.isNotEmpty) {
-    final File rustupRustc = File('$home/.cargo/bin/rustc');
-    if (rustupRustc.existsSync()) {
-      return rustupRustc.path;
-    }
-  }
   return 'rustc';
 }
 
-/// Validates Cargo and the minimum supported Rust compiler before building.
+/// Validates that the host Cargo and Rust compiler are available.
 Future<void> pixaValidateRustToolchain({
   required String cargo,
   required String rustc,
@@ -576,18 +558,10 @@ Future<void> pixaValidateRustToolchain({
     targetTriple: targetTriple,
   );
   final String rustcVersion = rustcResult.stdout.toString().trim();
-  final RegExpMatch? match = RegExp(
-    r'^rustc\s+(\d+)\.(\d+)\.(\d+)',
-  ).firstMatch(rustcVersion);
-  final int? major = match == null ? null : int.tryParse(match.group(1)!);
-  final int? minor = match == null ? null : int.tryParse(match.group(2)!);
-  if (major == null ||
-      minor == null ||
-      major < 1 ||
-      (major == 1 && minor < 89)) {
+  if (rustcVersion.isEmpty) {
     throw StateError(
       '${pixaRustPrerequisiteMessage(targetTriple: targetTriple)}\n'
-      'Detected compiler: ${rustcVersion.isEmpty ? 'unknown' : rustcVersion}',
+      'Rustc returned no version information.',
     );
   }
 }
@@ -658,50 +632,16 @@ Install a C/C++ compiler, CMake, Ninja, pkg-config, and NASM for native ROI buil
     _ => '',
   };
   return '''
-Pixa Native Assets requires Rust 1.96 or newer and pins toolchain $pixaRustToolchainVersion.
-Install Rust with rustup, then run:
-  rustup toolchain install $pixaRustToolchainVersion --profile minimal
-${targetTriple == null ? '' : '  rustup target add $targetTriple --toolchain $pixaRustToolchainVersion\n'}Ensure cargo and rustc from rustup are available on PATH.
+Pixa Native Assets uses the host Rust toolchain.
+Install Rust with rustup and ensure cargo and rustc are available on PATH.
+${targetTriple == null ? '' : 'For cross compilation, install the target with: rustup target add $targetTriple\n'}
 $platformPrerequisites
 '''
       .trimRight();
 }
 
-void _configureRustToolchainEnvironment(Map<String, String> environment) {
-  final String? home = environment['HOME'];
-  if (home == null || home.isEmpty) {
-    return;
-  }
-  final Directory cargoBin = Directory('$home/.cargo/bin');
-  if (!cargoBin.existsSync()) {
-    return;
-  }
-  _prependPath(environment, cargoBin.path);
-
-  final File cargo = File('${cargoBin.path}/cargo');
-  if (cargo.existsSync() && _isUnset(environment['CARGO'])) {
-    environment['CARGO'] = cargo.path;
-  }
-  final File rustc = File('${cargoBin.path}/rustc');
-  if (rustc.existsSync() && _isUnsetOrBareTool(environment['RUSTC'], 'rustc')) {
-    environment['RUSTC'] = rustc.path;
-  }
-  final File rustdoc = File('${cargoBin.path}/rustdoc');
-  if (rustdoc.existsSync() &&
-      _isUnsetOrBareTool(environment['RUSTDOC'], 'rustdoc')) {
-    environment['RUSTDOC'] = rustdoc.path;
-  }
-}
-
 bool _isUnset(String? value) {
   return value == null || value.trim().isEmpty;
-}
-
-bool _isUnsetOrBareTool(String? value, String toolName) {
-  if (_isUnset(value)) {
-    return true;
-  }
-  return value!.trim() == toolName;
 }
 
 void _prependPath(Map<String, String> environment, String path) {
@@ -746,7 +686,6 @@ String _pixaStablePathKey(String value) {
 
 List<Uri> _rustBuildInputs(Uri rustWorkspace) {
   final Set<Uri> inputs = <Uri>{
-    rustWorkspace.resolve('rust-toolchain.toml'),
     rustWorkspace.resolve('Cargo.toml'),
     rustWorkspace.resolve('Cargo.lock'),
     rustWorkspace.resolve('pixa_core/Cargo.toml'),

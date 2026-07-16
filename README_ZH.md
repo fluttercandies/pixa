@@ -23,11 +23,11 @@ dependencies:
 
 ### Native 构建前置条件
 
-Pixa 通过 Flutter Native Assets 编译包内 Rust runtime。首次 Flutter 构建前安装项目
-固定的 Rust toolchain：
+Pixa 通过 Flutter Native Assets 编译包内 Rust runtime。首次 Flutter 构建前安装宿主
+支持的 Rust toolchain：
 
 ```bash
-rustup toolchain install 1.96.0 --profile minimal
+rustup toolchain install stable --profile minimal
 ```
 
 跨平台构建还需要对应 target 的 Rust standard library 和 native compiler。缺少 target

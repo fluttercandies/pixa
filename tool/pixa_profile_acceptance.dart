@@ -14,18 +14,11 @@ typedef _ProfileProcessOutcome = ({
   StackTrace? stack,
 });
 
-const String _profileRustToolchainVersion = '1.96.0';
 const String _macOSProfileHostProbePath =
     'tool/pixa_macos_profile_host_state.swift';
 
 /// Exact Rust compiler probe used for release profile metadata.
-List<String> profileRustVersionCommand() => const <String>[
-  'rustup',
-  'run',
-  _profileRustToolchainVersion,
-  'rustc',
-  '--version',
-];
+List<String> profileRustVersionCommand() => <String>['rustc', '--version'];
 
 /// Builds the checked-in macOS session/window probe command.
 List<String> profileMacOSHostProbeArguments({

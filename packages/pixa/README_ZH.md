@@ -20,18 +20,12 @@ dependencies:
 
 ### Native 构建前置条件
 
-Pixa 使用 Flutter Native Assets 编译包内 Rust runtime。构建依赖 Pixa 的应用前先安装
-固定 toolchain：
-
-```bash
-rustup toolchain install 1.96.0 --profile minimal
-```
-
-跨平台 target 还需要执行 `rustup target add <target> --toolchain 1.96.0` 并安装对应
-platform compiler。Rust、Cargo 或 target 缺失时，Native Assets hook 会输出可直接执行
-的修复命令。Windows JPEG Turbo ROI 构建需要 Visual Studio 的 Desktop development
-with C++ workload 和 NASM。Android 构建需要 Android NDK、SDK CMake 和 Ninja；
-Pixa 的 64 位 Android runtime 原生支持 16 KB page size。
+Pixa 使用 Flutter Native Assets 编译包内 Rust runtime。构建依赖 Pixa 的应用前先通过
+rustup 安装 Rust。Native Assets hook 直接使用宿主 toolchain；Rust、Cargo 或 target
+缺失时会输出可直接执行的安装和 target 命令。跨平台 target 还需要对应
+platform compiler。Windows JPEG Turbo ROI 构建需要 Visual Studio 的 Desktop
+development with C++ workload 和 NASM。Android 构建需要 Android NDK、SDK CMake 和
+Ninja；Pixa 的 64 位 Android runtime 原生支持 16 KB page size。
 
 ## 快速开始
 

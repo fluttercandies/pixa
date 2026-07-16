@@ -6,7 +6,7 @@ resolver = "2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/fluttercandies/pixa"
-rust-version = "1.96"
+rust-version = "1.89"
 
 [profile.release]
 opt-level = 3

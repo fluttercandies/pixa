@@ -7,10 +7,10 @@ Future<void> main() async {
   _rejectsStaleOrDirtyReleaseEvidence();
   final ReleasePreflightPlan plan = _buildsTheReleaseContract();
   await _stopsAtTheFirstFailedCommand(plan);
-  _usesThePinnedRustToolchain(plan);
+  _usesTheHostRustToolchain(plan);
   _usesCleanPublishCandidates(plan);
   _configuresEveryDartdocWarningAsAnError();
-  _pinsCiActionsAndRustToolchain();
+  _pinsCiActionsAndTracksRustStable();
   stdout.writeln('Pixa release preflight self-test passed.');
 }
 
@@ -203,7 +203,7 @@ ReleasePreflightPlan _buildsTheReleaseContract() {
   return plan;
 }
 
-void _usesThePinnedRustToolchain(ReleasePreflightPlan plan) {
+void _usesTheHostRustToolchain(ReleasePreflightPlan plan) {
   final Map<String, ReleasePreflightStep> steps =
       <String, ReleasePreflightStep>{
         for (final ReleasePreflightStep step in plan.steps) step.id: step,
@@ -215,11 +215,11 @@ void _usesThePinnedRustToolchain(ReleasePreflightPlan plan) {
     'rust-tests',
   ]) {
     final ReleasePreflightStep step = steps[id]!;
-    _expect(step.executable == 'rustup', '$id should execute through rustup');
     _expect(
-      step.arguments.take(3).join(' ') == 'run 1.96.0 cargo',
-      '$id should use the packaged Rust 1.96.0 toolchain',
+      step.executable == 'cargo',
+      '$id should execute through host Cargo',
     );
+    _expect(step.arguments.isNotEmpty, '$id should provide a Cargo subcommand');
   }
 }
 
@@ -296,7 +296,7 @@ Future<void> _stopsAtTheFirstFailedCommand(ReleasePreflightPlan plan) async {
   );
 }
 
-void _pinsCiActionsAndRustToolchain() {
+void _pinsCiActionsAndTracksRustStable() {
   final String workflow = File('.github/workflows/ci.yml').readAsStringSync();
   for (final String pinned in <String>[
     'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0',
@@ -313,12 +313,12 @@ void _pinsCiActionsAndRustToolchain() {
     'CI actions should not use mutable major-version tags',
   );
   _expect(
-    workflow.contains('rustup toolchain install 1.96.0 --profile minimal'),
-    'CI should install the packaged Rust toolchain',
+    workflow.contains('rustup toolchain install stable --profile minimal'),
+    'CI should continuously validate the rolling Rust stable toolchain',
   );
   _expect(
-    !workflow.contains('rustup toolchain install stable'),
-    'CI should not float on the Rust stable channel',
+    !RegExp(r'rustup toolchain install \d+\.\d+\.\d+').hasMatch(workflow),
+    'CI should not pin the package to one Rust release',
   );
   _expect(
     workflow.contains(r'--require-git-commit=${{ github.sha }}'),

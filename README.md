@@ -25,11 +25,11 @@ dependencies:
 
 ### Native build prerequisite
 
-Pixa builds its packaged Rust runtime through Flutter Native Assets. Install
-the pinned Rust toolchain before the first Flutter build:
+Pixa builds its packaged Rust runtime through Flutter Native Assets. Install a
+supported host Rust toolchain before the first Flutter build:
 
 ```bash
-rustup toolchain install 1.96.0 --profile minimal
+rustup toolchain install stable --profile minimal
 ```
 
 Cross-platform builds also need that target's Rust standard library and native

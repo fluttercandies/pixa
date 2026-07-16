@@ -21,14 +21,13 @@ Future<void> main() async {
   }
   for (final List<String> command in report.benchmarkRustCommands()) {
     _expect(
-      command.take(4).join(' ') == 'rustup run 1.96.0 cargo',
-      'Rust benchmarks must execute through the packaged 1.96.0 toolchain',
+      command.take(2).join(' ') == 'cargo run',
+      'Rust benchmarks must execute through the host Cargo',
     );
   }
   _expect(
-    report.benchmarkRustVersionCommand().join(' ') ==
-        'rustup run 1.96.0 rustc --version',
-    'benchmark metadata must report the same pinned Rust toolchain',
+    report.benchmarkRustVersionCommand().join(' ') == 'rustc --version',
+    'benchmark metadata must report the host Rust compiler',
   );
   final Directory temp = await Directory.systemTemp.createTemp(
     'pixa_benchmark_report_test_',

@@ -127,9 +127,8 @@ Future<void> main() async {
     'profile output trigger must survive chunk boundaries and run once',
   );
   _expect(
-    acceptance.profileRustVersionCommand().join(' ') ==
-        'rustup run 1.96.0 rustc --version',
-    'profile metadata must probe the pinned release toolchain',
+    acceptance.profileRustVersionCommand().join(' ') == 'rustc --version',
+    'profile metadata must probe the host Rust compiler',
   );
   _expect(
     acceptance.profileGitTreeStateFromPorcelain('''

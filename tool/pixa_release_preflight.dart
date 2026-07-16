@@ -139,11 +139,8 @@ final class ReleasePreflightPlan {
       const ReleasePreflightStep(
         id: 'rust-format',
         label: 'Check Rust formatting',
-        executable: 'rustup',
+        executable: 'cargo',
         arguments: <String>[
-          'run',
-          '1.96.0',
-          'cargo',
           'fmt',
           '--manifest-path',
           'packages/pixa/native_src/rust/Cargo.toml',
@@ -154,11 +151,8 @@ final class ReleasePreflightPlan {
       const ReleasePreflightStep(
         id: 'rust-clippy',
         label: 'Run Rust clippy',
-        executable: 'rustup',
+        executable: 'cargo',
         arguments: <String>[
-          'run',
-          '1.96.0',
-          'cargo',
           'clippy',
           '--manifest-path',
           'packages/pixa/native_src/rust/Cargo.toml',
@@ -174,11 +168,8 @@ final class ReleasePreflightPlan {
       const ReleasePreflightStep(
         id: 'rust-audit',
         label: 'Audit Rust dependencies',
-        executable: 'rustup',
+        executable: 'cargo',
         arguments: <String>[
-          'run',
-          '1.96.0',
-          'cargo',
           'audit',
           '-f',
           'packages/pixa/native_src/rust/Cargo.lock',
@@ -189,11 +180,8 @@ final class ReleasePreflightPlan {
       const ReleasePreflightStep(
         id: 'rust-tests',
         label: 'Run Rust tests',
-        executable: 'rustup',
+        executable: 'cargo',
         arguments: <String>[
-          'run',
-          '1.96.0',
-          'cargo',
           'test',
           '--manifest-path',
           'packages/pixa/native_src/rust/Cargo.toml',
