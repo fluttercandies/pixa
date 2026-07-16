@@ -182,6 +182,20 @@ ReleasePreflightPlan _buildsTheReleaseContract() {
         ),
     'preflight should validate full benchmark evidence for current HEAD',
   );
+  final List<String> stepIds = plan.steps
+      .map((ReleasePreflightStep step) => step.id)
+      .toList(growable: false);
+  final int firstGalleryStep = stepIds.indexOf('gallery-analyze');
+  _expect(
+    stepIds.indexOf('benchmark-evidence') < firstGalleryStep,
+    'benchmark evidence must be verified before gallery commands can dirty '
+    'the release tree',
+  );
+  _expect(
+    stepIds.indexOf('profile-evidence') < firstGalleryStep,
+    'profile evidence must be verified before gallery commands can dirty '
+    'the release tree',
+  );
   _expect(
     plan.steps.last.id == 'git-diff-check',
     'diff validation should close the release plan',
