@@ -209,6 +209,20 @@ Future<void> main() async {
     'pixa-profile-acceptance-self-test-',
   );
   try {
+    final Directory cleanRepository = Directory('${temp.path}/clean-git')
+      ..createSync();
+    final ProcessResult gitInit = await Process.run('rtk', <String>[
+      'proxy',
+      'git',
+      'init',
+      '--quiet',
+    ], workingDirectory: cleanRepository.path);
+    _expect(gitInit.exitCode == 0, 'clean Git fixture must initialize');
+    _expect(
+      await acceptance.readProfileGitStatusPorcelain(cleanRepository) == '',
+      'machine-readable Git status must preserve empty porcelain output',
+    );
+
     final File driverRaw = File('${temp.path}/driver/raw.json');
     final File requestedRaw = File('${temp.path}/custom/evidence.json');
     final File staleReport = File('${temp.path}/custom/report.md');
