@@ -70,6 +70,7 @@ void main(List<String> args) {
   _checkBrandAssets(root, failures);
   _checkUserFacingReadmes(root, failures);
   _checkSdkCompatibilityContract(root, failures);
+  _checkPubHookLayout(root, failures);
   _checkReleaseNeutralReadmeInstallCopy(root, failures);
   _checkPubReleaseReadiness(root, failures);
   _checkReleasePreflightHardening(root, failures);
@@ -240,6 +241,39 @@ List<String> pixaSdkCompatibilityFailures(Map<String, String> sources) {
     }
   }
   return failures;
+}
+
+void _checkPubHookLayout(Directory root, List<String> failures) {
+  final Directory hookDirectory = Directory('${root.path}/packages/pixa/hook');
+  if (!hookDirectory.existsSync()) {
+    failures.add('pub hook layout: packages/pixa/hook is missing');
+    return;
+  }
+  final List<String> files = hookDirectory
+      .listSync(recursive: true)
+      .whereType<File>()
+      .map(
+        (File file) => _relative(root, file).replaceFirst('packages/pixa/', ''),
+      )
+      .toList(growable: false);
+  failures.addAll(pixaPubHookLayoutFailures(files));
+}
+
+List<String> pixaPubHookLayoutFailures(Iterable<String> files) {
+  const Set<String> allowed = <String>{'hook/build.dart', 'hook/link.dart'};
+  final List<String> rejected =
+      files
+          .where(
+            (String path) =>
+                path.startsWith('hook/') && !allowed.contains(path),
+          )
+          .toList(growable: false)
+        ..sort();
+  return <String>[
+    for (final String path in rejected)
+      'pub hook layout: $path is not an allowed pub hook entrypoint; '
+          'move hook helpers under lib/src/hook',
+  ];
 }
 
 final List<RegExp> _unsupportedFormatClaimPatterns = <RegExp>[
@@ -1276,15 +1310,45 @@ void _checkReleaseNeutralReadmeInstallCopy(
 List<String> pixaReadmeDependencyInstallFailures(Map<String, String> readmes) {
   const Map<String, List<String>> requiredInstallTokens =
       <String, List<String>>{
-        'README.md': <String>['pixa: ^1.0.0'],
-        'README_ZH.md': <String>['pixa: ^1.0.0'],
-        'packages/pixa/README.md': <String>['pixa: ^1.0.0'],
-        'packages/pixa/README_ZH.md': <String>['pixa: ^1.0.0'],
+        'README.md': <String>[
+          'pixa: ^1.0.0',
+          'Flutter 3.38.1',
+          'flutter pub get',
+          'Future<void> main() async',
+          'await Pixa.configure',
+        ],
+        'README_ZH.md': <String>[
+          'pixa: ^1.0.0',
+          'Flutter 3.38.1',
+          'flutter pub get',
+          'Future<void> main() async',
+          'await Pixa.configure',
+        ],
+        'packages/pixa/README.md': <String>[
+          'pixa: ^1.0.0',
+          'Flutter 3.38.1',
+          'flutter pub get',
+          'Future<void> main() async',
+          'await Pixa.configure',
+        ],
+        'packages/pixa/README_ZH.md': <String>[
+          'pixa: ^1.0.0',
+          'Flutter 3.38.1',
+          'flutter pub get',
+          'Future<void> main() async',
+          'await Pixa.configure',
+        ],
         'packages/pixa_fetcher_s3/README.md': <String>[
           'pixa_fetcher_s3: ^1.0.0',
+          'flutter pub get',
+          'Future<void> main() async',
+          'await Pixa.configure',
         ],
         'packages/pixa_video_frame_mjpeg/README.md': <String>[
           'pixa_video_frame_mjpeg: ^1.0.0',
+          'flutter pub get',
+          'Future<void> main() async',
+          'await Pixa.configure',
         ],
       };
   final List<String> failures = <String>[];

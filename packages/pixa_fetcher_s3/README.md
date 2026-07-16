@@ -26,21 +26,32 @@ dependencies:
 This package re-exports `package:pixa/pixa.dart`, so apps that only use S3
 helpers can import `package:pixa_fetcher_s3/pixa_fetcher_s3.dart`.
 
+Run `flutter pub get` normally. Pixa's shared Native Assets runtime already
+includes the S3 route; no `hooks.user_defines`, copied manifest, or path
+override is required.
+
 ## Register
 
 Register the plugin during app startup:
 
 ```dart
+import 'package:flutter/material.dart';
 import 'package:pixa_fetcher_s3/pixa_fetcher_s3.dart';
 
-await Pixa.configure(
-  const PixaConfig(
-    plugins: <PixaPlugin>[
-      PixaS3FetcherPlugin(),
-    ],
-  ),
-);
+Future<void> main() async {
+  await Pixa.configure(
+    const PixaConfig(
+      plugins: <PixaPlugin>[
+        PixaS3FetcherPlugin(),
+      ],
+    ),
+  );
+  runApp(const App());
+}
 ```
+
+`App` is your application's root widget. No separate Flutter binding
+initialization is required.
 
 The runtime source kinds are `s3` and `s3-object`.
 

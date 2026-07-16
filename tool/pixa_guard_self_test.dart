@@ -9,6 +9,7 @@ void main() {
   _enforcesAndroid16KbCiEvidence();
   _enforcesSdkCompatibilityContract();
   _selectsDartDependencyCurrencyGate();
+  _enforcesPubHookLayout();
   stdout.writeln('Pixa guard self-test passed.');
 }
 
@@ -65,19 +66,52 @@ void _detectsCargoCompatibleUpdates() {
 }
 
 void _enforcesDependencyOnlyReadmeInstall() {
+  const String coreInstall = '''
+dependencies:
+  pixa: ^1.0.0
+Flutter 3.38.1
+flutter pub get
+Future<void> main() async {
+  await Pixa.configure();
+}
+''';
   final Map<String, String> dependencyOnly = <String, String>{
-    'README.md': 'dependencies:\n  pixa: ^1.0.0\n',
-    'README_ZH.md': 'dependencies:\n  pixa: ^1.0.0\n',
-    'packages/pixa/README.md': 'dependencies:\n  pixa: ^1.0.0\n',
-    'packages/pixa/README_ZH.md': 'dependencies:\n  pixa: ^1.0.0\n',
-    'packages/pixa_fetcher_s3/README.md':
-        'dependencies:\n  pixa_fetcher_s3: ^1.0.0\n',
-    'packages/pixa_video_frame_mjpeg/README.md':
-        'dependencies:\n  pixa_video_frame_mjpeg: ^1.0.0\n',
+    'README.md': coreInstall,
+    'README_ZH.md': coreInstall,
+    'packages/pixa/README.md': coreInstall,
+    'packages/pixa/README_ZH.md': coreInstall,
+    'packages/pixa_fetcher_s3/README.md': '''
+dependencies:
+  pixa_fetcher_s3: ^1.0.0
+flutter pub get
+Future<void> main() async {
+  await Pixa.configure();
+}
+''',
+    'packages/pixa_video_frame_mjpeg/README.md': '''
+dependencies:
+  pixa_video_frame_mjpeg: ^1.0.0
+flutter pub get
+Future<void> main() async {
+  await Pixa.configure();
+}
+''',
   };
   _expect(
     pixaReadmeDependencyInstallFailures(dependencyOnly).isEmpty,
     'version-only pub dependencies should pass README install guard',
+  );
+
+  final Map<String, String> missingBootstrap = <String, String>{
+    ...dependencyOnly,
+    'packages/pixa_fetcher_s3/README.md':
+        'dependencies:\n  pixa_fetcher_s3: ^1.0.0\n',
+  };
+  _expect(
+    pixaReadmeDependencyInstallFailures(
+      missingBootstrap,
+    ).any((String failure) => failure.contains('Future<void> main() async')),
+    'README install guard should require a complete async startup flow',
   );
 
   final Map<String, String> pathOverride = <String, String>{
@@ -85,6 +119,10 @@ void _enforcesDependencyOnlyReadmeInstall() {
     'packages/pixa_video_frame_mjpeg/README.md': '''
 dependencies:
   pixa_video_frame_mjpeg: ^1.0.0
+flutter pub get
+Future<void> main() async {
+  await Pixa.configure();
+}
   pixa:
     path: ../pixa_video_frame_mjpeg
 dependency_overrides:
@@ -219,6 +257,22 @@ void _selectsDartDependencyCurrencyGate() {
       '--skip-dart-dependency-currency',
     ]),
     'minimum-SDK guard should explicitly skip Dart dependency currency',
+  );
+}
+
+void _enforcesPubHookLayout() {
+  _expect(
+    pixaPubHookLayoutFailures(const <String>['hook/build.dart']).isEmpty,
+    'pub hook directory should allow the build entrypoint',
+  );
+  final List<String> failures = pixaPubHookLayoutFailures(const <String>[
+    'hook/build.dart',
+    'hook/plugin_plan.dart',
+  ]);
+  _expect(failures.length == 1, 'pub hook helpers should be rejected');
+  _expect(
+    failures.single.contains('hook/plugin_plan.dart'),
+    'pub hook layout failure should name the rejected helper',
   );
 }
 

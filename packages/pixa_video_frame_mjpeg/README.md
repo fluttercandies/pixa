@@ -34,16 +34,23 @@ second dependency-resolution pass is required.
 ## Register
 
 ```dart
+import 'package:flutter/material.dart';
 import 'package:pixa_video_frame_mjpeg/pixa_video_frame_mjpeg.dart';
 
-await Pixa.configure(
-  const PixaConfig(
-    plugins: <PixaPlugin>[
-      PixaMjpegVideoFramePlugin(),
-    ],
-  ),
-);
+Future<void> main() async {
+  await Pixa.configure(
+    const PixaConfig(
+      plugins: <PixaPlugin>[
+        PixaMjpegVideoFramePlugin(),
+      ],
+    ),
+  );
+  runApp(const App());
+}
 ```
+
+`App` is your application's root widget. No separate Flutter binding
+initialization is required.
 
 ## Use
 

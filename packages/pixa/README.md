@@ -18,6 +18,11 @@ dependencies:
   pixa: ^1.0.0
 ```
 
+Pixa requires Flutter 3.38.1 or later (Dart 3.10.0 or later). Run
+`flutter pub get` normally. Native Assets are enabled by default on supported
+Flutter versions; no Flutter feature flag, hook configuration, manifest copy,
+or path override is required.
+
 ### Native build prerequisite
 
 Pixa compiles its packaged Rust runtime with Flutter Native Assets. Install
@@ -34,15 +39,23 @@ Pixa's 64-bit Android runtime is linked for native 16 KB page-size support.
 Configure Pixa before loading images:
 
 ```dart
+import 'package:flutter/material.dart';
 import 'package:pixa/pixa.dart';
 
-await Pixa.configure(const PixaConfig(
-  memoryCacheBytes: 96 * 1024 * 1024,
-  diskCacheBytes: 512 * 1024 * 1024,
-  networkConcurrency: 6,
-  decodeConcurrency: 2,
-));
+Future<void> main() async {
+  await Pixa.configure(const PixaConfig(
+    memoryCacheBytes: 96 * 1024 * 1024,
+    diskCacheBytes: 512 * 1024 * 1024,
+    networkConcurrency: 6,
+    decodeConcurrency: 2,
+  ));
+  runApp(const App());
+}
 ```
+
+`App` is your application's root widget. `Pixa.configure` initializes the
+Flutter binding when needed, so a separate binding initialization call is not
+required.
 
 Use `PixaImage.network` for normal image widgets:
 

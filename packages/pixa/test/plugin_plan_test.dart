@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import '../hook/plugin_plan.dart';
+import 'package:pixa/src/hook/plugin_plan.dart';
 
 void main() {
   test(

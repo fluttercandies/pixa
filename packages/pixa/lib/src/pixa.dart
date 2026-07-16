@@ -61,6 +61,7 @@ final class Pixa {
     PixaConfig config = const PixaConfig(),
   ]) async {
     _validateConfig(config);
+    WidgetsFlutterBinding.ensureInitialized();
     final PixaRegistry registry = _buildPluginRegistry(config.plugins);
     registry.compileRoutePlan();
     final String rootPath = config.cacheRootPath ?? await _defaultCacheRoot();

@@ -18,6 +18,10 @@ dependencies:
   pixa: ^1.0.0
 ```
 
+Pixa 需要 Flutter 3.38.1 或更高版本（Dart 3.10.0 或更高版本）。正常执行
+`flutter pub get` 即可。支持的 Flutter 版本默认启用 Native Assets，无需
+Flutter feature flag、hook 配置、manifest 复制或 path override。
+
 ### Native 构建前置条件
 
 Pixa 使用 Flutter Native Assets 编译包内 Rust runtime。构建依赖 Pixa 的应用前先通过
@@ -32,15 +36,22 @@ Ninja；Pixa 的 64 位 Android runtime 原生支持 16 KB page size。
 加载图片前先配置一次：
 
 ```dart
+import 'package:flutter/material.dart';
 import 'package:pixa/pixa.dart';
 
-await Pixa.configure(const PixaConfig(
-  memoryCacheBytes: 96 * 1024 * 1024,
-  diskCacheBytes: 512 * 1024 * 1024,
-  networkConcurrency: 6,
-  decodeConcurrency: 2,
-));
+Future<void> main() async {
+  await Pixa.configure(const PixaConfig(
+    memoryCacheBytes: 96 * 1024 * 1024,
+    diskCacheBytes: 512 * 1024 * 1024,
+    networkConcurrency: 6,
+    decodeConcurrency: 2,
+  ));
+  runApp(const App());
+}
 ```
+
+`App` 代表应用的根 Widget。`Pixa.configure` 会在需要时自行初始化 Flutter
+binding，不需要额外调用 binding 初始化 API。
 
 普通图片 widget 使用 `PixaImage.network`：
 

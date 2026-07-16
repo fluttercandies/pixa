@@ -3,8 +3,7 @@ import 'dart:isolate';
 
 import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
-
-import 'plugin_plan.dart';
+import 'package:pixa/src/hook/plugin_plan.dart';
 
 /// Process boundary used to validate the Rust toolchain before a native build.
 typedef PixaHookProcessRunner =
@@ -154,8 +153,9 @@ Future<void> main(List<String> args) async {
     output.dependencies.addAll(<Uri>[
       ?resolvedPackageConfig,
       ...pluginPlan.dependencies,
-      input.packageRoot.resolve('hook/plugin_link_plan.dart'),
-      input.packageRoot.resolve('hook/plugin_plan_helpers.dart'),
+      input.packageRoot.resolve('lib/src/hook/plugin_plan.dart'),
+      input.packageRoot.resolve('lib/src/hook/plugin_link_plan.dart'),
+      input.packageRoot.resolve('lib/src/hook/plugin_plan_helpers.dart'),
       ..._rustBuildInputs(rustWorkspace),
     ]);
     output.assets.code.add(
