@@ -184,9 +184,9 @@ jobs:
           profile: pixel_2
           ram-size: 2048M
           heap-size: 512M
-          emulator-boot-timeout: 2700
+          emulator-boot-timeout: 900
           emulator-build: 15261927 # Reproducible diagnostic baseline
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 2048
+          emulator-options: -no-window -gpu swiftshader_indirect -accel off -no-snapshot -noaudio -no-boot-anim -camera-back none -memory 2048
           script: bash tool/pixa_android_cockpit_ci.sh
       - name: Upload Android gallery Cockpit acceptance
         if: always()

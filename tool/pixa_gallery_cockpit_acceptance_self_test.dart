@@ -7,7 +7,7 @@ import 'pixa_gallery_cockpit_acceptance.dart' as acceptance;
 
 void main() {
   _mobilePlatformsUseCiSizedLaunchBudget();
-  _androidCiRunsRichCockpitOnMacosArm64();
+  _androidCiRunsRichCockpitOnMacosArm64WithoutNestedVirtualization();
   _androidCiIsolatesPlatformProbeFromCockpit();
   _androidCockpitSeparatesUiFrom16KbAcceptance();
   _androidCockpitPinsReproducibleEmulatorBuild();
@@ -17,7 +17,7 @@ void main() {
   _androidBuildPrerequisiteRetryStopsAtConfiguredLimit();
   _androidCiPrebuildsCockpitBeforeStartingTheEmulator();
   _androidAcceptanceReusesThePrebuiltCockpitApk();
-  _androidCiUsesCiSizedEmulatorBootBudget();
+  _androidCiUsesBoundedEmulatorBootBudgets();
   _androidCockpitUsesStableGuestMemoryBudget();
   _androidCiCapturesCockpitDiagnosticsOnFailure();
   _androidCiCapturesLiveCockpitDiagnostics();
@@ -345,7 +345,7 @@ void _androidCiIsolatesPlatformProbeFromCockpit() {
   );
 }
 
-void _androidCiRunsRichCockpitOnMacosArm64() {
+void _androidCiRunsRichCockpitOnMacosArm64WithoutNestedVirtualization() {
   final workflow = File('.github/workflows/ci.yml').readAsStringSync();
   const kvmStep = '- name: Enable Android emulator KVM acceleration';
   final kvmMatches = kvmStep.allMatches(workflow).toList(growable: false);
@@ -365,10 +365,11 @@ void _androidCiRunsRichCockpitOnMacosArm64() {
     cockpitJob.contains('runs-on: macos-15') &&
         cockpitJob.contains('arch: arm64-v8a') &&
         cockpitJob.contains('rustup target add aarch64-linux-android') &&
+        cockpitJob.contains('-accel off') &&
         !cockpitJob.contains('/dev/kvm') &&
         !cockpitJob.contains('-feature -Vulkan') &&
         !cockpitJob.contains('apt-get'),
-    'Rich Android Cockpit acceptance should use a native arm64 macOS emulator host.',
+    'Rich Android Cockpit acceptance should use the macOS arm64 software execution path.',
   );
   _expect(
     platformJobs.contains(kvmStep) &&
@@ -417,19 +418,23 @@ void _androidCockpitPinsReproducibleEmulatorBuild() {
   );
 }
 
-void _androidCiUsesCiSizedEmulatorBootBudget() {
+void _androidCiUsesBoundedEmulatorBootBudgets() {
   final workflow = File('.github/workflows/ci.yml').readAsStringSync();
-  final matches = RegExp(
-    r'emulator-boot-timeout:\s*(\d+)',
-  ).allMatches(workflow);
-  final timeouts = <int>[for (final m in matches) int.parse(m.group(1)!)];
+  final cockpitStart = workflow.indexOf('\n  android-cockpit:\n');
+  final platformStart = workflow.indexOf('\n  platform-build:\n');
   _expect(
-    timeouts.length == 2,
-    'Android CI should declare two isolated emulator boot timeouts.',
+    cockpitStart >= 0 && platformStart > cockpitStart,
+    'Android Cockpit and platform jobs should both exist.',
+  );
+  final cockpitJob = workflow.substring(cockpitStart, platformStart);
+  final platformJobs = workflow.substring(platformStart);
+  _expect(
+    cockpitJob.contains('emulator-boot-timeout: 900'),
+    'macOS software execution should fail within a bounded boot budget.',
   );
   _expect(
-    timeouts.every((timeout) => timeout == 2700),
-    'Android emulator boot timeouts should allow slow CI boot.',
+    platformJobs.contains('emulator-boot-timeout: 2700'),
+    'The Linux ps16k platform probe should retain its proven boot budget.',
   );
 }
 
