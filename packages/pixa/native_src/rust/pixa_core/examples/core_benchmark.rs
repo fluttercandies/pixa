@@ -246,9 +246,9 @@ fn run(name: &str, iterations: usize, mut work: impl FnMut() -> usize) {
     }
     let elapsed = started.elapsed();
     let total_ns = elapsed.as_nanos();
-    let avg_ns = total_ns / iterations.max(1) as u128;
+    let avg_ns = average_nanoseconds(total_ns, iterations);
     println!(
-        "{name},{iterations},{},{},{}",
+        "{name},{iterations},{},{:.3},{}",
         total_ns / 1_000,
         avg_ns,
         bytes
@@ -261,6 +261,10 @@ fn iterations(env_name: &str, default: usize) -> usize {
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(default)
+}
+
+fn average_nanoseconds(total_ns: u128, iterations: usize) -> f64 {
+    total_ns as f64 / iterations.max(1) as f64
 }
 
 fn request(cache_key: &str, cache_mode: CacheMode, processors: Vec<String>) -> RuntimeRequest {
