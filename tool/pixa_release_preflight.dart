@@ -64,6 +64,10 @@ final class ReleasePreflightPlan {
         options.profileInput ?? '<required-profile-input>';
     final String profileBaseline =
         options.profileBaseline ?? '<required-profile-baseline>';
+    final String benchmarkInput =
+        options.benchmarkInput ?? '<required-benchmark-input>';
+    final String benchmarkBaseline =
+        options.benchmarkBaseline ?? '<required-benchmark-baseline>';
     final String gitCommit = options.gitCommit ?? '<current-git-commit>';
     return ReleasePreflightPlan(<ReleasePreflightStep>[
       const ReleasePreflightStep(
@@ -307,12 +311,25 @@ final class ReleasePreflightPlan {
       ),
       const ReleasePreflightStep(
         id: 'benchmark-smoke',
-        label: 'Generate smoke benchmark report',
+        label: 'Run non-release benchmark coverage smoke',
         executable: 'dart',
         arguments: <String>[
           'run',
           'tool/pixa_benchmark_report.dart',
           '--smoke',
+        ],
+      ),
+      ReleasePreflightStep(
+        id: 'benchmark-evidence',
+        label: 'Validate full benchmark baseline evidence',
+        executable: 'dart',
+        arguments: <String>[
+          'run',
+          'tool/pixa_benchmark_report.dart',
+          '--verify-evidence=$benchmarkInput',
+          '--baseline=$benchmarkBaseline',
+          '--output=build/reports/pixa_benchmark_release_report.md',
+          '--require-git-commit=$gitCommit',
         ],
       ),
       ReleasePreflightStep(
@@ -460,6 +477,8 @@ final class ReleasePreflightOptions {
     required this.nativeAssetsLog,
     required this.profileInput,
     required this.profileBaseline,
+    required this.benchmarkInput,
+    required this.benchmarkBaseline,
     required this.gitCommit,
   });
 
@@ -469,6 +488,8 @@ final class ReleasePreflightOptions {
   final String? nativeAssetsLog;
   final String? profileInput;
   final String? profileBaseline;
+  final String? benchmarkInput;
+  final String? benchmarkBaseline;
   final String? gitCommit;
 
   factory ReleasePreflightOptions.parse(
@@ -491,6 +512,12 @@ final class ReleasePreflightOptions {
     String? profileBaseline =
         environment?['PIXA_PROFILE_BASELINE'] ??
         Platform.environment['PIXA_PROFILE_BASELINE'];
+    String? benchmarkInput =
+        environment?['PIXA_BENCHMARK_INPUT'] ??
+        Platform.environment['PIXA_BENCHMARK_INPUT'];
+    String? benchmarkBaseline =
+        environment?['PIXA_BENCHMARK_BASELINE'] ??
+        Platform.environment['PIXA_BENCHMARK_BASELINE'];
     String? gitCommit =
         environment?['PIXA_PLATFORM_GIT_COMMIT'] ??
         environment?['GITHUB_SHA'] ??
@@ -506,6 +533,12 @@ final class ReleasePreflightOptions {
         profileInput = arg.substring('--profile-input='.length).trim();
       } else if (arg.startsWith('--profile-baseline=')) {
         profileBaseline = arg.substring('--profile-baseline='.length).trim();
+      } else if (arg.startsWith('--benchmark-input=')) {
+        benchmarkInput = arg.substring('--benchmark-input='.length).trim();
+      } else if (arg.startsWith('--benchmark-baseline=')) {
+        benchmarkBaseline = arg
+            .substring('--benchmark-baseline='.length)
+            .trim();
       } else if (arg.startsWith('--git-commit=')) {
         gitCommit = arg.substring('--git-commit='.length).trim().toLowerCase();
       } else {
@@ -531,6 +564,12 @@ final class ReleasePreflightOptions {
     if (profileBaseline != null && profileBaseline.isEmpty) {
       throw const FormatException('--profile-baseline must not be empty.');
     }
+    if (benchmarkInput != null && benchmarkInput.isEmpty) {
+      throw const FormatException('--benchmark-input must not be empty.');
+    }
+    if (benchmarkBaseline != null && benchmarkBaseline.isEmpty) {
+      throw const FormatException('--benchmark-baseline must not be empty.');
+    }
     if (gitCommit != null &&
         !RegExp(r'^[0-9a-f]{40}(?:[0-9a-f]{24})?$').hasMatch(gitCommit)) {
       throw const FormatException('--git-commit must be a full Git object id.');
@@ -550,13 +589,17 @@ final class ReleasePreflightOptions {
             nativeAssetsLog == null ||
             profileInput == null ||
             profileBaseline == null ||
+            benchmarkInput == null ||
+            benchmarkBaseline == null ||
             gitCommit == null)) {
       throw const FormatException(
         'Release execution requires platform reports, a Native Assets build '
-        'log, current and baseline profile evidence, and the current Git '
-        'commit. Use --platform-reports=<directory>, '
+        'log, current and baseline profile evidence, current and baseline '
+        'benchmark evidence, and the current Git commit. Use '
+        '--platform-reports=<directory>, '
         '--native-assets-log=<file>, --profile-input=<file>, and '
-        '--profile-baseline=<file>; the commit is resolved from Git.',
+        '--profile-baseline=<file>, --benchmark-input=<file>, and '
+        '--benchmark-baseline=<file>; the commit is resolved from Git.',
       );
     }
     if (!dryRun && !help && currentGitTreeClean != true) {
@@ -571,6 +614,8 @@ final class ReleasePreflightOptions {
       nativeAssetsLog: nativeAssetsLog,
       profileInput: profileInput,
       profileBaseline: profileBaseline,
+      benchmarkInput: benchmarkInput,
+      benchmarkBaseline: benchmarkBaseline,
       gitCommit: gitCommit,
     );
   }
@@ -638,7 +683,8 @@ Usage: dart run tool/pixa_release_preflight.dart [options]
 Runs the local release gate in the same order expected before publishing:
 Dart fixes/format/analyze/dartdoc, Flutter tests, Rust fmt/clippy/audit/tests,
 architecture guard, package publish dry-runs, hosted dependency runtime smoke,
-Cockpit acceptance, benchmark smoke, and hosted five-platform evidence.
+Cockpit acceptance, non-release benchmark smoke, full benchmark/profile
+evidence, and hosted five-platform evidence.
 
 Options:
   --platform-reports=<directory>  Required hosted platform report directory.
@@ -649,6 +695,10 @@ Options:
                                   PIXA_PROFILE_INPUT is also accepted.
   --profile-baseline=<file>       Required comparable profile baseline JSON.
                                   PIXA_PROFILE_BASELINE is also accepted.
+  --benchmark-input=<file>        Required current full benchmark evidence JSON.
+                                  PIXA_BENCHMARK_INPUT is also accepted.
+  --benchmark-baseline=<file>     Required comparable benchmark baseline JSON.
+                                  PIXA_BENCHMARK_BASELINE is also accepted.
   --git-commit=<object-id>        Commit required in platform evidence.
                                   Defaults to the current Git HEAD.
   --dry-run                       Print the plan without requiring evidence.

@@ -35,6 +35,8 @@ void _rejectsStaleOrDirtyReleaseEvidence() {
         '--native-assets-log=/tmp/pixa-macos-profile.log',
         '--profile-input=/tmp/pixa-profile-current.json',
         '--profile-baseline=/tmp/pixa-profile-baseline.json',
+        '--benchmark-input=/tmp/pixa-benchmark-current.json',
+        '--benchmark-baseline=/tmp/pixa-benchmark-baseline.json',
       ],
       currentGitCommit: _headCommit,
       currentGitTreeClean: false,
@@ -62,6 +64,8 @@ ReleasePreflightPlan _buildsTheReleaseContract() {
       '--native-assets-log=/tmp/pixa-macos-profile.log',
       '--profile-input=/tmp/pixa-profile-current.json',
       '--profile-baseline=/tmp/pixa-profile-baseline.json',
+      '--benchmark-input=/tmp/pixa-benchmark-current.json',
+      '--benchmark-baseline=/tmp/pixa-benchmark-baseline.json',
       '--git-commit=$_headCommit',
     ],
     currentGitCommit: _headCommit,
@@ -82,6 +86,7 @@ ReleasePreflightPlan _buildsTheReleaseContract() {
     'guard-self-test',
     'profile-report-self-test',
     'profile-acceptance-self-test',
+    'benchmark-evidence',
     'profile-evidence',
     'gallery-tests',
     'pub-dependency-smoke',
@@ -163,6 +168,19 @@ ReleasePreflightPlan _buildsTheReleaseContract() {
   _expect(
     profileEvidence.arguments.contains('--require-live-network'),
     'release profile evidence must include the seeded Picsum corpus',
+  );
+  final ReleasePreflightStep benchmarkEvidence = steps['benchmark-evidence']!;
+  _expect(
+    benchmarkEvidence.arguments.contains(
+          '--verify-evidence=/tmp/pixa-benchmark-current.json',
+        ) &&
+        benchmarkEvidence.arguments.contains(
+          '--baseline=/tmp/pixa-benchmark-baseline.json',
+        ) &&
+        benchmarkEvidence.arguments.contains(
+          '--require-git-commit=$_headCommit',
+        ),
+    'preflight should validate full benchmark evidence for current HEAD',
   );
   _expect(
     plan.steps.last.id == 'git-diff-check',
@@ -292,6 +310,19 @@ void _pinsCiActionsAndRustToolchain() {
     workflow.contains(r'--require-git-commit=${{ github.sha }}'),
     'CI must reject platform evidence from any non-current commit',
   );
+  for (final String benchmarkToken in <String>[
+    'benchmark-evidence:',
+    '--capture-only',
+    '--evidence-output=build/reports/pixa_benchmark_baseline.json',
+    '--baseline=build/reports/pixa_benchmark_baseline.json',
+    '--evidence-output=build/reports/pixa_benchmark_current.json',
+    'pixa-benchmark-evidence',
+  ]) {
+    _expect(
+      workflow.contains(benchmarkToken),
+      'CI full benchmark evidence is missing $benchmarkToken',
+    );
+  }
 }
 
 void _expectThrows(void Function() action, String messagePart) {

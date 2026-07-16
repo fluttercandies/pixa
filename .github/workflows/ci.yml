@@ -114,6 +114,50 @@ jobs:
       - name: Test
         run: cargo test --manifest-path packages/pixa/native_src/rust/Cargo.toml --target-dir build/rust-target --all
 
+  benchmark-evidence:
+    name: Full benchmark evidence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install Rust 1.89.0
+        run: |
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+      - name: Install dependencies
+        run: |
+          dart pub get
+          dart run melos bootstrap
+      - name: Self-test benchmark evidence verifier
+        run: dart run tool/pixa_benchmark_report_self_test.dart
+      - name: Capture full benchmark baseline
+        run: >-
+          dart run tool/pixa_benchmark_report.dart
+          --capture-only
+          --evidence-output=build/reports/pixa_benchmark_baseline.json
+          --output=build/reports/pixa_benchmark_baseline.md
+          --require-git-commit=${{ github.sha }}
+      - name: Capture and validate full benchmark current run
+        run: >-
+          dart run tool/pixa_benchmark_report.dart
+          --baseline=build/reports/pixa_benchmark_baseline.json
+          --evidence-output=build/reports/pixa_benchmark_current.json
+          --output=build/reports/pixa_benchmark_report.md
+          --require-git-commit=${{ github.sha }}
+      - name: Upload full benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pixa-benchmark-evidence
+          path: |
+            build/reports/pixa_benchmark_baseline.json
+            build/reports/pixa_benchmark_baseline.md
+            build/reports/pixa_benchmark_current.json
+            build/reports/pixa_benchmark_report.md
+
   platform-evidence:
     name: Platform evidence
     runs-on: ubuntu-latest
