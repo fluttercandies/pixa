@@ -94,8 +94,8 @@ final class ReleasePreflightPlan {
         ],
       ),
       const ReleasePreflightStep(
-        id: 'dartdoc',
-        label: 'Generate strict package API documentation',
+        id: 'dartdoc-pixa',
+        label: 'Generate strict pixa API documentation',
         executable: 'dart',
         arguments: <String>[
           'doc',
@@ -103,6 +103,28 @@ final class ReleasePreflightPlan {
           '--output=../../build/dartdoc/pixa',
         ],
         workingDirectory: 'packages/pixa',
+      ),
+      const ReleasePreflightStep(
+        id: 'dartdoc-s3',
+        label: 'Generate strict S3 plugin API documentation',
+        executable: 'dart',
+        arguments: <String>[
+          'doc',
+          '--validate-links',
+          '--output=../../build/dartdoc/pixa_fetcher_s3',
+        ],
+        workingDirectory: 'packages/pixa_fetcher_s3',
+      ),
+      const ReleasePreflightStep(
+        id: 'dartdoc-mjpeg',
+        label: 'Generate strict MJPEG plugin API documentation',
+        executable: 'dart',
+        arguments: <String>[
+          'doc',
+          '--validate-links',
+          '--output=../../build/dartdoc/pixa_video_frame_mjpeg',
+        ],
+        workingDirectory: 'packages/pixa_video_frame_mjpeg',
       ),
       const ReleasePreflightStep(
         id: 'flutter-tests',

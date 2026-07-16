@@ -74,7 +74,9 @@ ReleasePreflightPlan _buildsTheReleaseContract() {
       };
 
   for (final String required in <String>[
-    'dartdoc',
+    'dartdoc-pixa',
+    'dartdoc-s3',
+    'dartdoc-mjpeg',
     'rust-audit',
     'release-preflight-self-test',
     'guard-self-test',
@@ -96,17 +98,23 @@ ReleasePreflightPlan _buildsTheReleaseContract() {
     );
   }
 
-  final ReleasePreflightStep dartdoc = steps['dartdoc']!;
-  _expect(dartdoc.executable == 'dart', 'dartdoc should use the Dart SDK');
-  _expect(dartdoc.arguments.first == 'doc', 'dartdoc should run dart doc');
-  _expect(
-    dartdoc.arguments.contains('--validate-links'),
-    'dartdoc should validate links before publication',
-  );
-  _expect(
-    dartdoc.workingDirectory == 'packages/pixa',
-    'dartdoc should run against the published core package',
-  );
+  for (final MapEntry<String, String> package in const <String, String>{
+    'pixa': 'packages/pixa',
+    's3': 'packages/pixa_fetcher_s3',
+    'mjpeg': 'packages/pixa_video_frame_mjpeg',
+  }.entries) {
+    final ReleasePreflightStep dartdoc = steps['dartdoc-${package.key}']!;
+    _expect(dartdoc.executable == 'dart', 'dartdoc should use the Dart SDK');
+    _expect(dartdoc.arguments.first == 'doc', 'dartdoc should run dart doc');
+    _expect(
+      dartdoc.arguments.contains('--validate-links'),
+      'dartdoc should validate links before publication',
+    );
+    _expect(
+      dartdoc.workingDirectory == package.value,
+      'dartdoc should run against published package ${package.key}',
+    );
+  }
 
   final ReleasePreflightStep evidence = steps['platform-evidence']!;
   _expect(
@@ -203,22 +211,28 @@ void _usesCleanPublishCandidates(ReleasePreflightPlan plan) {
 }
 
 void _configuresEveryDartdocWarningAsAnError() {
-  final String options = File(
+  for (final String path in <String>[
     'packages/pixa/dartdoc_options.yaml',
-  ).readAsStringSync();
-  for (final String warning in <String>[
-    'ambiguous-doc-reference',
-    'ambiguous-reexport',
-    'broken-link',
-    'internal-error',
-    'no-library-level-docs',
-    'unresolved-doc-reference',
-    'tool-error',
+    'packages/pixa_fetcher_s3/dartdoc_options.yaml',
+    'packages/pixa_video_frame_mjpeg/dartdoc_options.yaml',
   ]) {
-    _expect(
-      options.contains('- $warning'),
-      'dartdoc warning $warning should be promoted to an error',
-    );
+    final File file = File(path);
+    _expect(file.existsSync(), '$path should exist');
+    final String options = file.readAsStringSync();
+    for (final String warning in <String>[
+      'ambiguous-doc-reference',
+      'ambiguous-reexport',
+      'broken-link',
+      'internal-error',
+      'no-library-level-docs',
+      'unresolved-doc-reference',
+      'tool-error',
+    ]) {
+      _expect(
+        options.contains('- $warning'),
+        '$path should promote dartdoc warning $warning to an error',
+      );
+    }
   }
 }
 

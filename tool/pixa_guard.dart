@@ -1296,6 +1296,14 @@ void _checkReleasePreflightHardening(Directory root, List<String> failures) {
       'ambiguous-reexport',
       'unresolved-doc-reference',
     ],
+    'packages/pixa_fetcher_s3/dartdoc_options.yaml': <String>[
+      'ambiguous-reexport',
+      'unresolved-doc-reference',
+    ],
+    'packages/pixa_video_frame_mjpeg/dartdoc_options.yaml': <String>[
+      'ambiguous-reexport',
+      'unresolved-doc-reference',
+    ],
     'packages/pixa/.pubignore': <String>['*.iml'],
     'packages/pixa_fetcher_s3/.pubignore': <String>['*.iml'],
     'packages/pixa_video_frame_mjpeg/.pubignore': <String>['*.iml'],
@@ -1311,7 +1319,9 @@ void _checkReleasePreflightHardening(Directory root, List<String> failures) {
     ],
     'tool/pixa_release_preflight.dart': <String>[
       "id: 'release-preflight-self-test'",
-      "id: 'dartdoc'",
+      "id: 'dartdoc-pixa'",
+      "id: 'dartdoc-s3'",
+      "id: 'dartdoc-mjpeg'",
       "id: 'rust-audit'",
       "id: 'guard-self-test'",
       "id: 'profile-report-self-test'",
