@@ -1049,15 +1049,16 @@ Future<void> writeProfileReportAtomically(String path, String contents) async {
 
 Future<({String commit, bool clean})> _currentGitState() async {
   final String commit = await _gitOutput(<String>['git', 'rev-parse', 'HEAD']);
-  final String status = await _gitOutput(<String>[
-    'git',
-    'status',
-    '--porcelain',
-  ]);
+  final String status = await readProfileGitStatusPorcelain(Directory.current);
   return (
     commit: commit,
     clean: profileGitTreeStateFromPorcelain(status) == 'clean',
   );
+}
+
+/// Reads Git porcelain without RTK's human-readable empty-output summary.
+Future<String> readProfileGitStatusPorcelain(Directory root) {
+  return _gitOutput(pixaProfileGitStatusArguments, workingDirectory: root);
 }
 
 /// Classifies Git porcelain output while honoring repository-local policy.
@@ -1065,8 +1066,15 @@ String profileGitTreeStateFromPorcelain(String porcelain) {
   return classifyPixaProfileGitTreeState(porcelain);
 }
 
-Future<String> _gitOutput(List<String> arguments) async {
-  final ProcessResult result = await Process.run('rtk', arguments);
+Future<String> _gitOutput(
+  List<String> arguments, {
+  Directory? workingDirectory,
+}) async {
+  final ProcessResult result = await Process.run(
+    'rtk',
+    arguments,
+    workingDirectory: workingDirectory?.path,
+  );
   if (result.exitCode != 0) {
     throw ProcessException(
       'rtk',

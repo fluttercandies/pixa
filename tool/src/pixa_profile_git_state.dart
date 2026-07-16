@@ -1,5 +1,13 @@
 import 'dart:convert';
 
+/// RTK arguments that preserve Git's machine-readable empty output.
+const List<String> pixaProfileGitStatusArguments = <String>[
+  'proxy',
+  'git',
+  'status',
+  '--porcelain',
+];
+
 /// Classifies Git porcelain output while honoring policy-local planning files.
 String classifyPixaProfileGitTreeState(String porcelain) {
   final Iterable<String> relevant = const LineSplitter()

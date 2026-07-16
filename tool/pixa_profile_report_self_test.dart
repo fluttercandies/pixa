@@ -22,6 +22,24 @@ Future<void> main() async {
         'dirty',
     'untracked source files must keep profile reports dirty',
   );
+  final Directory cleanGitFixture = await Directory.systemTemp.createTemp(
+    'pixa-profile-report-git-',
+  );
+  try {
+    final ProcessResult gitInit = await Process.run('rtk', <String>[
+      'proxy',
+      'git',
+      'init',
+      '--quiet',
+    ], workingDirectory: cleanGitFixture.path);
+    _expect(gitInit.exitCode == 0, 'clean Git fixture must initialize');
+    _expect(
+      await profile.readProfileGitStatusPorcelain(cleanGitFixture) == '',
+      'profile report must preserve empty Git porcelain output',
+    );
+  } finally {
+    await cleanGitFixture.delete(recursive: true);
+  }
   final Map<String, Object?> baseline = _run(
     refreshRateHz: 120,
     buildP99Micros: 7800,

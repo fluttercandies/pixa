@@ -572,7 +572,7 @@ Future<({String commit, String treeState})> _gitIdentity(Directory root) async {
 
 /// Reads Git porcelain without RTK's human-readable empty-output summary.
 Future<String> readProfileGitStatusPorcelain(Directory root) {
-  return _runForOutput(root, <String>['proxy', 'git', 'status', '--porcelain']);
+  return _runForOutput(root, pixaProfileGitStatusArguments);
 }
 
 /// Classifies Git porcelain output while honoring repository-local planning files.
